@@ -355,6 +355,7 @@ void AI::reset()
  */
 void AI::update()
 {
+	PROFILER_SECTION_NAME("AI::update");
 	// Do pathfinding.
 	m_pathfinder->processPathfindQueue();
 

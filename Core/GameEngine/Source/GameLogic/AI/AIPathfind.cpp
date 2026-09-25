@@ -119,6 +119,29 @@ constexpr const UnsignedInt MAX_SAFE_PATH_CELL_COUNT = 2000;
 constexpr const UnsignedInt PATHFIND_CELLS_PER_FRAME = 5000; // Number of cells we will search pathfinding per frame.
 constexpr const UnsignedInt CELL_INFOS_TO_ALLOCATE = 30000;
 
+#if defined(RTS_PROFILE_TRACY)
+// ZH Overhaul @profiling
+// Queue-level diagnostics that complement Tracy's timing data. These counters are
+// profiling-only so non-profile builds have no extra simulation work or state.
+struct PathfindQueueProfileStats
+{
+	Int enqueueAttempts;
+	Int acceptedRequests;
+	Int duplicateRequests;
+	Int queueHighWater;
+};
+
+static PathfindQueueProfileStats s_pathfindQueueProfileStats = { 0, 0, 0, 0 };
+
+static Int getPathfindQueueDepth(Int head, Int tail)
+{
+	if (tail >= head)
+		return tail - head;
+
+	return PATHFIND_QUEUE_LEN - head + tail;
+}
+#endif
+
 //-----------------------------------------------------------------------------------
 PathNode::PathNode() :
 	m_nextOpti(nullptr),
@@ -2660,6 +2683,7 @@ void PathfindZoneManager::markZonesDirty()  ///< Called when the zones need to b
  */
 void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer layers[], const IRegion2D &globalBounds )
 {
+	PROFILER_SECTION_NAME("PathfindZoneManager::calculateZones-body");
 #ifdef DEBUG_QPF
 #if defined(DEBUG_LOGGING)
 	__int64 startTime64;
@@ -5760,6 +5784,9 @@ Bool Pathfinder::adjustToPossibleDestination(Object *obj, const LocomotorSet& lo
  */
 Bool Pathfinder::queueForPath(ObjectID id)
 {
+#if defined(RTS_PROFILE_TRACY)
+	++s_pathfindQueueProfileStats.enqueueAttempts;
+#endif
 #ifdef DEBUG_LOGGING
 	{
 		Object *tmpObj = TheGameLogic->findObjectByID(id);
@@ -5777,6 +5804,9 @@ Bool Pathfinder::queueForPath(ObjectID id)
 	Int slot = m_queuePRHead;
 	while (slot != m_queuePRTail) {
 		if (m_queuedPathfindRequests[slot] == id) {
+#if defined(RTS_PROFILE_TRACY)
+			++s_pathfindQueueProfileStats.duplicateRequests;
+#endif
 			return true;
 		}
 		slot++;
@@ -5796,6 +5826,13 @@ Bool Pathfinder::queueForPath(ObjectID id)
 	}
 	m_queuedPathfindRequests[m_queuePRTail] = id;
 	m_queuePRTail = nextSlot;
+#if defined(RTS_PROFILE_TRACY)
+	++s_pathfindQueueProfileStats.acceptedRequests;
+	Int queueDepth = getPathfindQueueDepth(m_queuePRHead, m_queuePRTail);
+	if (queueDepth > s_pathfindQueueProfileStats.queueHighWater) {
+		s_pathfindQueueProfileStats.queueHighWater = queueDepth;
+	}
+#endif
 	return true;
 }
 
@@ -5989,6 +6026,18 @@ Path *Pathfinder::getAircraftPath( const Object *obj, const Coord3D *to )
 void Pathfinder::processPathfindQueue()
 {
 	//USE_PERF_TIMER(processPathfindQueue)
+	PROFILER_SECTION_NAME("Pathfinder::processPathfindQueue");
+#if defined(RTS_PROFILE_TRACY)
+	const Int queueDepthBefore = getPathfindQueueDepth(m_queuePRHead, m_queuePRTail);
+	const Int enqueueAttempts = s_pathfindQueueProfileStats.enqueueAttempts;
+	const Int acceptedRequests = s_pathfindQueueProfileStats.acceptedRequests;
+	const Int duplicateRequests = s_pathfindQueueProfileStats.duplicateRequests;
+	const Int queueHighWater = s_pathfindQueueProfileStats.queueHighWater;
+	s_pathfindQueueProfileStats.enqueueAttempts = 0;
+	s_pathfindQueueProfileStats.acceptedRequests = 0;
+	s_pathfindQueueProfileStats.duplicateRequests = 0;
+	s_pathfindQueueProfileStats.queueHighWater = queueDepthBefore;
+#endif
 	if (!m_isMapReady) {
 		return;
 	}
@@ -6004,9 +6053,19 @@ void Pathfinder::processPathfindQueue()
 #endif
 
 	if (m_zoneManager.needToCalculateZones()) {
-		m_zoneManager.calculateZones(m_map, m_layers, m_extent);
+#if defined(RTS_PROFILE_TRACY)
+		PROFILER_PLOT("PathfindZoneRecalculation", 1.0);
+		PROFILER_PLOT("PathfindQueueDepthBefore", (double)queueDepthBefore);
+#endif
+		{
+			PROFILER_SECTION_NAME("PathfindZoneManager::calculateZones");
+			m_zoneManager.calculateZones(m_map, m_layers, m_extent);
+		}
 		return;
 	}
+#if defined(RTS_PROFILE_TRACY)
+	PROFILER_PLOT("PathfindZoneRecalculation", 0.0);
+#endif
 
 	// Get the current logical extent.
 	Region3D terrainExtent;
@@ -6022,6 +6081,12 @@ void Pathfinder::processPathfindQueue()
 
 	m_cumulativeCellsAllocated = 0;	// Number of pathfind cells examined.
 	Int pathsFound = 0;
+#if defined(RTS_PROFILE_TRACY)
+	Int maxCellsPerRequest = 0;
+	Int zeroCellRequests = 0;
+	Int missingObjects = 0;
+	Int missingAIUpdates = 0;
+#endif
 	while (m_cumulativeCellsAllocated < PATHFIND_CELLS_PER_FRAME &&
 		m_queuePRTail!=m_queuePRHead) {
 		Object *obj = TheGameLogic->findObjectByID(m_queuedPathfindRequests[m_queuePRHead]);
@@ -6029,10 +6094,35 @@ void Pathfinder::processPathfindQueue()
 		if (obj) {
 			AIUpdateInterface *ai = obj->getAIUpdateInterface();
 			if (ai) {
-				ai->doPathfind(this);
+#if defined(RTS_PROFILE_TRACY)
+				const Int cellsBeforeRequest = m_cumulativeCellsAllocated;
+#endif
+				{
+					PROFILER_SECTION_NAME("Pathfinder::queuedDoPathfind");
+					ai->doPathfind(this);
+				}
 				pathsFound++;
+#if defined(RTS_PROFILE_TRACY)
+				const Int cellsForRequest = m_cumulativeCellsAllocated - cellsBeforeRequest;
+				if (cellsForRequest > maxCellsPerRequest) {
+					maxCellsPerRequest = cellsForRequest;
+				}
+				if (cellsForRequest == 0) {
+					++zeroCellRequests;
+				}
+#endif
 			}
+#if defined(RTS_PROFILE_TRACY)
+			else {
+				++missingAIUpdates;
+			}
+#endif
 		}
+#if defined(RTS_PROFILE_TRACY)
+		else {
+			++missingObjects;
+		}
+#endif
 		m_queuePRHead = m_queuePRHead+1;
 		if (m_queuePRHead >= PATHFIND_QUEUE_LEN) {
 			m_queuePRHead = 0;
@@ -6042,6 +6132,22 @@ void Pathfinder::processPathfindQueue()
 		PROFILER_PLOT("PathfindCells", (double)m_cumulativeCellsAllocated);
 		PROFILER_PLOT("PathfindPaths", (double)pathsFound);
 	}
+#if defined(RTS_PROFILE_TRACY)
+	const Int queueDepthAfter = getPathfindQueueDepth(m_queuePRHead, m_queuePRTail);
+	const Bool budgetExhausted = (m_cumulativeCellsAllocated >= PATHFIND_CELLS_PER_FRAME && queueDepthAfter > 0);
+	PROFILER_PLOT("PathfindQueueDepthBefore", (double)queueDepthBefore);
+	PROFILER_PLOT("PathfindQueueDepthAfter", (double)queueDepthAfter);
+	PROFILER_PLOT("PathfindQueueHighWater", (double)queueHighWater);
+	PROFILER_PLOT("PathfindEnqueueAttempts", (double)enqueueAttempts);
+	PROFILER_PLOT("PathfindAcceptedRequests", (double)acceptedRequests);
+	PROFILER_PLOT("PathfindDuplicateRequests", (double)duplicateRequests);
+	PROFILER_PLOT("PathfindMaxCellsPerRequest", (double)maxCellsPerRequest);
+	PROFILER_PLOT("PathfindZeroCellRequests", (double)zeroCellRequests);
+	PROFILER_PLOT("PathfindMissingObjects", (double)missingObjects);
+	PROFILER_PLOT("PathfindMissingAIUpdates", (double)missingAIUpdates);
+	PROFILER_PLOT("PathfindBudgetExhausted", budgetExhausted ? 1.0 : 0.0);
+	PROFILER_PLOT("PathfindCellsPerRequestAvg", pathsFound > 0 ? (double)m_cumulativeCellsAllocated / (double)pathsFound : 0.0);
+#endif
 #ifdef DEBUG_QPF
 	if (pathsFound>0) {
 #ifdef DEBUG_LOGGING
@@ -6444,6 +6550,7 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 													 const Coord3D *rawTo)
 {
+	PROFILER_SECTION_NAME("Pathfinder::findPath");
 	if (!clientSafeQuickDoesPathExist(locomotorSet, from, rawTo)) {
 		return nullptr;
 	}
@@ -6474,6 +6581,7 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 													 const Coord3D *rawTo)
 {
+	PROFILER_SECTION_NAME("Pathfinder::internalFindPath");
 	//CRCDEBUG_LOG(("Pathfinder::findPath()"));
 #ifdef INTENSE_DEBUG
 	DEBUG_LOG(("internal find path..."));
