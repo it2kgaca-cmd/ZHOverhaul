@@ -3755,20 +3755,16 @@ void GameLogic::update()
 
 	// force CRC calculation, so we can keep a cache of the last N CRCs.  We do this right where the recorder
 	// would be getting the CRC anyway, so replays can get the CRCs from the exact instant in time as the original.
-	Bool isMPGameOrReplay = (TheRecorder && TheRecorder->isMultiplayer() && getGameMode() != GAME_SHELL && getGameMode() != GAME_NONE);
-	Bool isSoloGameOrReplay = (TheRecorder && !TheRecorder->isMultiplayer() && getGameMode() != GAME_SHELL && getGameMode() != GAME_NONE);
-	Bool generateForMP = (isMPGameOrReplay && (m_frame % TheGameInfo->getCRCInterval()) == 0);
-#ifdef DEBUG_CRC
-	Bool generateForSolo = isSoloGameOrReplay && ((m_frame && (m_frame%100 == 0)) ||
-		(getFrame() >= TheCRCFirstFrameToLog && getFrame() < TheCRCLastFrameToLog && ((m_frame % REPLAY_CRC_INTERVAL) == 0)));
-#else
-	Bool generateForSolo = isSoloGameOrReplay && ((m_frame % REPLAY_CRC_INTERVAL) == 0);
-#endif // DEBUG_CRC
+	// ZH Overhaul @performance
+	// Live multiplayer/replay synchronization is intentionally unsupported in this personal fork.
+	// CRC recalculation can walk a large portion of game state and is unnecessary during normal play.
+	// Keep CRC generation during replay playback only, so old captures remain usable for diagnostics.
+	const Bool isPlayback = (TheRecorder && TheRecorder->isPlaybackMode());
+	const Bool generateReplayCRC = isPlayback && ((m_frame % REPLAY_CRC_INTERVAL) == 0);
 
-	if (generateForSolo || generateForMP)
+	if (generateReplayCRC)
 	{
 		m_CRC = getCRC( CRC_RECALC );
-		bool isPlayback = (TheRecorder && TheRecorder->isPlaybackMode());
 
 		GameMessage *msg = newInstance(GameMessage)(GameMessage::MSG_LOGIC_CRC);
 		msg->appendIntegerArgument(m_CRC);
