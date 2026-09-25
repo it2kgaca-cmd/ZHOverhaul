@@ -246,12 +246,30 @@ class PathfindCellList
 	friend class PathfindCell;
 
 public:
-	PathfindCellList() : m_head(nullptr), m_tail(nullptr) {}
+	PathfindCellList() : m_head(nullptr), m_tail(nullptr)
+#if defined(RTS_PROFILE_TRACY)
+		, m_profileSize(0)
+#endif
+	{}
 
 #if RETAIL_COMPATIBLE_PATHFINDING
-	void reset(PathfindCell* newHead = nullptr) { m_head = newHead; m_tail = nullptr; }
+	void reset(PathfindCell* newHead = nullptr)
+	{
+		m_head = newHead;
+		m_tail = nullptr;
+#if defined(RTS_PROFILE_TRACY)
+		m_profileSize = newHead ? 1 : 0;
+#endif
+	}
 #else
-	void reset() { m_head = nullptr; m_tail = nullptr; }
+	void reset()
+	{
+		m_head = nullptr;
+		m_tail = nullptr;
+#if defined(RTS_PROFILE_TRACY)
+		m_profileSize = 0;
+#endif
+	}
 #endif
 
 	PathfindCell* getHead() const { return m_head; }
@@ -263,6 +281,9 @@ public:
 private:
 	PathfindCell* m_head;
 	PathfindCell* m_tail;
+#if defined(RTS_PROFILE_TRACY)
+	Int m_profileSize;
+#endif
 };
 
 /**
