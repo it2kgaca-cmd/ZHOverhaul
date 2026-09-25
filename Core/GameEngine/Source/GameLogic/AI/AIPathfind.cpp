@@ -200,7 +200,7 @@ static SharedMacroRouteCacheEntry *findSharedMacroRoute(const ICoord2D &startBlo
 {
 	const UnsignedInt frame = TheGameLogic ? TheGameLogic->getFrame() : 0;
 	SharedMacroRouteCacheEntry *best = nullptr;
-	Int bestStartDistance = INT_MAX;
+	Int bestStartDistance = 0x7FFFFFFF;
 	UnsignedInt bestLastUsedFrame = 0;
 	neighborStartHit = false;
 
@@ -6704,6 +6704,9 @@ void Pathfinder::processPathfindQueue()
 	s_sharedMacroRouteStores = 0;
 	s_sharedMacroRouteRejected = 0;
 	s_sharedMacroRouteBlocksReused = 0;
+	s_sharedMacroRouteNeighborStartHits = 0;
+	s_sharedMacroRouteClosestHits = 0;
+	s_sharedMacroRouteClosestRejected = 0;
 	const Int cellInfoAllocationFailures = s_pathfindCellInfoAllocationFailures;
 	s_pathfindCellInfoAllocationFailures = 0;
 #endif
@@ -6880,6 +6883,9 @@ void Pathfinder::processPathfindQueue()
 	PROFILER_PLOT("PathfindSharedRouteStores", (double)s_sharedMacroRouteStores);
 	PROFILER_PLOT("PathfindSharedRouteRejected", (double)s_sharedMacroRouteRejected);
 	PROFILER_PLOT("PathfindSharedRouteBlocksReused", (double)s_sharedMacroRouteBlocksReused);
+	PROFILER_PLOT("PathfindSharedRouteNeighborStartHits", (double)s_sharedMacroRouteNeighborStartHits);
+	PROFILER_PLOT("PathfindSharedRouteClosestHits", (double)s_sharedMacroRouteClosestHits);
+	PROFILER_PLOT("PathfindSharedRouteClosestRejected", (double)s_sharedMacroRouteClosestRejected);
 #endif
 #ifdef DEBUG_QPF
 	if (pathsFound>0) {
@@ -9686,6 +9692,7 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 	const ICoord2D sharedClosestGoalBlock = sharedMacroRouteBlockForPosition(rawTo);
 	const Int sharedClosestBlockDistance =
 		sharedMacroRouteBlockDistance(sharedClosestStartBlock, sharedClosestGoalBlock);
+	const Bool sharedClosestHierarchicalCrusher = false;
 
 	sharedClosestRouteEligible =
 		!s_disableSharedClosestRouteRetry &&
@@ -9705,8 +9712,8 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 			Bool neighborStartHit = false;
 			SharedMacroRouteCacheEntry *cachedRoute = findSharedMacroRoute(
 				sharedClosestStartBlock, sharedClosestGoalBlock, sharedClosestSurfaces,
-				isCrusher, isHuman, sharedClosestStartLayer, sharedClosestGoalLayer,
-				true, neighborStartHit);
+				sharedClosestHierarchicalCrusher, isHuman, sharedClosestStartLayer,
+				sharedClosestGoalLayer, true, neighborStartHit);
 
 			if (cachedRoute)
 			{
@@ -9732,7 +9739,7 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 
 		if (!reusedClosestSharedMacroRoute)
 		{
-			Path *hPat = findClosestHierarchicalPath(isHuman, locomotorSet, from, rawTo, isCrusher);
+			Path *hPat = findClosestHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
 			if (hPat) {
 				deleteInstance(hPat);
 				gotHierarchicalPath = true;
@@ -9843,8 +9850,8 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 			if (sharedClosestRouteEligible)
 			{
 				storeSharedMacroRoute(sharedClosestStartBlock, sharedClosestGoalBlock,
-					sharedClosestSurfaces, isCrusher, isHuman, sharedClosestStartLayer,
-					sharedClosestGoalLayer, true, path);
+					sharedClosestSurfaces, sharedClosestHierarchicalCrusher, isHuman,
+					sharedClosestStartLayer, sharedClosestGoalLayer, true, path);
 			}
 #if defined(RTS_PROFILE_TRACY)
 			endPathfindProfileStage(PATHFIND_PROFILE_CLOSEST_PATH, m_cumulativeCellsAllocated - profileCellsBefore, true);
@@ -9943,8 +9950,8 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 		if (sharedClosestRouteEligible)
 		{
 			storeSharedMacroRoute(sharedClosestStartBlock, sharedClosestGoalBlock,
-				sharedClosestSurfaces, isCrusher, isHuman, sharedClosestStartLayer,
-				sharedClosestGoalLayer, true, path);
+				sharedClosestSurfaces, sharedClosestHierarchicalCrusher, isHuman,
+				sharedClosestStartLayer, sharedClosestGoalLayer, true, path);
 		}
 #if defined(RTS_PROFILE_TRACY)
 		endPathfindProfileStage(PATHFIND_PROFILE_CLOSEST_PATH, m_cumulativeCellsAllocated - profileCellsBefore, true);
