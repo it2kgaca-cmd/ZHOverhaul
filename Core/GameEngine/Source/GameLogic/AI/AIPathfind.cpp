@@ -159,6 +159,10 @@ struct PathfindRequestProfileStats
 	Int patchPathCalls;
 	Int patchPathCells;
 	Int patchPathSuccesses;
+	Int openListInsertCalls;
+	Int openListTraversalSteps;
+	Int openListMaxTraversal;
+	Int openListMaxSize;
 };
 
 struct PathfindStageFrameProfileStats
@@ -179,12 +183,55 @@ struct PathfindStageFrameProfileStats
 	Int slowFallbackRequests;
 };
 
+struct PathfindOpenListFrameProfileStats
+{
+	Int insertCalls;
+	Int forwardCalls;
+	Int reverseCalls;
+	Int retailCalls;
+	Int traversalSteps;
+	Int maxTraversal;
+	Int maxSize;
+	Int removeCalls;
+	Int fastInsertCalls;
+};
+
 static PathfindQueueProfileStats s_pathfindQueueProfileStats = { 0, 0, 0, 0 };
 static PathfindRequestProfileStats s_pathfindRequestProfileStats = {};
 static PathfindStageFrameProfileStats s_pathfindStageFrameProfileStats = {};
+static PathfindOpenListFrameProfileStats s_pathfindOpenListFrameProfileStats = {};
 static Int s_pathfindCellInfoAllocationFailures = 0;
 static Int s_pathfindCellInfoInUse = 0;
 static Int s_pathfindCellInfoPeakInUse = 0;
+
+static void recordOpenListInsertProfile(Int traversalSteps, Int listSize, Bool reverseSort, Bool retailSort, Bool fastInsert)
+{
+	++s_pathfindOpenListFrameProfileStats.insertCalls;
+	if (reverseSort)
+		++s_pathfindOpenListFrameProfileStats.reverseCalls;
+	else if (retailSort)
+		++s_pathfindOpenListFrameProfileStats.retailCalls;
+	else
+		++s_pathfindOpenListFrameProfileStats.forwardCalls;
+
+	s_pathfindOpenListFrameProfileStats.traversalSteps += traversalSteps;
+	if (traversalSteps > s_pathfindOpenListFrameProfileStats.maxTraversal)
+		s_pathfindOpenListFrameProfileStats.maxTraversal = traversalSteps;
+	if (listSize > s_pathfindOpenListFrameProfileStats.maxSize)
+		s_pathfindOpenListFrameProfileStats.maxSize = listSize;
+	if (fastInsert)
+		++s_pathfindOpenListFrameProfileStats.fastInsertCalls;
+
+	if (s_pathfindRequestProfileStats.active)
+	{
+		++s_pathfindRequestProfileStats.openListInsertCalls;
+		s_pathfindRequestProfileStats.openListTraversalSteps += traversalSteps;
+		if (traversalSteps > s_pathfindRequestProfileStats.openListMaxTraversal)
+			s_pathfindRequestProfileStats.openListMaxTraversal = traversalSteps;
+		if (listSize > s_pathfindRequestProfileStats.openListMaxSize)
+			s_pathfindRequestProfileStats.openListMaxSize = listSize;
+	}
+}
 
 static void beginQueuedPathfindRequestProfile()
 {
@@ -1835,7 +1882,10 @@ Bool PathfindCell::removeObstacle( Object *obstacle )
 // Retail compatible insertion sort
 void PathfindCell::forwardInsertionSortRetailCompatible(PathfindCellList& list)
 {
+	PROFILER_SECTION_NAME("PathfindOpenList::retailInsert");
 	DEBUG_ASSERTCRASH(m_info, ("Has to have info."));
+	Int profileTraversalSteps = 0;
+	Bool profileFastInsert = false;
 	DEBUG_ASSERTCRASH(m_info->m_closed == FALSE && m_info->m_open == FALSE, ("Serious error - Invalid flags. jba"));
 
 	// mark the newCell as being on the open list
@@ -1847,6 +1897,11 @@ void PathfindCell::forwardInsertionSortRetailCompatible(PathfindCellList& list)
 		list.m_head = this;
 		m_info->m_prevOpen = nullptr;
 		m_info->m_nextOpen = nullptr;
+#if defined(RTS_PROFILE_TRACY)
+		++list.m_profileSize;
+		profileFastInsert = true;
+		recordOpenListInsertProfile(profileTraversalSteps, list.m_profileSize, false, true, profileFastInsert);
+#endif
 		return;
 	}
 
@@ -1864,6 +1919,9 @@ void PathfindCell::forwardInsertionSortRetailCompatible(PathfindCellList& list)
 		}
 
 		cellCount++;
+#if defined(RTS_PROFILE_TRACY)
+		++profileTraversalSteps;
+#endif
 		previousCell = currentCell;
 		currentCell = currentCell->getNextOpen();
 	}
@@ -1889,13 +1947,20 @@ void PathfindCell::forwardInsertionSortRetailCompatible(PathfindCellList& list)
 		m_info->m_prevOpen = previousCell->m_info;
 		m_info->m_nextOpen = nullptr;
 	}
+#if defined(RTS_PROFILE_TRACY)
+	++list.m_profileSize;
+	recordOpenListInsertProfile(profileTraversalSteps, list.m_profileSize, false, true, profileFastInsert);
+#endif
 }
 #endif
 
 // Forward insertion sort, returns early if the list is being initialized or we are prepending the list
 void PathfindCell::forwardInsertionSort(PathfindCellList& list)
 {
+	PROFILER_SECTION_NAME("PathfindOpenList::forwardInsert");
 	DEBUG_ASSERTCRASH(m_info, ("Has to have info."));
+	Int profileTraversalSteps = 0;
+	Bool profileFastInsert = false;
 	DEBUG_ASSERTCRASH(m_info->m_closed == FALSE && m_info->m_open == FALSE, ("Serious error - Invalid flags. jba"));
 
 	// mark the new cell as being on the open list
@@ -1907,6 +1972,11 @@ void PathfindCell::forwardInsertionSort(PathfindCellList& list)
 		m_info->m_nextOpen = nullptr;
 		list.m_head = this;
 		list.m_tail = this;
+#if defined(RTS_PROFILE_TRACY)
+		++list.m_profileSize;
+		profileFastInsert = true;
+		recordOpenListInsertProfile(profileTraversalSteps, list.m_profileSize, false, false, profileFastInsert);
+#endif
 		return;
 	}
 
@@ -1916,6 +1986,11 @@ void PathfindCell::forwardInsertionSort(PathfindCellList& list)
 		list.m_head->m_info->m_prevOpen = this->m_info;
 		m_info->m_nextOpen = list.m_head->m_info;
 		list.m_head = this;
+#if defined(RTS_PROFILE_TRACY)
+		++list.m_profileSize;
+		profileFastInsert = true;
+		recordOpenListInsertProfile(profileTraversalSteps, list.m_profileSize, false, false, profileFastInsert);
+#endif
 		return;
 	}
 
@@ -1923,6 +1998,9 @@ void PathfindCell::forwardInsertionSort(PathfindCellList& list)
 	PathfindCell* current = list.m_head;
 	while (current->m_info->m_nextOpen && current->m_info->m_nextOpen->m_totalCost <= m_info->m_totalCost) {
 		current = current->getNextOpen();
+#if defined(RTS_PROFILE_TRACY)
+		++profileTraversalSteps;
+#endif
 	}
 
 	// Insert the new node in the correct position
@@ -1936,12 +2014,19 @@ void PathfindCell::forwardInsertionSort(PathfindCellList& list)
 
 	current->m_info->m_nextOpen = this->m_info;
 	m_info->m_prevOpen = current->m_info;
+#if defined(RTS_PROFILE_TRACY)
+	++list.m_profileSize;
+	recordOpenListInsertProfile(profileTraversalSteps, list.m_profileSize, false, false, profileFastInsert);
+#endif
 }
 
 // Reverse insertion sort, returns early if the list is being initialized or we are appending the list
 void PathfindCell::reverseInsertionSort(PathfindCellList& list)
 {
+	PROFILER_SECTION_NAME("PathfindOpenList::reverseInsert");
 	DEBUG_ASSERTCRASH(m_info, ("Has to have info."));
+	Int profileTraversalSteps = 0;
+	Bool profileFastInsert = false;
 	DEBUG_ASSERTCRASH(m_info->m_closed == FALSE && m_info->m_open == FALSE, ("Serious error - Invalid flags. jba"));
 
 	// mark the new cell as being on the open list
@@ -1953,6 +2038,11 @@ void PathfindCell::reverseInsertionSort(PathfindCellList& list)
 		m_info->m_nextOpen = nullptr;
 		list.m_tail = this;
 		list.m_head = this;
+#if defined(RTS_PROFILE_TRACY)
+		++list.m_profileSize;
+		profileFastInsert = true;
+		recordOpenListInsertProfile(profileTraversalSteps, list.m_profileSize, true, false, profileFastInsert);
+#endif
 		return;
 	}
 
@@ -1962,6 +2052,11 @@ void PathfindCell::reverseInsertionSort(PathfindCellList& list)
 		list.m_tail->m_info->m_nextOpen = this->m_info;
 		m_info->m_nextOpen = nullptr;
 		list.m_tail = this;
+#if defined(RTS_PROFILE_TRACY)
+		++list.m_profileSize;
+		profileFastInsert = true;
+		recordOpenListInsertProfile(profileTraversalSteps, list.m_profileSize, true, false, profileFastInsert);
+#endif
 		return;
 	}
 
@@ -1969,6 +2064,9 @@ void PathfindCell::reverseInsertionSort(PathfindCellList& list)
 	PathfindCell* current = list.m_tail;
 	while (current->m_info->m_prevOpen && current->m_info->m_prevOpen->m_totalCost > m_info->m_totalCost) {
 		current = current->getPrevOpen();
+#if defined(RTS_PROFILE_TRACY)
+		++profileTraversalSteps;
+#endif
 	}
 
 	// Insert the new node in the correct position
@@ -1982,6 +2080,10 @@ void PathfindCell::reverseInsertionSort(PathfindCellList& list)
 
 	current->m_info->m_prevOpen = this->m_info;
 	m_info->m_nextOpen = current->m_info;
+#if defined(RTS_PROFILE_TRACY)
+	++list.m_profileSize;
+	recordOpenListInsertProfile(profileTraversalSteps, list.m_profileSize, true, false, profileFastInsert);
+#endif
 }
 
 /// put self on "open" list in ascending cost order, return new list
@@ -2008,7 +2110,11 @@ void PathfindCell::putOnSortedOpenList( PathfindCellList &list )
 /// remove self from "open" list
 void PathfindCell::removeFromOpenList( PathfindCellList &list )
 {
+	PROFILER_SECTION_NAME("PathfindOpenList::remove");
 	DEBUG_ASSERTCRASH(m_info, ("Has to have info."));
+#if defined(RTS_PROFILE_TRACY)
+	++s_pathfindOpenListFrameProfileStats.removeCalls;
+#endif
 	DEBUG_ASSERTCRASH(m_info->m_closed==FALSE && m_info->m_open==TRUE, ("Serious error - Invalid flags. jba"));
 	if (m_info->m_nextOpen)
 		m_info->m_nextOpen->m_prevOpen = m_info->m_prevOpen;
@@ -2024,6 +2130,10 @@ void PathfindCell::removeFromOpenList( PathfindCellList &list )
 	m_info->m_open = false;
 	m_info->m_nextOpen = nullptr;
 	m_info->m_prevOpen = nullptr;
+#if defined(RTS_PROFILE_TRACY)
+	if (list.m_profileSize > 0)
+		--list.m_profileSize;
+#endif
 
 }
 
@@ -6174,6 +6284,7 @@ void Pathfinder::processPathfindQueue()
 	s_pathfindQueueProfileStats.duplicateRequests = 0;
 	s_pathfindQueueProfileStats.queueHighWater = queueDepthBefore;
 	s_pathfindStageFrameProfileStats = {};
+	s_pathfindOpenListFrameProfileStats = {};
 	const Int cellInfoAllocationFailures = s_pathfindCellInfoAllocationFailures;
 	s_pathfindCellInfoAllocationFailures = 0;
 #endif
@@ -6271,7 +6382,7 @@ void Pathfinder::processPathfindQueue()
 					message.format(
 						"SlowPath frame=%u obj=%u unit=%s player=%d type=%d state=%d:%s stuck=%d retry=%d "
 						"cells=%d find=%d/%d/%d internal=%d/%d/%d closest=%d/%d/%d patch=%d/%d/%d other=%d "
-						"start=(%.1f,%.1f) requested=(%.1f,%.1f) goal=(%.1f,%.1f)",
+						"open=%d/%d/%d/%d start=(%.1f,%.1f) requested=(%.1f,%.1f) goal=(%.1f,%.1f)",
 						TheGameLogic->getFrame(), obj->getID(), obj->getTemplate()->getName().str(), playerIndex, playerType,
 						(Int)ai->getCurrentStateID(), ai->getCurrentStateName().str(), ai->isBlockedAndStuck() ? 1 : 0, ai->getRetryPath() ? 1 : 0,
 						cellsForRequest,
@@ -6279,6 +6390,8 @@ void Pathfinder::processPathfindQueue()
 						s_pathfindRequestProfileStats.internalFindPathCalls, s_pathfindRequestProfileStats.internalFindPathCells, s_pathfindRequestProfileStats.internalFindPathSuccesses,
 						s_pathfindRequestProfileStats.closestPathCalls, s_pathfindRequestProfileStats.closestPathCells, s_pathfindRequestProfileStats.closestPathSuccesses,
 						s_pathfindRequestProfileStats.patchPathCalls, s_pathfindRequestProfileStats.patchPathCells, s_pathfindRequestProfileStats.patchPathSuccesses, otherCells,
+						s_pathfindRequestProfileStats.openListInsertCalls, s_pathfindRequestProfileStats.openListTraversalSteps,
+						s_pathfindRequestProfileStats.openListMaxTraversal, s_pathfindRequestProfileStats.openListMaxSize,
 						start ? start->x : 0.0f, start ? start->y : 0.0f, requested ? requested->x : 0.0f, requested ? requested->y : 0.0f,
 						goal ? goal->x : 0.0f, goal ? goal->y : 0.0f);
 					PROFILER_MSG(message.str(), message.getLength());
@@ -6338,6 +6451,15 @@ void Pathfinder::processPathfindQueue()
 	PROFILER_PLOT("PathfindCellInfoAllocationFailures", (double)cellInfoAllocationFailures);
 	PROFILER_PLOT("PathfindCellInfoInUse", (double)s_pathfindCellInfoInUse);
 	PROFILER_PLOT("PathfindCellInfoPeakInUse", (double)s_pathfindCellInfoPeakInUse);
+	PROFILER_PLOT("PathfindOpenListInsertCalls", (double)s_pathfindOpenListFrameProfileStats.insertCalls);
+	PROFILER_PLOT("PathfindOpenListForwardCalls", (double)s_pathfindOpenListFrameProfileStats.forwardCalls);
+	PROFILER_PLOT("PathfindOpenListReverseCalls", (double)s_pathfindOpenListFrameProfileStats.reverseCalls);
+	PROFILER_PLOT("PathfindOpenListRetailCalls", (double)s_pathfindOpenListFrameProfileStats.retailCalls);
+	PROFILER_PLOT("PathfindOpenListTraversalSteps", (double)s_pathfindOpenListFrameProfileStats.traversalSteps);
+	PROFILER_PLOT("PathfindOpenListMaxTraversal", (double)s_pathfindOpenListFrameProfileStats.maxTraversal);
+	PROFILER_PLOT("PathfindOpenListMaxSize", (double)s_pathfindOpenListFrameProfileStats.maxSize);
+	PROFILER_PLOT("PathfindOpenListRemoveCalls", (double)s_pathfindOpenListFrameProfileStats.removeCalls);
+	PROFILER_PLOT("PathfindOpenListFastInsertCalls", (double)s_pathfindOpenListFrameProfileStats.fastInsertCalls);
 #endif
 #ifdef DEBUG_QPF
 	if (pathsFound>0) {
