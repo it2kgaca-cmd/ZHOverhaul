@@ -123,3 +123,30 @@ This fork is intended for one local player and does not target multiplayer or re
 Replay playback code remains available for diagnostics, and CRC generation remains active during replay playback only.
 
 This removes work that exists primarily for deterministic multiplayer and replay reproduction, neither of which is a requirement for this fork.
+
+
+## 0.0.4 - A* open-list profiling
+
+This step changes no pathfinding decisions. It measures the cost of the current linked-list open set before replacing it.
+
+### Added Tracy zones
+- `PathfindOpenList::forwardInsert`
+- `PathfindOpenList::reverseInsert`
+- `PathfindOpenList::retailInsert`
+- `PathfindOpenList::remove`
+
+### Added plots
+- `PathfindOpenListInsertCalls`
+- `PathfindOpenListForwardCalls`
+- `PathfindOpenListReverseCalls`
+- `PathfindOpenListRetailCalls`
+- `PathfindOpenListTraversalSteps`
+- `PathfindOpenListMaxTraversal`
+- `PathfindOpenListMaxSize`
+- `PathfindOpenListRemoveCalls`
+- `PathfindOpenListFastInsertCalls`
+
+### SlowPath message extension
+`open=insertCalls/traversalSteps/maxSingleTraversal/maxOpenListSize`
+
+The test target is a large player-issued cross-map move order on Twilight Flame. If traversal steps and insert-zone wall time dominate the giant searches, 0.0.5 will replace the sorted linked list with a priority-queue/heap open set.
