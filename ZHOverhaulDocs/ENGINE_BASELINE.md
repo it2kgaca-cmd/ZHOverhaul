@@ -150,3 +150,40 @@ This step changes no pathfinding decisions. It measures the cost of the current 
 `open=insertCalls/traversalSteps/maxSingleTraversal/maxOpenListSize`
 
 The test target is a large player-issued cross-map move order on Twilight Flame. If traversal steps and insert-zone wall time dominate the giant searches, 0.0.5 will replace the sorted linked list with a priority-queue/heap open set.
+
+
+## 0.0.5 - Binary-heap A* open set
+
+The 0.0.4 trace showed open-list maintenance consuming roughly half of `internalFindPath` time during the Twilight Flame stress test, with more than 100 million sorted-list insertions in one capture.
+
+### Changes
+- Replaced the active A* open set's sorted linked-list ordering with a binary min-heap.
+- Equal-cost nodes retain stable insertion order.
+- Arbitrary open-set removal remains O(log n) through a heap index stored in `PathfindCellInfo`.
+- The old linked pointers are retained only for cleanup/debug enumeration.
+- Retail-compatible forward/reverse insertion helpers remain compiled but are no longer used by the active pathfinder.
+- Removed per-operation Tracy zones from the active insert/remove path to avoid enormous trace/event exports.
+
+### New aggregate Tracy plots
+- `PathfindOpenHeapPushCalls`
+- `PathfindOpenHeapRemoveCalls`
+- `PathfindOpenHeapSiftSteps`
+- `PathfindOpenHeapMaxSiftSteps`
+- `PathfindOpenHeapMaxSize`
+
+Slow-path messages now label the open-set tuple as `heap=pushes/siftSteps/maxSift/maxSize`.
+
+### Test
+Repeat the same large player-issued move order across Twilight Flame and compare:
+1. visible hitching;
+2. `Pathfinder::internalFindPath` wall time;
+3. `Pathfinder::processPathfindQueue` max/mean time;
+4. the new heap aggregate counters.
+
+Do not export a raw events CSV unless specifically needed.
+
+## Crusader muzzle-flash regression
+
+When a model state creates a new render object, the prior code hid muzzle flashes before the new render object existed, then skipped the post-creation hide call. The new object could therefore start with muzzle-flash subobjects visible.
+
+The recreated render object now hides validated muzzle-flash subobjects immediately after `validateStuff()`. Also includes the upstream null guard in `handleClientRecoil()`.
