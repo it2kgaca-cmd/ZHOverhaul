@@ -2328,18 +2328,32 @@ static void doHideShowBoneSubObjs(Bool state, Int numSubObjects, Int boneIdx, Re
 //-------------------------------------------------------------------------------------------------
 void ModelConditionInfo::WeaponBarrelInfo::setMuzzleFlashHidden(RenderObjClass *fullObject, Bool hide) const
 {
-	if (fullObject)
+	if (!fullObject)
+		return;
+
+	// ZH Overhaul @bugfix
+	// A muzzle-flash bone can own more than one render subobject. Retail's old helper only
+	// toggled the first subobject found on the bone, which can leave additional muzzle-flash
+	// meshes permanently visible (notably the Crusader's TurretFX geometry).
+	Bool found = false;
+	const Int subObjectCount = fullObject->Get_Num_Sub_Objects();
+	for (Int i = 0; i < subObjectCount; ++i)
 	{
-		RenderObjClass* childObject = fullObject->Get_Sub_Object_On_Bone(0, m_muzzleFlashBone);
+		if (fullObject->Get_Sub_Object_Bone_Index(0, i) != m_muzzleFlashBone)
+			continue;
+
+		RenderObjClass* childObject = fullObject->Get_Sub_Object(i);
 		if (childObject)
 		{
 			childObject->Set_Hidden(hide);
 			childObject->Release_Ref();
+			found = true;
 		}
-		else
-		{
-			DEBUG_CRASH(("*** ASSET ERROR: childObject %s not found in setMuzzleFlashHidden()",m_muzzleFlashBoneName.str()));
-		}
+	}
+
+	if (!found)
+	{
+		DEBUG_CRASH(("*** ASSET ERROR: childObject %s not found in setMuzzleFlashHidden()",m_muzzleFlashBoneName.str()));
 	}
 }
 
