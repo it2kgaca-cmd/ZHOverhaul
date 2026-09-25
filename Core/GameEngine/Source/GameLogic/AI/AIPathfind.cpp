@@ -117,7 +117,12 @@ constexpr const UnsignedInt MAX_ADJUSTMENT_CELL_COUNT = 400;
 constexpr const UnsignedInt MAX_SAFE_PATH_CELL_COUNT = 2000;
 
 constexpr const UnsignedInt PATHFIND_CELLS_PER_FRAME = 5000; // Number of cells we will search pathfinding per frame.
-constexpr const UnsignedInt CELL_INFOS_TO_ALLOCATE = 30000;
+// ZH Overhaul @pathfinding
+// Retail's 30k PathfindCellInfo pool is too small for legitimate long searches on large maps
+// (notably Twilight Flame ravine crossings), causing otherwise valid searches to exhaust the pool,
+// fail, fall back to findClosestPath(), and then get retried repeatedly. 500k comfortably covers
+// the stock large-map grid while remaining modest (~tens of MiB) in a 32-bit process.
+constexpr const UnsignedInt CELL_INFOS_TO_ALLOCATE = 500000;
 
 #if defined(RTS_PROFILE_TRACY)
 // ZH Overhaul @profiling
@@ -177,6 +182,9 @@ struct PathfindStageFrameProfileStats
 static PathfindQueueProfileStats s_pathfindQueueProfileStats = { 0, 0, 0, 0 };
 static PathfindRequestProfileStats s_pathfindRequestProfileStats = {};
 static PathfindStageFrameProfileStats s_pathfindStageFrameProfileStats = {};
+static Int s_pathfindCellInfoAllocationFailures = 0;
+static Int s_pathfindCellInfoInUse = 0;
+static Int s_pathfindCellInfoPeakInUse = 0;
 
 static void beginQueuedPathfindRequestProfile()
 {
@@ -1304,6 +1312,12 @@ PathfindCellInfo *PathfindCellInfo::getACellInfo(PathfindCell *cell,const ICoord
 		DEBUG_ASSERTCRASH(s_firstFree->m_isFree, ("Should be freed."));
 		s_firstFree = s_firstFree->m_pathParent;
 		info->m_isFree = false;  // Just allocated it.
+#if defined(RTS_PROFILE_TRACY)
+		++s_pathfindCellInfoInUse;
+		if (s_pathfindCellInfoInUse > s_pathfindCellInfoPeakInUse) {
+			s_pathfindCellInfoPeakInUse = s_pathfindCellInfoInUse;
+		}
+#endif
 		info->m_cell = cell;
 		info->m_pos = pos;
 
@@ -1322,6 +1336,11 @@ PathfindCellInfo *PathfindCellInfo::getACellInfo(PathfindCell *cell,const ICoord
 		info->m_obstacleIsTransparent = false;
 		info->m_blockedByAlly = false;
 	}
+#if defined(RTS_PROFILE_TRACY)
+	else {
+		++s_pathfindCellInfoAllocationFailures;
+	}
+#endif
 	return info;
 }
 
@@ -1336,6 +1355,11 @@ void PathfindCellInfo::releaseACellInfo(PathfindCellInfo *theInfo)
 	theInfo->m_pathParent = s_firstFree;
 	s_firstFree = theInfo;
 	s_firstFree->m_isFree = true;
+#if defined(RTS_PROFILE_TRACY)
+	if (s_pathfindCellInfoInUse > 0) {
+		--s_pathfindCellInfoInUse;
+	}
+#endif
 }
 
 //-----------------------------------------------------------------------------------
@@ -6150,6 +6174,8 @@ void Pathfinder::processPathfindQueue()
 	s_pathfindQueueProfileStats.duplicateRequests = 0;
 	s_pathfindQueueProfileStats.queueHighWater = queueDepthBefore;
 	s_pathfindStageFrameProfileStats = {};
+	const Int cellInfoAllocationFailures = s_pathfindCellInfoAllocationFailures;
+	s_pathfindCellInfoAllocationFailures = 0;
 #endif
 	if (!m_isMapReady) {
 		return;
@@ -6309,6 +6335,9 @@ void Pathfinder::processPathfindQueue()
 	PROFILER_PLOT("PathfindPatchPathSuccesses", (double)s_pathfindStageFrameProfileStats.patchPathSuccesses);
 	PROFILER_PLOT("PathfindSlowRequests", (double)s_pathfindStageFrameProfileStats.slowRequests);
 	PROFILER_PLOT("PathfindSlowFallbackRequests", (double)s_pathfindStageFrameProfileStats.slowFallbackRequests);
+	PROFILER_PLOT("PathfindCellInfoAllocationFailures", (double)cellInfoAllocationFailures);
+	PROFILER_PLOT("PathfindCellInfoInUse", (double)s_pathfindCellInfoInUse);
+	PROFILER_PLOT("PathfindCellInfoPeakInUse", (double)s_pathfindCellInfoPeakInUse);
 #endif
 #ifdef DEBUG_QPF
 	if (pathsFound>0) {
