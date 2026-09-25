@@ -83,3 +83,29 @@ tracy-csvexport.exe -m "Generals Tracy.tracy" > generals_messages.csv
 ```
 
 The goal of 0.0.2 is to identify the exact call path and game objects behind the 30k-40k-cell outliers observed in the first Twilight Flame capture before any behavioral optimization is attempted.
+
+
+## 0.0.3 - Large-map pathfinding resource fix
+
+First gameplay-affecting pathfinding change.
+
+The retail engine allocates only 30,000 `PathfindCellInfo` records. Profiling on Twilight Flame showed repeated expensive exact-path failures followed by successful `findClosestPath` fallbacks. Upstream investigation of the same map identifies pathfinding-resource exhaustion as a root cause of valid ravine paths failing.
+
+### Change
+- Increase `CELL_INFOS_TO_ALLOCATE` from 30,000 to 500,000.
+- This intentionally drops retail pathfinding compatibility for this fork.
+- No A* cost/heuristic or movement behavior is otherwise changed in this step.
+
+### New Tracy plots
+- `PathfindCellInfoAllocationFailures`
+- `PathfindCellInfoInUse`
+- `PathfindCellInfoPeakInUse`
+
+### Test goal
+On the next Twilight Flame stress run:
+1. allocation failures should remain at zero;
+2. the repeated Rebel exact-path failure/fallback loop should disappear or fall sharply;
+3. total slow-path requests and pathfinding wall time should drop;
+4. units should be more likely to complete ravine routes instead of piling against cliffs.
+
+If long valid paths remain expensive after they stop falsely failing, the next optimization target is the open-list implementation rather than suppressing retries.
