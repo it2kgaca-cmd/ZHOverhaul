@@ -218,3 +218,24 @@ This is intentionally a conservative first shared-routing step. It shares the st
 
 ### Included visual fix
 The Crusader muzzle-flash follow-up is included in the same test build. Muzzle-flash visibility now toggles every render subobject attached directly to the configured muzzle-flash bone instead of only the first matching subobject.
+
+
+## 0.0.6.1 - Formation-friendly shared routing
+
+0.0.6 proved that sharing short-lived macro corridors reduces ordinary A* work, but the first cache key was intentionally conservative. 0.0.6.1 broadens reuse before the 0.1 movement work begins.
+
+### Changes
+- Macro-route cache lifetime increased from 12 to 30 logic frames so large queued formations have time to consume a route.
+- Radius and center-in-cell are no longer macro-route key fields. They still matter to each unit's local A*, but they do not define which strategic side of the map a formation should travel through.
+- Units may join a route produced from the same coarse block or an immediately neighboring coarse block (Manhattan distance <= 1).
+- Reused routes get a 3x3 coarse-block join/leave area around the current unit start and requested goal, allowing formation slots to merge onto the shared strategic corridor without cloning an exact path.
+- Exact paths and findClosestPath fallback routes use separate cache modes.
+- findClosestPath can now reuse recently successful macro corridors. If a reused closest-path corridor fails, it retries once with the normal hierarchical prepass; a successful retry refreshes the cache with the corrected corridor.
+- Existing safety restrictions remain: long ground-to-ground routing only, matching locomotor surface mask and human/AI routing mode, no ignored-obstacle route reuse.
+
+### Additional Tracy aggregates
+- `PathfindSharedRouteNeighborStartHits`
+- `PathfindSharedRouteClosestHits`
+- `PathfindSharedRouteClosestRejected`
+
+The goal is to finish the macro-routing baseline before 0.1 introduces destination spreading, yielding, local avoidance, choke flow, and attack-move movement changes.
