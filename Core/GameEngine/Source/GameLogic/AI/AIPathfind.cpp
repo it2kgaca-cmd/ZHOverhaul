@@ -213,7 +213,7 @@ static void appendSharedMacroRouteBlock(std::vector<ICoord2D> &blocks, Int block
 
 static void storeSharedMacroRoute(const ICoord2D &startBlock, const ICoord2D &goalBlock,
 	UnsignedInt surfaces, Int radius, Bool centerInCell, Bool isCrusher, Bool isHuman,
-	PathfindLayerEnum startLayer, PathfindLayerEnum goalLayer, const Path *path)
+	PathfindLayerEnum startLayer, PathfindLayerEnum goalLayer, Path *path)
 {
 	if (!path)
 		return;
@@ -7215,15 +7215,108 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 		isHuman = false; // computer gets to cheat.
 	}
 
+	// 0.0.6: reuse the coarse corridor of a recently successful path from the
+	// same movement class and start/goal blocks. Each unit still computes its own
+	// local path, so this is route sharing rather than path cloning.
+	Bool reusedSharedMacroRoute = false;
+	Bool sharedMacroRouteEligible = false;
+	ICoord2D sharedStartBlock = { 0, 0 };
+	ICoord2D sharedGoalBlock = { 0, 0 };
+	Int sharedRadius = 0;
+	Bool sharedCenterInCell = true;
+	const Bool sharedIsCrusher = obj ? obj->getCrusherLevel() > 0 : false;
+	const UnsignedInt sharedSurfaces = (UnsignedInt)locomotorSet.getValidSurfaces();
+	const PathfindLayerEnum sharedStartLayer = obj ? obj->getLayer() : TheTerrainLogic->getLayerForDestination(from);
+	const PathfindLayerEnum sharedGoalLayer = TheTerrainLogic->getLayerForDestination(rawTo);
+
+	if (obj)
+		getRadiusAndCenter(obj, sharedRadius, sharedCenterInCell);
+
+	sharedStartBlock = sharedMacroRouteBlockForPosition(from);
+	sharedGoalBlock = sharedMacroRouteBlockForPosition(rawTo);
+	const Int sharedBlockDistance =
+		IABS(sharedStartBlock.x - sharedGoalBlock.x) + IABS(sharedStartBlock.y - sharedGoalBlock.y);
+
+	sharedMacroRouteEligible =
+		obj != nullptr &&
+		m_ignoreObstacleID == INVALID_ID &&
+		sharedStartLayer == LAYER_GROUND &&
+		sharedGoalLayer == LAYER_GROUND &&
+		sharedBlockDistance >= SHARED_MACRO_ROUTE_MIN_BLOCK_DISTANCE;
+
 	m_zoneManager.clearPassableFlags();
-	Path *hPat = findHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
-	if (hPat) {
-		deleteInstance(hPat);
-	}	else {
-		m_zoneManager.setAllPassable();
+
+	if (sharedMacroRouteEligible)
+	{
+		SharedMacroRouteCacheEntry *cachedRoute = findSharedMacroRoute(
+			sharedStartBlock, sharedGoalBlock, sharedSurfaces, sharedRadius, sharedCenterInCell,
+			sharedIsCrusher, isHuman, sharedStartLayer, sharedGoalLayer);
+
+		if (cachedRoute)
+		{
+			ICoord2D blockExtent;
+			m_zoneManager.getExtent(blockExtent);
+			for (std::vector<ICoord2D>::const_iterator it = cachedRoute->blocks.begin();
+				it != cachedRoute->blocks.end(); ++it)
+			{
+				if (it->x < 0 || it->y < 0 || it->x >= blockExtent.x || it->y >= blockExtent.y)
+					continue;
+
+				m_zoneManager.setPassable(
+					it->x * PathfindZoneManager::ZONE_BLOCK_SIZE,
+					it->y * PathfindZoneManager::ZONE_BLOCK_SIZE,
+					true);
+			}
+			reusedSharedMacroRoute = true;
+#if defined(RTS_PROFILE_TRACY)
+			++s_sharedMacroRouteHits;
+			s_sharedMacroRouteBlocksReused += (Int)cachedRoute->blocks.size();
+#endif
+		}
+		else
+		{
+#if defined(RTS_PROFILE_TRACY)
+			++s_sharedMacroRouteMisses;
+#endif
+		}
+	}
+
+	if (!reusedSharedMacroRoute)
+	{
+		Path *hPat = findHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
+		if (hPat) {
+			deleteInstance(hPat);
+		}	else {
+			m_zoneManager.setAllPassable();
+		}
 	}
 
 	Path *pat = internalFindPath(obj, locomotorSet, from, rawTo);
+
+	// A shared corridor is an optimization only. If it proves too narrow because
+	// battlefield geometry changed or this unit differs locally, retry once using
+	// the normal hierarchical prepass before reporting failure.
+	if (pat == nullptr && reusedSharedMacroRoute)
+	{
+#if defined(RTS_PROFILE_TRACY)
+		++s_sharedMacroRouteRejected;
+#endif
+		m_zoneManager.clearPassableFlags();
+		Path *hPat = findHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
+		if (hPat) {
+			deleteInstance(hPat);
+		}	else {
+			m_zoneManager.setAllPassable();
+		}
+		pat = internalFindPath(obj, locomotorSet, from, rawTo);
+	}
+
+	if (pat != nullptr && sharedMacroRouteEligible)
+	{
+		storeSharedMacroRoute(sharedStartBlock, sharedGoalBlock, sharedSurfaces,
+			sharedRadius, sharedCenterInCell, sharedIsCrusher, isHuman,
+			sharedStartLayer, sharedGoalLayer, pat);
+	}
 #if defined(RTS_PROFILE_TRACY)
 	endPathfindProfileStage(PATHFIND_PROFILE_FIND_PATH, m_cumulativeCellsAllocated - profileCellsBefore, pat != nullptr);
 #endif
