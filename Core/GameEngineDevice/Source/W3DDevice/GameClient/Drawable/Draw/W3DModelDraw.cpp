@@ -2495,11 +2495,12 @@ void W3DModelDraw::handleClientTurretPositioning()
 */
 void W3DModelDraw::handleClientRecoil()
 {
-	const W3DModelDrawModuleData* d = getW3DModelDrawModuleData();
-	if (!(m_curState->m_validStuff & ModelConditionInfo::BARRELS_VALID))
+	if (!m_curState || !(m_curState->m_validStuff & ModelConditionInfo::BARRELS_VALID))
 	{
 		return;
 	}
+
+	const W3DModelDrawModuleData* d = getW3DModelDrawModuleData();
 
 	// do recoil, if any
 	for (int wslot = 0; wslot < WEAPONSLOT_COUNT; ++wslot)
@@ -3032,8 +3033,10 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 		//BONEPOS_DUMPREAL(draw->getScale());
 
 		newState->validateStuff(m_renderObject, draw->getScale(), getW3DModelDrawModuleData()->m_extraPublicBones);
-		// ensure that any muzzle flashes from the *new* state, start out hidden...
-//		hideAllMuzzleFlashes(newState, m_renderObject);//moved to above
+		// ZH Overhaul: this is a newly-created render object, so the pre-swap hide call above
+		// could only affect the old object (or nullptr). Hide the new state's muzzle-flash
+		// subobjects here after its barrel bones have been validated.
+		hideAllMuzzleFlashes(newState, m_renderObject);
 		rebuildWeaponRecoilInfo(newState);
 		doHideShowSubObjs(&newState->m_hideShowVec);
 
