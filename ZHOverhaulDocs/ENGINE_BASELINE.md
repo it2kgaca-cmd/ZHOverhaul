@@ -109,3 +109,17 @@ On the next Twilight Flame stress run:
 4. units should be more likely to complete ravine routes instead of piling against cliffs.
 
 If long valid paths remain expensive after they stop falsely failing, the next optimization target is the open-list implementation rather than suppressing retries.
+
+
+## Single-player performance policy
+
+This fork is intended for one local player and does not target multiplayer or retail replay compatibility.
+
+### Disabled during live games
+- Replay recording / `LastReplay.rep` creation.
+- Per-frame command-list serialization and replay-file flushing.
+- Periodic live-game synchronization CRC recalculation.
+
+Replay playback code remains available for diagnostics, and CRC generation remains active during replay playback only.
+
+This removes work that exists primarily for deterministic multiplayer and replay reproduction, neither of which is a requirement for this fork.
