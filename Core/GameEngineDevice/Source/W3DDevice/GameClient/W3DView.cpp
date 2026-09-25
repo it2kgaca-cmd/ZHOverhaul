@@ -103,6 +103,11 @@ static const Real DRAWABLE_OVERSCAN = 75.0f;  ///< 3D world coords of how much t
 
 constexpr const Real NearZ = MAP_XY_FACTOR; ///< Set the near to MAP_XY_FACTOR. Improves z buffer resolution.
 
+// ZH Overhaul @qol
+// Give user-controlled play a less claustrophobic camera while preserving the existing camera math.
+constexpr const Real ZH_OVERHAUL_DEFAULT_CAMERA_HEIGHT = 450.0f;
+constexpr const Real ZH_OVERHAUL_MAX_CAMERA_HEIGHT = 600.0f;
+
 //=================================================================================================
 inline Real minf(Real a, Real b) { if (a < b) return a; else return b; }
 inline Real maxf(Real a, Real b) { if (a > b) return a; else return b; }
@@ -2236,7 +2241,8 @@ void W3DView::setDefaultView(Real pitch, Real angle, Real maxHeight)
 	// MDC - we no longer want to rotate maps (design made all of them right to begin with)
 	//	m_defaultAngle = angle * M_PI/180.0f;
 	setDefaultPitch(pitch);
-	m_maxHeightAboveGround = TheGlobalData->m_maxCameraHeight*maxHeight;
+	const Real mapMaxHeight = TheGlobalData->m_maxCameraHeight * maxHeight;
+	m_maxHeightAboveGround = max(mapMaxHeight, ZH_OVERHAUL_MAX_CAMERA_HEIGHT);
 	if (m_minHeightAboveGround > m_maxHeightAboveGround)
 		m_maxHeightAboveGround = m_minHeightAboveGround;
 }
@@ -2274,9 +2280,9 @@ void W3DView::setZoom(Real z)
 //-------------------------------------------------------------------------------------------------
 void W3DView::setZoomToDefault()
 {
-	// default zoom has to be max, otherwise players will just zoom to max always
-	m_heightAboveGround = m_maxHeightAboveGround;
-	m_zoom = getMaxZoom(m_pos.x, m_pos.y);
+	// ZH Overhaul: start farther out than retail without forcing the absolute maximum zoom.
+	m_heightAboveGround = clamp(m_minHeightAboveGround, ZH_OVERHAUL_DEFAULT_CAMERA_HEIGHT, m_maxHeightAboveGround);
+	m_zoom = getDesiredZoom(m_pos.x, m_pos.y);
 
 	stopDoingScriptedCamera();
 	m_CameraArrivedAtWaypointOnPathFlag = false;
