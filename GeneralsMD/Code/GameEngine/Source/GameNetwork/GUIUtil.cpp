@@ -346,6 +346,43 @@ void PopulateStartingCashComboBox(GameWindow *comboBox, GameInfo *myGame)
     }
   }
 
+  // ZH Overhaul @testing
+  // Extra high-cash presets for stress-testing skirmish AI and large-unit-count matches.
+  static const UnsignedInt ZHOverhaulStartingCashChoices[] =
+  {
+    100000,
+    250000,
+    500000,
+    1000000
+  };
+
+  for (UnsignedInt amount : ZHOverhaulStartingCashChoices)
+  {
+    Bool alreadyPresent = false;
+    for (MultiplayerStartingMoneyList::const_iterator it = startingCashMap.begin(); it != startingCashMap.end(); ++it)
+    {
+      if (it->countMoney() == amount)
+      {
+        alreadyPresent = true;
+        break;
+      }
+    }
+
+    if (!alreadyPresent)
+    {
+      Money extraCash;
+      extraCash.setStartingCash(amount);
+      Int newIndex = GadgetComboBoxAddEntry(comboBox, formatMoneyForStartingCashComboBox(extraCash),
+                                            comboBox->winGetEnabled() ? comboBox->winGetEnabledTextColor() : comboBox->winGetDisabledTextColor());
+      GadgetComboBoxSetItemData(comboBox, newIndex, (void *)amount);
+
+      if (myGame->getStartingCash().countMoney() == amount)
+      {
+        currentSelectionIndex = newIndex;
+      }
+    }
+  }
+
   if ( currentSelectionIndex == -1 )
   {
     DEBUG_CRASH( ("Current selection for starting cash not found in list") );
