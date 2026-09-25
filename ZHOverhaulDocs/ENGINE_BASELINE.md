@@ -187,3 +187,34 @@ Do not export a raw events CSV unless specifically needed.
 When a model state creates a new render object, the prior code hid muzzle flashes before the new render object existed, then skipped the post-creation hide call. The new object could therefore start with muzzle-flash subobjects visible.
 
 The recreated render object now hides validated muzzle-flash subobjects immediately after `validateStuff()`. Also includes the upstream null guard in `handleClientRecoil()`.
+
+
+## 0.0.6 - Shared macro-route corridors
+
+This step reduces repeated long-distance work from large move orders without cloning one unit's exact path onto another.
+
+### Behavior
+- After a successful long ground path, cache the coarse pathfinding blocks crossed by that route.
+- Cache keys include:
+  - start and goal pathfinding blocks;
+  - locomotor surface mask;
+  - unit path radius / centering class;
+  - crusher status;
+  - human-vs-AI routing mode;
+  - start and destination layers.
+- A matching unit may reuse the cached block corridor and still runs its own local A* inside that corridor.
+- Only long ground-to-ground moves with no ignored obstacle are eligible.
+- Cache entries are short lived (12 logic frames) and capped at 64 entries.
+- If a reused corridor fails, the pathfinder immediately retries once with the normal hierarchical prepass. Shared routing is therefore an optimization, not a new failure mode.
+
+### Tracy aggregates
+- `PathfindSharedRouteHits`
+- `PathfindSharedRouteMisses`
+- `PathfindSharedRouteStores`
+- `PathfindSharedRouteRejected`
+- `PathfindSharedRouteBlocksReused`
+
+This is intentionally a conservative first shared-routing step. It shares the strategic corridor while retaining per-unit collision, radius, endpoint, and local path checks.
+
+### Included visual fix
+The Crusader muzzle-flash follow-up is included in the same test build. Muzzle-flash visibility now toggles every render subobject attached directly to the configured muzzle-flash bone instead of only the first matching subobject.
