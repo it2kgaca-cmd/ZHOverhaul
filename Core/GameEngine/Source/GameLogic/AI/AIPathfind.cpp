@@ -9677,16 +9677,68 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 	}
 
 	Bool gotHierarchicalPath = false;
+	Bool reusedClosestSharedMacroRoute = false;
+	Bool sharedClosestRouteEligible = false;
+	const UnsignedInt sharedClosestSurfaces = (UnsignedInt)locomotorSet.getValidSurfaces();
+	const PathfindLayerEnum sharedClosestStartLayer = obj->getLayer();
+	const PathfindLayerEnum sharedClosestGoalLayer = destinationLayer;
+	const ICoord2D sharedClosestStartBlock = sharedMacroRouteBlockForPosition(from);
+	const ICoord2D sharedClosestGoalBlock = sharedMacroRouteBlockForPosition(rawTo);
+	const Int sharedClosestBlockDistance =
+		sharedMacroRouteBlockDistance(sharedClosestStartBlock, sharedClosestGoalBlock);
+
+	sharedClosestRouteEligible =
+		!s_disableSharedClosestRouteRetry &&
+		!m_isTunneling &&
+		m_ignoreObstacleID == INVALID_ID &&
+		sharedClosestStartLayer == LAYER_GROUND &&
+		sharedClosestGoalLayer == LAYER_GROUND &&
+		sharedClosestBlockDistance >= SHARED_MACRO_ROUTE_MIN_BLOCK_DISTANCE;
+
 	if (m_isTunneling) {
 		m_zoneManager.setAllPassable(); // can't optimize.
 	}	else {
 		m_zoneManager.clearPassableFlags();
-		Path *hPat = findClosestHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
-		if (hPat) {
-			deleteInstance(hPat);
-			gotHierarchicalPath = true;
-		}	else {
-			m_zoneManager.setAllPassable();
+
+		if (sharedClosestRouteEligible)
+		{
+			Bool neighborStartHit = false;
+			SharedMacroRouteCacheEntry *cachedRoute = findSharedMacroRoute(
+				sharedClosestStartBlock, sharedClosestGoalBlock, sharedClosestSurfaces,
+				isCrusher, isHuman, sharedClosestStartLayer, sharedClosestGoalLayer,
+				true, neighborStartHit);
+
+			if (cachedRoute)
+			{
+				const Int blocksReused = applySharedMacroRoute(
+					m_zoneManager, *cachedRoute, sharedClosestStartBlock, sharedClosestGoalBlock);
+				reusedClosestSharedMacroRoute = true;
+				gotHierarchicalPath = true;
+#if defined(RTS_PROFILE_TRACY)
+				++s_sharedMacroRouteHits;
+				++s_sharedMacroRouteClosestHits;
+				s_sharedMacroRouteBlocksReused += blocksReused;
+				if (neighborStartHit)
+					++s_sharedMacroRouteNeighborStartHits;
+#endif
+			}
+			else
+			{
+#if defined(RTS_PROFILE_TRACY)
+				++s_sharedMacroRouteMisses;
+#endif
+			}
+		}
+
+		if (!reusedClosestSharedMacroRoute)
+		{
+			Path *hPat = findClosestHierarchicalPath(isHuman, locomotorSet, from, rawTo, isCrusher);
+			if (hPat) {
+				deleteInstance(hPat);
+				gotHierarchicalPath = true;
+			}	else {
+				m_zoneManager.setAllPassable();
+			}
 		}
 	}
 	const Bool startedStuck = m_isTunneling;
@@ -9788,6 +9840,12 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 				parentCell->releaseInfo();
 				goalCell->releaseInfo();
 			}
+			if (sharedClosestRouteEligible)
+			{
+				storeSharedMacroRoute(sharedClosestStartBlock, sharedClosestGoalBlock,
+					sharedClosestSurfaces, isCrusher, isHuman, sharedClosestStartLayer,
+					sharedClosestGoalLayer, true, path);
+			}
 #if defined(RTS_PROFILE_TRACY)
 			endPathfindProfileStage(PATHFIND_PROFILE_CLOSEST_PATH, m_cumulativeCellsAllocated - profileCellsBefore, true);
 #endif
@@ -9882,6 +9940,12 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 			parentCell->releaseInfo();
 			goalCell->releaseInfo();
 		}
+		if (sharedClosestRouteEligible)
+		{
+			storeSharedMacroRoute(sharedClosestStartBlock, sharedClosestGoalBlock,
+				sharedClosestSurfaces, isCrusher, isHuman, sharedClosestStartLayer,
+				sharedClosestGoalLayer, true, path);
+		}
 #if defined(RTS_PROFILE_TRACY)
 		endPathfindProfileStage(PATHFIND_PROFILE_CLOSEST_PATH, m_cumulativeCellsAllocated - profileCellsBefore, true);
 #endif
@@ -9919,6 +9983,17 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 #if defined(RTS_PROFILE_TRACY)
 	endPathfindProfileStage(PATHFIND_PROFILE_CLOSEST_PATH, m_cumulativeCellsAllocated - profileCellsBefore, false);
 #endif
+
+	if (reusedClosestSharedMacroRoute)
+	{
+#if defined(RTS_PROFILE_TRACY)
+		++s_sharedMacroRouteRejected;
+		++s_sharedMacroRouteClosestRejected;
+#endif
+		LatchRestore<Bool> disableSharedRetry(s_disableSharedClosestRouteRetry, true);
+		return findClosestPath(obj, locomotorSet, from, rawTo, blocked, pathCostMultiplier, moveAllies);
+	}
+
 	return nullptr;
 }
 
