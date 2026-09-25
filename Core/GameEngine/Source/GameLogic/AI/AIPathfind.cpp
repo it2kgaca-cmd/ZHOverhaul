@@ -109,6 +109,182 @@ struct TCheckMovementInfo
 inline Int IABS(Int x) {	if (x>=0) return x; return -x;};
 
 //-----------------------------------------------------------------------------------
+// ZH Overhaul 0.0.6 - short-lived shared macro-route corridor cache.
+//
+// We do NOT share a unit's exact path. A successful long path contributes only the
+// sequence of coarse pathfinding blocks it crossed. Other units of the same movement
+// class, starting and ending in the same coarse blocks, may reuse that corridor and
+// still run their own local A* inside it. If reuse fails, the normal hierarchical
+// prepass is immediately retried, so the cache cannot permanently make a route invalid.
+struct SharedMacroRouteCacheEntry
+{
+	Int startBlockX;
+	Int startBlockY;
+	Int goalBlockX;
+	Int goalBlockY;
+	UnsignedInt surfaces;
+	Int radius;
+	Bool centerInCell;
+	Bool isCrusher;
+	Bool isHuman;
+	PathfindLayerEnum startLayer;
+	PathfindLayerEnum goalLayer;
+	UnsignedInt createdFrame;
+	UnsignedInt lastUsedFrame;
+	std::vector<ICoord2D> blocks;
+};
+
+constexpr const UnsignedInt SHARED_MACRO_ROUTE_TTL_FRAMES = 12;
+constexpr const Int SHARED_MACRO_ROUTE_CACHE_SIZE = 64;
+constexpr const Int SHARED_MACRO_ROUTE_MIN_BLOCK_DISTANCE = 4;
+
+static std::vector<SharedMacroRouteCacheEntry> s_sharedMacroRouteCache;
+
+#if defined(RTS_PROFILE_TRACY)
+static Int s_sharedMacroRouteHits = 0;
+static Int s_sharedMacroRouteMisses = 0;
+static Int s_sharedMacroRouteStores = 0;
+static Int s_sharedMacroRouteRejected = 0;
+static Int s_sharedMacroRouteBlocksReused = 0;
+#endif
+
+static ICoord2D sharedMacroRouteBlockForPosition(const Coord3D *pos)
+{
+	ICoord2D result;
+	const Real blockWorldSize = PATHFIND_CELL_SIZE_F * PathfindZoneManager::ZONE_BLOCK_SIZE;
+	result.x = REAL_TO_INT_FLOOR(pos->x / blockWorldSize);
+	result.y = REAL_TO_INT_FLOOR(pos->y / blockWorldSize);
+	return result;
+}
+
+static Bool sharedMacroRouteKeyMatches(const SharedMacroRouteCacheEntry &entry,
+	const ICoord2D &startBlock, const ICoord2D &goalBlock, UnsignedInt surfaces,
+	Int radius, Bool centerInCell, Bool isCrusher, Bool isHuman,
+	PathfindLayerEnum startLayer, PathfindLayerEnum goalLayer)
+{
+	return entry.startBlockX == startBlock.x &&
+		entry.startBlockY == startBlock.y &&
+		entry.goalBlockX == goalBlock.x &&
+		entry.goalBlockY == goalBlock.y &&
+		entry.surfaces == surfaces &&
+		entry.radius == radius &&
+		entry.centerInCell == centerInCell &&
+		entry.isCrusher == isCrusher &&
+		entry.isHuman == isHuman &&
+		entry.startLayer == startLayer &&
+		entry.goalLayer == goalLayer;
+}
+
+static SharedMacroRouteCacheEntry *findSharedMacroRoute(const ICoord2D &startBlock,
+	const ICoord2D &goalBlock, UnsignedInt surfaces, Int radius, Bool centerInCell,
+	Bool isCrusher, Bool isHuman, PathfindLayerEnum startLayer, PathfindLayerEnum goalLayer)
+{
+	const UnsignedInt frame = TheGameLogic ? TheGameLogic->getFrame() : 0;
+	for (std::vector<SharedMacroRouteCacheEntry>::iterator it = s_sharedMacroRouteCache.begin();
+		it != s_sharedMacroRouteCache.end(); ++it)
+	{
+		if (frame - it->createdFrame > SHARED_MACRO_ROUTE_TTL_FRAMES)
+			continue;
+
+		if (sharedMacroRouteKeyMatches(*it, startBlock, goalBlock, surfaces, radius,
+			centerInCell, isCrusher, isHuman, startLayer, goalLayer))
+		{
+			it->lastUsedFrame = frame;
+			return &(*it);
+		}
+	}
+	return nullptr;
+}
+
+static void appendSharedMacroRouteBlock(std::vector<ICoord2D> &blocks, Int blockX, Int blockY)
+{
+	if (!blocks.empty())
+	{
+		const ICoord2D &last = blocks.back();
+		if (last.x == blockX && last.y == blockY)
+			return;
+	}
+
+	ICoord2D block;
+	block.x = blockX;
+	block.y = blockY;
+	blocks.push_back(block);
+}
+
+static void storeSharedMacroRoute(const ICoord2D &startBlock, const ICoord2D &goalBlock,
+	UnsignedInt surfaces, Int radius, Bool centerInCell, Bool isCrusher, Bool isHuman,
+	PathfindLayerEnum startLayer, PathfindLayerEnum goalLayer, const Path *path)
+{
+	if (!path)
+		return;
+
+	SharedMacroRouteCacheEntry entry;
+	entry.startBlockX = startBlock.x;
+	entry.startBlockY = startBlock.y;
+	entry.goalBlockX = goalBlock.x;
+	entry.goalBlockY = goalBlock.y;
+	entry.surfaces = surfaces;
+	entry.radius = radius;
+	entry.centerInCell = centerInCell;
+	entry.isCrusher = isCrusher;
+	entry.isHuman = isHuman;
+	entry.startLayer = startLayer;
+	entry.goalLayer = goalLayer;
+	entry.createdFrame = TheGameLogic ? TheGameLogic->getFrame() : 0;
+	entry.lastUsedFrame = entry.createdFrame;
+
+	for (const PathNode *node = path->getFirstNode(); node; node = node->getNext())
+	{
+		const Coord3D *pos = node->getPosition();
+		const ICoord2D block = sharedMacroRouteBlockForPosition(pos);
+		appendSharedMacroRouteBlock(entry.blocks, block.x, block.y);
+	}
+
+	if (entry.blocks.empty())
+		return;
+
+	// Refresh an existing key instead of growing duplicates.
+	for (std::vector<SharedMacroRouteCacheEntry>::iterator it = s_sharedMacroRouteCache.begin();
+		it != s_sharedMacroRouteCache.end(); ++it)
+	{
+		if (sharedMacroRouteKeyMatches(*it, startBlock, goalBlock, surfaces, radius,
+			centerInCell, isCrusher, isHuman, startLayer, goalLayer))
+		{
+			*it = entry;
+#if defined(RTS_PROFILE_TRACY)
+			++s_sharedMacroRouteStores;
+#endif
+			return;
+		}
+	}
+
+	if ((Int)s_sharedMacroRouteCache.size() >= SHARED_MACRO_ROUTE_CACHE_SIZE)
+	{
+		// Evict the least-recently-used entry. The cache is intentionally tiny, so
+		// a linear scan here is negligible compared with even one path search.
+		Int oldestIndex = 0;
+		UnsignedInt oldestFrame = s_sharedMacroRouteCache[0].lastUsedFrame;
+		for (Int i = 1; i < (Int)s_sharedMacroRouteCache.size(); ++i)
+		{
+			if (s_sharedMacroRouteCache[i].lastUsedFrame < oldestFrame)
+			{
+				oldestFrame = s_sharedMacroRouteCache[i].lastUsedFrame;
+				oldestIndex = i;
+			}
+		}
+		s_sharedMacroRouteCache[oldestIndex] = entry;
+	}
+	else
+	{
+		s_sharedMacroRouteCache.push_back(entry);
+	}
+
+#if defined(RTS_PROFILE_TRACY)
+	++s_sharedMacroRouteStores;
+#endif
+}
+
+//-----------------------------------------------------------------------------------
 static Int frameToShowObstacles;
 
 constexpr const UnsignedInt ZONE_UPDATE_FREQUENCY = 300;
@@ -6439,6 +6615,11 @@ void Pathfinder::processPathfindQueue()
 	s_pathfindQueueProfileStats.queueHighWater = queueDepthBefore;
 	s_pathfindStageFrameProfileStats = {};
 	s_pathfindOpenHeapFrameProfileStats = {};
+	s_sharedMacroRouteHits = 0;
+	s_sharedMacroRouteMisses = 0;
+	s_sharedMacroRouteStores = 0;
+	s_sharedMacroRouteRejected = 0;
+	s_sharedMacroRouteBlocksReused = 0;
 	const Int cellInfoAllocationFailures = s_pathfindCellInfoAllocationFailures;
 	s_pathfindCellInfoAllocationFailures = 0;
 #endif
@@ -6610,6 +6791,11 @@ void Pathfinder::processPathfindQueue()
 	PROFILER_PLOT("PathfindOpenHeapSiftSteps", (double)s_pathfindOpenHeapFrameProfileStats.siftSteps);
 	PROFILER_PLOT("PathfindOpenHeapMaxSiftSteps", (double)s_pathfindOpenHeapFrameProfileStats.maxSiftSteps);
 	PROFILER_PLOT("PathfindOpenHeapMaxSize", (double)s_pathfindOpenHeapFrameProfileStats.maxSize);
+	PROFILER_PLOT("PathfindSharedRouteHits", (double)s_sharedMacroRouteHits);
+	PROFILER_PLOT("PathfindSharedRouteMisses", (double)s_sharedMacroRouteMisses);
+	PROFILER_PLOT("PathfindSharedRouteStores", (double)s_sharedMacroRouteStores);
+	PROFILER_PLOT("PathfindSharedRouteRejected", (double)s_sharedMacroRouteRejected);
+	PROFILER_PLOT("PathfindSharedRouteBlocksReused", (double)s_sharedMacroRouteBlocksReused);
 #endif
 #ifdef DEBUG_QPF
 	if (pathsFound>0) {
