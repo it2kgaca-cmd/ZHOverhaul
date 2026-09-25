@@ -9695,7 +9695,6 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 	const Bool sharedClosestHierarchicalCrusher = false;
 
 	sharedClosestRouteEligible =
-		!s_disableSharedClosestRouteRetry &&
 		!m_isTunneling &&
 		m_ignoreObstacleID == INVALID_ID &&
 		sharedClosestStartLayer == LAYER_GROUND &&
@@ -9707,7 +9706,7 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 	}	else {
 		m_zoneManager.clearPassableFlags();
 
-		if (sharedClosestRouteEligible)
+		if (sharedClosestRouteEligible && !s_disableSharedClosestRouteRetry)
 		{
 			Bool neighborStartHit = false;
 			SharedMacroRouteCacheEntry *cachedRoute = findSharedMacroRoute(
