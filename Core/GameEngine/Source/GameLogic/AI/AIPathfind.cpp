@@ -230,6 +230,12 @@ static void recordOpenHeapRemoveProfile(Int siftSteps, Int heapSize)
 		s_pathfindOpenHeapFrameProfileStats.maxSize = heapSize;
 }
 
+// Legacy .4 insertion helpers remain compiled for compatibility but are no longer used by the active open set.
+// Keep this as a no-op so they do not emit high-frequency profiling data if referenced accidentally.
+static void recordOpenListInsertProfile(Int, Int, Bool, Bool, Bool)
+{
+}
+
 static void beginQueuedPathfindRequestProfile()
 {
 	s_pathfindRequestProfileStats = {};
@@ -2315,6 +2321,7 @@ Int PathfindCell::releaseOpenList( PathfindCellList &list )
 		curInfo->m_nextOpen = nullptr;
 		curInfo->m_prevOpen = nullptr;
 		curInfo->m_open = FALSE;
+		curInfo->m_heapIndex = -1;
 		cur->releaseInfo();
 	}
 	return count;
