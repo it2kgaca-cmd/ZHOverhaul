@@ -650,7 +650,7 @@ public:
 
 	// this is intended for use ONLY by AIFollowPathState.
 	void friend_setCurrentGoalPathIndex( Int index ) { m_nextGoalPathIndex = index; }
-#ifdef DEBUG_LOGGING
+#if defined(DEBUG_LOGGING) || defined(RTS_PROFILE_TRACY)
 	inline const Coord3D *friend_getRequestedDestination() const { return &m_requestedDestination; }
 	inline const Coord3D *friend_getRequestedDestination2() const { return &m_requestedDestination2; }
 #endif
