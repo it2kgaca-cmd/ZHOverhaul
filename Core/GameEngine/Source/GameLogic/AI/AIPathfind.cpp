@@ -7306,20 +7306,16 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 	Bool sharedMacroRouteEligible = false;
 	ICoord2D sharedStartBlock = { 0, 0 };
 	ICoord2D sharedGoalBlock = { 0, 0 };
-	Int sharedRadius = 0;
-	Bool sharedCenterInCell = true;
-	const Bool sharedIsCrusher = obj ? obj->getCrusherLevel() > 0 : false;
 	const UnsignedInt sharedSurfaces = (UnsignedInt)locomotorSet.getValidSurfaces();
 	const PathfindLayerEnum sharedStartLayer = obj ? obj->getLayer() : TheTerrainLogic->getLayerForDestination(from);
 	const PathfindLayerEnum sharedGoalLayer = TheTerrainLogic->getLayerForDestination(rawTo);
-
-	if (obj)
-		getRadiusAndCenter(obj, sharedRadius, sharedCenterInCell);
+	// findHierarchicalPath() currently uses crusher=false, so crusher/radius/centering
+	// are intentionally not part of an exact-path macro-route key.
+	const Bool sharedHierarchicalCrusher = false;
 
 	sharedStartBlock = sharedMacroRouteBlockForPosition(from);
 	sharedGoalBlock = sharedMacroRouteBlockForPosition(rawTo);
-	const Int sharedBlockDistance =
-		IABS(sharedStartBlock.x - sharedGoalBlock.x) + IABS(sharedStartBlock.y - sharedGoalBlock.y);
+	const Int sharedBlockDistance = sharedMacroRouteBlockDistance(sharedStartBlock, sharedGoalBlock);
 
 	sharedMacroRouteEligible =
 		obj != nullptr &&
@@ -7332,29 +7328,21 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 
 	if (sharedMacroRouteEligible)
 	{
+		Bool neighborStartHit = false;
 		SharedMacroRouteCacheEntry *cachedRoute = findSharedMacroRoute(
-			sharedStartBlock, sharedGoalBlock, sharedSurfaces, sharedRadius, sharedCenterInCell,
-			sharedIsCrusher, isHuman, sharedStartLayer, sharedGoalLayer);
+			sharedStartBlock, sharedGoalBlock, sharedSurfaces, sharedHierarchicalCrusher,
+			isHuman, sharedStartLayer, sharedGoalLayer, false, neighborStartHit);
 
 		if (cachedRoute)
 		{
-			ICoord2D blockExtent;
-			m_zoneManager.getExtent(blockExtent);
-			for (std::vector<ICoord2D>::const_iterator it = cachedRoute->blocks.begin();
-				it != cachedRoute->blocks.end(); ++it)
-			{
-				if (it->x < 0 || it->y < 0 || it->x >= blockExtent.x || it->y >= blockExtent.y)
-					continue;
-
-				m_zoneManager.setPassable(
-					it->x * PathfindZoneManager::ZONE_BLOCK_SIZE,
-					it->y * PathfindZoneManager::ZONE_BLOCK_SIZE,
-					true);
-			}
+			const Int blocksReused = applySharedMacroRoute(
+				m_zoneManager, *cachedRoute, sharedStartBlock, sharedGoalBlock);
 			reusedSharedMacroRoute = true;
 #if defined(RTS_PROFILE_TRACY)
 			++s_sharedMacroRouteHits;
-			s_sharedMacroRouteBlocksReused += (Int)cachedRoute->blocks.size();
+			s_sharedMacroRouteBlocksReused += blocksReused;
+			if (neighborStartHit)
+				++s_sharedMacroRouteNeighborStartHits;
 #endif
 		}
 		else
@@ -7398,8 +7386,7 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 	if (pat != nullptr && sharedMacroRouteEligible)
 	{
 		storeSharedMacroRoute(sharedStartBlock, sharedGoalBlock, sharedSurfaces,
-			sharedRadius, sharedCenterInCell, sharedIsCrusher, isHuman,
-			sharedStartLayer, sharedGoalLayer, pat);
+			sharedHierarchicalCrusher, isHuman, sharedStartLayer, sharedGoalLayer, false, pat);
 	}
 #if defined(RTS_PROFILE_TRACY)
 	endPathfindProfileStage(PATHFIND_PROFILE_FIND_PATH, m_cumulativeCellsAllocated - profileCellsBefore, pat != nullptr);
