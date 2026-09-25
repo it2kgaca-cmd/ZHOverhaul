@@ -28,6 +28,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include "Common/GameType.h"
 #include "Common/GameMemory.h"
 #include "Common/Snapshot.h"
@@ -200,6 +202,7 @@ enum {MAX_WALL_PIECES = 128};
 class PathfindCellInfo
 {
 	friend class PathfindCell;
+	friend class PathfindCellList;
 public:
 #if RETAIL_COMPATIBLE_PATHFINDING
 	static void forceCleanPathFindCellInfos();
@@ -219,6 +222,7 @@ protected:
 
 	PathfindCellInfo *m_pathParent;												///< "parent" cell from pathfinder
 	PathfindCell *m_cell;															///< Cell this info belongs to currently.
+	Int m_heapIndex;																///< index in ZH Overhaul A* open heap, -1 when not queued.
 
 	UnsignedShort m_totalCost, m_costSoFar;	///< cost estimates for A* search
 
@@ -245,45 +249,45 @@ class PathfindCellList
 {
 	friend class PathfindCell;
 
+	struct HeapEntry
+	{
+		HeapEntry() : cell(nullptr), order(0) {}
+		HeapEntry(PathfindCell *newCell, UnsignedInt newOrder) : cell(newCell), order(newOrder) {}
+
+		PathfindCell *cell;
+		UnsignedInt order;
+	};
+
 public:
-	PathfindCellList() : m_head(nullptr), m_tail(nullptr)
-#if defined(RTS_PROFILE_TRACY)
-		, m_profileSize(0)
-#endif
-	{}
+	PathfindCellList() : m_head(nullptr), m_tail(nullptr), m_nextHeapOrder(0) {}
 
 #if RETAIL_COMPATIBLE_PATHFINDING
-	void reset(PathfindCell* newHead = nullptr)
-	{
-		m_head = newHead;
-		m_tail = nullptr;
-#if defined(RTS_PROFILE_TRACY)
-		m_profileSize = newHead ? 1 : 0;
-#endif
-	}
+	void reset(PathfindCell* newHead = nullptr);
 #else
-	void reset()
-	{
-		m_head = nullptr;
-		m_tail = nullptr;
-#if defined(RTS_PROFILE_TRACY)
-		m_profileSize = 0;
-#endif
-	}
+	void reset();
 #endif
 
-	PathfindCell* getHead() const { return m_head; }
+	// For open lists, getHead() returns the minimum-cost heap entry.
+	// Closed lists do not use the heap, so they continue to return the linked-list head.
+	PathfindCell* getHead() const { return m_heap.empty() ? m_head : m_heap[0].cell; }
+	PathfindCell* getLinkedHead() const { return m_head; }
 
 	Bool empty() const { return m_head == nullptr; }
 
 	Bool canReverseSort(PathfindCell& currentCell) const;
 
 private:
+	Bool heapLess(const HeapEntry &lhs, const HeapEntry &rhs) const;
+	void heapSwap(Int a, Int b);
+	Int heapSiftUp(Int index);
+	Int heapSiftDown(Int index);
+	Int heapInsert(PathfindCell *cell);
+	Int heapRemove(PathfindCell *cell);
+
 	PathfindCell* m_head;
 	PathfindCell* m_tail;
-#if defined(RTS_PROFILE_TRACY)
-	Int m_profileSize;
-#endif
+	std::vector<HeapEntry> m_heap;
+	UnsignedInt m_nextHeapOrder;
 };
 
 /**
@@ -424,6 +428,7 @@ public:
 	PathfindLayerEnum getConnectLayer() const { return (PathfindLayerEnum)m_connectsToLayer; }				///< get the cell layer connect id
 
 private:
+	friend class PathfindCellList;
 	PathfindCellInfo *m_info;
 	ObjectID m_obstacleID;	                  ///< the object ID who overlaps this cell
 	UnsignedInt m_blockedByAlly : 1;          ///< True if this cell is blocked by an allied unit.
