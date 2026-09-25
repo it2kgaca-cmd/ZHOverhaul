@@ -404,9 +404,11 @@ void RecorderClass::reset() {
  * Do the update for this frame.
  */
 void RecorderClass::update() {
-	if (m_mode == RECORDERMODETYPE_RECORD || m_mode == RECORDERMODETYPE_NONE) {
-		updateRecord();
-	} else if (isPlaybackMode()) {
+	// ZH Overhaul @performance
+	// This fork is single-player-first and does not record live games.
+	// Preserve replay playback support, but skip command-list traversal, serialization,
+	// disk writes and per-command flushes during normal play.
+	if (isPlaybackMode()) {
 		updatePlayback();
 	}
 }
