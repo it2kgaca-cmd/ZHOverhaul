@@ -183,54 +183,51 @@ struct PathfindStageFrameProfileStats
 	Int slowFallbackRequests;
 };
 
-struct PathfindOpenListFrameProfileStats
+struct PathfindOpenHeapFrameProfileStats
 {
-	Int insertCalls;
-	Int forwardCalls;
-	Int reverseCalls;
-	Int retailCalls;
-	Int traversalSteps;
-	Int maxTraversal;
-	Int maxSize;
+	Int pushCalls;
 	Int removeCalls;
-	Int fastInsertCalls;
+	Int siftSteps;
+	Int maxSiftSteps;
+	Int maxSize;
 };
 
 static PathfindQueueProfileStats s_pathfindQueueProfileStats = { 0, 0, 0, 0 };
 static PathfindRequestProfileStats s_pathfindRequestProfileStats = {};
 static PathfindStageFrameProfileStats s_pathfindStageFrameProfileStats = {};
-static PathfindOpenListFrameProfileStats s_pathfindOpenListFrameProfileStats = {};
+static PathfindOpenHeapFrameProfileStats s_pathfindOpenHeapFrameProfileStats = {};
 static Int s_pathfindCellInfoAllocationFailures = 0;
 static Int s_pathfindCellInfoInUse = 0;
 static Int s_pathfindCellInfoPeakInUse = 0;
 
-static void recordOpenListInsertProfile(Int traversalSteps, Int listSize, Bool reverseSort, Bool retailSort, Bool fastInsert)
+static void recordOpenHeapPushProfile(Int siftSteps, Int heapSize)
 {
-	++s_pathfindOpenListFrameProfileStats.insertCalls;
-	if (reverseSort)
-		++s_pathfindOpenListFrameProfileStats.reverseCalls;
-	else if (retailSort)
-		++s_pathfindOpenListFrameProfileStats.retailCalls;
-	else
-		++s_pathfindOpenListFrameProfileStats.forwardCalls;
-
-	s_pathfindOpenListFrameProfileStats.traversalSteps += traversalSteps;
-	if (traversalSteps > s_pathfindOpenListFrameProfileStats.maxTraversal)
-		s_pathfindOpenListFrameProfileStats.maxTraversal = traversalSteps;
-	if (listSize > s_pathfindOpenListFrameProfileStats.maxSize)
-		s_pathfindOpenListFrameProfileStats.maxSize = listSize;
-	if (fastInsert)
-		++s_pathfindOpenListFrameProfileStats.fastInsertCalls;
+	++s_pathfindOpenHeapFrameProfileStats.pushCalls;
+	s_pathfindOpenHeapFrameProfileStats.siftSteps += siftSteps;
+	if (siftSteps > s_pathfindOpenHeapFrameProfileStats.maxSiftSteps)
+		s_pathfindOpenHeapFrameProfileStats.maxSiftSteps = siftSteps;
+	if (heapSize > s_pathfindOpenHeapFrameProfileStats.maxSize)
+		s_pathfindOpenHeapFrameProfileStats.maxSize = heapSize;
 
 	if (s_pathfindRequestProfileStats.active)
 	{
 		++s_pathfindRequestProfileStats.openListInsertCalls;
-		s_pathfindRequestProfileStats.openListTraversalSteps += traversalSteps;
-		if (traversalSteps > s_pathfindRequestProfileStats.openListMaxTraversal)
-			s_pathfindRequestProfileStats.openListMaxTraversal = traversalSteps;
-		if (listSize > s_pathfindRequestProfileStats.openListMaxSize)
-			s_pathfindRequestProfileStats.openListMaxSize = listSize;
+		s_pathfindRequestProfileStats.openListTraversalSteps += siftSteps;
+		if (siftSteps > s_pathfindRequestProfileStats.openListMaxTraversal)
+			s_pathfindRequestProfileStats.openListMaxTraversal = siftSteps;
+		if (heapSize > s_pathfindRequestProfileStats.openListMaxSize)
+			s_pathfindRequestProfileStats.openListMaxSize = heapSize;
 	}
+}
+
+static void recordOpenHeapRemoveProfile(Int siftSteps, Int heapSize)
+{
+	++s_pathfindOpenHeapFrameProfileStats.removeCalls;
+	s_pathfindOpenHeapFrameProfileStats.siftSteps += siftSteps;
+	if (siftSteps > s_pathfindOpenHeapFrameProfileStats.maxSiftSteps)
+		s_pathfindOpenHeapFrameProfileStats.maxSiftSteps = siftSteps;
+	if (heapSize > s_pathfindOpenHeapFrameProfileStats.maxSize)
+		s_pathfindOpenHeapFrameProfileStats.maxSize = heapSize;
 }
 
 static void beginQueuedPathfindRequestProfile()
@@ -1371,6 +1368,7 @@ PathfindCellInfo *PathfindCellInfo::getACellInfo(PathfindCell *cell,const ICoord
 		info->m_nextOpen = nullptr;
 		info->m_prevOpen = nullptr;
 		info->m_pathParent = nullptr;
+		info->m_heapIndex = -1;
 		info->m_costSoFar = 0;
 		info->m_totalCost = 0;
 		info->m_open = 0;
@@ -1399,6 +1397,7 @@ void PathfindCellInfo::releaseACellInfo(PathfindCellInfo *theInfo)
 	DEBUG_ASSERTCRASH(!theInfo->m_isFree, ("Shouldn't be free."));
 	//@ todo -fix this assert on usa04.  jba.
 	//DEBUG_ASSERTCRASH(theInfo->m_obstacleID==0, ("Shouldn't be obstacle."));
+	theInfo->m_heapIndex = -1;
 	theInfo->m_pathParent = s_firstFree;
 	s_firstFree = theInfo;
 	s_firstFree->m_isFree = true;
@@ -1410,6 +1409,195 @@ void PathfindCellInfo::releaseACellInfo(PathfindCellInfo *theInfo)
 }
 
 //-----------------------------------------------------------------------------------
+
+#if RETAIL_COMPATIBLE_PATHFINDING
+void PathfindCellList::reset(PathfindCell* newHead)
+{
+	m_head = nullptr;
+	m_tail = nullptr;
+	m_heap.clear();
+	m_nextHeapOrder = 0;
+#if defined(RTS_PROFILE_TRACY)
+	m_profileSize = 0;
+#endif
+
+	if (newHead)
+		heapInsert(newHead);
+}
+#else
+void PathfindCellList::reset()
+{
+	m_head = nullptr;
+	m_tail = nullptr;
+	m_heap.clear();
+	m_nextHeapOrder = 0;
+#if defined(RTS_PROFILE_TRACY)
+	m_profileSize = 0;
+#endif
+}
+#endif
+
+Bool PathfindCellList::heapLess(const HeapEntry &lhs, const HeapEntry &rhs) const
+{
+	const UnsignedInt lhsCost = lhs.cell->getTotalCost();
+	const UnsignedInt rhsCost = rhs.cell->getTotalCost();
+
+	if (lhsCost != rhsCost)
+		return lhsCost < rhsCost;
+
+	// Preserve stable insertion order for equal A* costs.
+	return lhs.order < rhs.order;
+}
+
+void PathfindCellList::heapSwap(Int a, Int b)
+{
+	if (a == b)
+		return;
+
+	HeapEntry tmp = m_heap[a];
+	m_heap[a] = m_heap[b];
+	m_heap[b] = tmp;
+
+	m_heap[a].cell->m_info->m_heapIndex = a;
+	m_heap[b].cell->m_info->m_heapIndex = b;
+}
+
+Int PathfindCellList::heapSiftUp(Int index)
+{
+	Int steps = 0;
+	while (index > 0)
+	{
+		const Int parent = (index - 1) / 2;
+		if (!heapLess(m_heap[index], m_heap[parent]))
+			break;
+
+		heapSwap(index, parent);
+		index = parent;
+		++steps;
+	}
+	return steps;
+}
+
+Int PathfindCellList::heapSiftDown(Int index)
+{
+	Int steps = 0;
+	const Int count = (Int)m_heap.size();
+
+	for (;;)
+	{
+		const Int left = index * 2 + 1;
+		const Int right = left + 1;
+		if (left >= count)
+			break;
+
+		Int best = left;
+		if (right < count && heapLess(m_heap[right], m_heap[left]))
+			best = right;
+
+		if (!heapLess(m_heap[best], m_heap[index]))
+			break;
+
+		heapSwap(index, best);
+		index = best;
+		++steps;
+	}
+	return steps;
+}
+
+Int PathfindCellList::heapInsert(PathfindCell *cell)
+{
+	DEBUG_ASSERTCRASH(cell && cell->m_info, ("Heap insert requires PathfindCellInfo."));
+	DEBUG_ASSERTCRASH(cell->m_info->m_closed == FALSE && cell->m_info->m_open == FALSE, ("Cell already linked."));
+	DEBUG_ASSERTCRASH(cell->m_info->m_heapIndex < 0, ("Cell already has heap index."));
+
+	cell->m_info->m_open = true;
+	cell->m_info->m_closed = false;
+
+	// Keep an unsorted linked list solely for cleanup/debug enumeration.
+	cell->m_info->m_prevOpen = m_tail ? m_tail->m_info : nullptr;
+	cell->m_info->m_nextOpen = nullptr;
+	if (m_tail)
+		m_tail->m_info->m_nextOpen = cell->m_info;
+	else
+		m_head = cell;
+	m_tail = cell;
+
+	if (m_heap.empty() && m_heap.capacity() < 4096)
+		m_heap.reserve(4096);
+
+	const Int index = (Int)m_heap.size();
+	m_heap.push_back(HeapEntry(cell, m_nextHeapOrder++));
+	cell->m_info->m_heapIndex = index;
+
+	const Int siftSteps = heapSiftUp(index);
+#if defined(RTS_PROFILE_TRACY)
+	m_profileSize = (Int)m_heap.size();
+	recordOpenHeapPushProfile(siftSteps, m_profileSize);
+#endif
+	return siftSteps;
+}
+
+Int PathfindCellList::heapRemove(PathfindCell *cell)
+{
+	DEBUG_ASSERTCRASH(cell && cell->m_info, ("Heap remove requires PathfindCellInfo."));
+	DEBUG_ASSERTCRASH(cell->m_info->m_closed == FALSE && cell->m_info->m_open == TRUE, ("Cell is not on open set."));
+
+	Int index = cell->m_info->m_heapIndex;
+	if (index < 0 || index >= (Int)m_heap.size() || m_heap[index].cell != cell)
+	{
+		// This should never happen. Recover by locating the entry rather than corrupting the heap.
+		index = -1;
+		for (Int i = 0; i < (Int)m_heap.size(); ++i)
+		{
+			if (m_heap[i].cell == cell)
+			{
+				index = i;
+				break;
+			}
+		}
+		DEBUG_ASSERTCRASH(index >= 0, ("Open cell missing from heap."));
+		if (index < 0)
+			return 0;
+	}
+
+	// Unlink from the cleanup/debug linked list.
+	if (cell->m_info->m_nextOpen)
+		cell->m_info->m_nextOpen->m_prevOpen = cell->m_info->m_prevOpen;
+	else
+		m_tail = cell->getPrevOpen();
+
+	if (cell->m_info->m_prevOpen)
+		cell->m_info->m_prevOpen->m_nextOpen = cell->m_info->m_nextOpen;
+	else
+		m_head = cell->getNextOpen();
+
+	const Int last = (Int)m_heap.size() - 1;
+	if (index != last)
+		heapSwap(index, last);
+
+	m_heap.pop_back();
+	cell->m_info->m_heapIndex = -1;
+
+	Int siftSteps = 0;
+	if (index < (Int)m_heap.size())
+	{
+		const Int parent = (index - 1) / 2;
+		if (index > 0 && heapLess(m_heap[index], m_heap[parent]))
+			siftSteps += heapSiftUp(index);
+		else
+			siftSteps += heapSiftDown(index);
+	}
+
+	cell->m_info->m_open = false;
+	cell->m_info->m_nextOpen = nullptr;
+	cell->m_info->m_prevOpen = nullptr;
+
+#if defined(RTS_PROFILE_TRACY)
+	m_profileSize = (Int)m_heap.size();
+	recordOpenHeapRemoveProfile(siftSteps, m_profileSize);
+#endif
+	return siftSteps;
+}
 
 Bool PathfindCellList::canReverseSort(PathfindCell& currentCell) const
 {
@@ -1482,15 +1670,9 @@ Bool PathfindCell::startPathfind( PathfindCell *goalCell  )
 	if (goalCell) {
 		m_info->m_totalCost = costToGoal( goalCell );
 	}
-#if RETAIL_COMPATIBLE_PATHFINDING
-	if (!s_useFixedPathfinding) {
-		m_info->m_open = TRUE;
-	} else
-#endif
-	{
-		m_info->m_open = FALSE;
-	}
+	m_info->m_open = FALSE;
 	m_info->m_closed = FALSE;
+	m_info->m_heapIndex = -1;
 	return true;
 }
 
@@ -1608,6 +1790,7 @@ void PathfindCell::releaseInfo()
 
 	DEBUG_ASSERTCRASH(m_info->m_prevOpen==nullptr && m_info->m_nextOpen==nullptr, ("Shouldn't be linked."));
 	DEBUG_ASSERTCRASH(m_info->m_open==0 && m_info->m_closed==0, ("Shouldn't be linked."));
+	DEBUG_ASSERTCRASH(m_info->m_heapIndex < 0, ("Shouldn't still be in open heap."));
 	DEBUG_ASSERTCRASH(m_info->m_goalUnitID==INVALID_ID && m_info->m_posUnitID==INVALID_ID, ("Shouldn't be occupied."));
 	DEBUG_ASSERTCRASH(m_info->m_goalAircraftID==INVALID_ID , ("Shouldn't be occupied by aircraft."));
 	if (m_info->m_prevOpen || m_info->m_nextOpen || m_info->m_open || m_info->m_closed) {
@@ -2089,52 +2272,16 @@ void PathfindCell::reverseInsertionSort(PathfindCellList& list)
 /// put self on "open" list in ascending cost order, return new list
 void PathfindCell::putOnSortedOpenList( PathfindCellList &list )
 {
-#if RETAIL_COMPATIBLE_PATHFINDING
-	if (!s_useFixedPathfinding) {
-		forwardInsertionSortRetailCompatible(list);
-		return;
-	}
-#endif
-
-	// TheSuperHackers @performance Mauller 20/03/2026 Implement reverse insertion sorting.
-	// Long and complex paths often append PathfindCell's, with high total path costs, to the open list.
-	// Appending and reverse traversal allow faster insertion of these cells, reducing pathfinding overhead by 50 - 66%.
-	if (list.canReverseSort(*this)) {
-		reverseInsertionSort(list);
-	}
-	else {
-		forwardInsertionSort(list);
-	}
+	// ZH Overhaul 0.0.5:
+	// Use a binary min-heap for the A* open set. The linked list is retained only for cleanup/debug
+	// enumeration; ordering comes exclusively from the heap.
+	list.heapInsert(this);
 }
 
 /// remove self from "open" list
 void PathfindCell::removeFromOpenList( PathfindCellList &list )
 {
-	PROFILER_SECTION_NAME("PathfindOpenList::remove");
-	DEBUG_ASSERTCRASH(m_info, ("Has to have info."));
-#if defined(RTS_PROFILE_TRACY)
-	++s_pathfindOpenListFrameProfileStats.removeCalls;
-#endif
-	DEBUG_ASSERTCRASH(m_info->m_closed==FALSE && m_info->m_open==TRUE, ("Serious error - Invalid flags. jba"));
-	if (m_info->m_nextOpen)
-		m_info->m_nextOpen->m_prevOpen = m_info->m_prevOpen;
-	else {
-		list.m_tail = getPrevOpen();
-	}
-
-	if (m_info->m_prevOpen)
-		m_info->m_prevOpen->m_nextOpen = m_info->m_nextOpen;
-	else
-		list.m_head = getNextOpen();
-
-	m_info->m_open = false;
-	m_info->m_nextOpen = nullptr;
-	m_info->m_prevOpen = nullptr;
-#if defined(RTS_PROFILE_TRACY)
-	if (list.m_profileSize > 0)
-		--list.m_profileSize;
-#endif
-
+	list.heapRemove(this);
 }
 
 /// remove all cells from "open" list
@@ -5108,7 +5255,7 @@ void Pathfinder::debugShowSearch(  Bool pathFound  )
 		addIcon(nullptr, 0, 0, color);	 // erase.
 	}
 
-	for( s = m_openList.getHead(); s; s=s->getNextOpen() )
+	for( s = m_openList.getLinkedHead(); s; s=s->getNextOpen() )
 	{
 		// create objects to show path - they decay
 		RGBColor color;
@@ -6284,7 +6431,7 @@ void Pathfinder::processPathfindQueue()
 	s_pathfindQueueProfileStats.duplicateRequests = 0;
 	s_pathfindQueueProfileStats.queueHighWater = queueDepthBefore;
 	s_pathfindStageFrameProfileStats = {};
-	s_pathfindOpenListFrameProfileStats = {};
+	s_pathfindOpenHeapFrameProfileStats = {};
 	const Int cellInfoAllocationFailures = s_pathfindCellInfoAllocationFailures;
 	s_pathfindCellInfoAllocationFailures = 0;
 #endif
@@ -6382,7 +6529,7 @@ void Pathfinder::processPathfindQueue()
 					message.format(
 						"SlowPath frame=%u obj=%u unit=%s player=%d type=%d state=%d:%s stuck=%d retry=%d "
 						"cells=%d find=%d/%d/%d internal=%d/%d/%d closest=%d/%d/%d patch=%d/%d/%d other=%d "
-						"open=%d/%d/%d/%d start=(%.1f,%.1f) requested=(%.1f,%.1f) goal=(%.1f,%.1f)",
+						"heap=%d/%d/%d/%d start=(%.1f,%.1f) requested=(%.1f,%.1f) goal=(%.1f,%.1f)",
 						TheGameLogic->getFrame(), obj->getID(), obj->getTemplate()->getName().str(), playerIndex, playerType,
 						(Int)ai->getCurrentStateID(), ai->getCurrentStateName().str(), ai->isBlockedAndStuck() ? 1 : 0, ai->getRetryPath() ? 1 : 0,
 						cellsForRequest,
@@ -6451,15 +6598,11 @@ void Pathfinder::processPathfindQueue()
 	PROFILER_PLOT("PathfindCellInfoAllocationFailures", (double)cellInfoAllocationFailures);
 	PROFILER_PLOT("PathfindCellInfoInUse", (double)s_pathfindCellInfoInUse);
 	PROFILER_PLOT("PathfindCellInfoPeakInUse", (double)s_pathfindCellInfoPeakInUse);
-	PROFILER_PLOT("PathfindOpenListInsertCalls", (double)s_pathfindOpenListFrameProfileStats.insertCalls);
-	PROFILER_PLOT("PathfindOpenListForwardCalls", (double)s_pathfindOpenListFrameProfileStats.forwardCalls);
-	PROFILER_PLOT("PathfindOpenListReverseCalls", (double)s_pathfindOpenListFrameProfileStats.reverseCalls);
-	PROFILER_PLOT("PathfindOpenListRetailCalls", (double)s_pathfindOpenListFrameProfileStats.retailCalls);
-	PROFILER_PLOT("PathfindOpenListTraversalSteps", (double)s_pathfindOpenListFrameProfileStats.traversalSteps);
-	PROFILER_PLOT("PathfindOpenListMaxTraversal", (double)s_pathfindOpenListFrameProfileStats.maxTraversal);
-	PROFILER_PLOT("PathfindOpenListMaxSize", (double)s_pathfindOpenListFrameProfileStats.maxSize);
-	PROFILER_PLOT("PathfindOpenListRemoveCalls", (double)s_pathfindOpenListFrameProfileStats.removeCalls);
-	PROFILER_PLOT("PathfindOpenListFastInsertCalls", (double)s_pathfindOpenListFrameProfileStats.fastInsertCalls);
+	PROFILER_PLOT("PathfindOpenHeapPushCalls", (double)s_pathfindOpenHeapFrameProfileStats.pushCalls);
+	PROFILER_PLOT("PathfindOpenHeapRemoveCalls", (double)s_pathfindOpenHeapFrameProfileStats.removeCalls);
+	PROFILER_PLOT("PathfindOpenHeapSiftSteps", (double)s_pathfindOpenHeapFrameProfileStats.siftSteps);
+	PROFILER_PLOT("PathfindOpenHeapMaxSiftSteps", (double)s_pathfindOpenHeapFrameProfileStats.maxSiftSteps);
+	PROFILER_PLOT("PathfindOpenHeapMaxSize", (double)s_pathfindOpenHeapFrameProfileStats.maxSize);
 #endif
 #ifdef DEBUG_QPF
 	if (pathsFound>0) {
@@ -7044,16 +7187,8 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	parentCell->startPathfind(goalCell);
 
 	// initialize "open" list to contain start cell
-#if RETAIL_COMPATIBLE_PATHFINDING
-	if (!s_useFixedPathfinding) {
-		m_openList.reset(parentCell);
-	}
-	else
-#endif
-	{
-		m_openList.reset();
-		parentCell->putOnSortedOpenList(m_openList);
-	}
+	m_openList.reset();
+	parentCell->putOnSortedOpenList(m_openList);
 
 	// "closed" list is initially empty
 	m_closedList.reset();
@@ -7611,16 +7746,8 @@ Path *Pathfinder::findGroundPath( const Coord3D *from,
 	parentCell->startPathfind(goalCell);
 
 	// initialize "open" list to contain start cell
-#if RETAIL_COMPATIBLE_PATHFINDING
-	if (!s_useFixedPathfinding) {
-		m_openList.reset(parentCell);
-	}
-	else
-#endif
-	{
-		m_openList.reset();
-		parentCell->putOnSortedOpenList(m_openList);
-	}
+	m_openList.reset();
+	parentCell->putOnSortedOpenList(m_openList);
 
 	// "closed" list is initially empty
 	m_closedList.reset();
@@ -8091,16 +8218,8 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 	}
 
 	// initialize "open" list to contain start cell
-#if RETAIL_COMPATIBLE_PATHFINDING
-	if (!s_useFixedPathfinding) {
-		m_openList.reset(parentCell);
-	}
-	else
-#endif
-	{
-		m_openList.reset();
-		parentCell->putOnSortedOpenList(m_openList);
-	}
+	m_openList.reset();
+	parentCell->putOnSortedOpenList(m_openList);
 
 	if (parentCell->getLayer()!=LAYER_GROUND) {
 		PathfindLayerEnum layer = parentCell->getLayer();
@@ -8904,16 +9023,8 @@ Int Pathfinder::checkPathCost(Object *obj, const LocomotorSet& locomotorSet, con
 	parentCell->startPathfind(goalCell);
 
 	// initialize "open" list to contain start cell
-#if RETAIL_COMPATIBLE_PATHFINDING
-	if (!s_useFixedPathfinding) {
-		m_openList.reset(parentCell);
-	}
-	else
-#endif
-	{
-		m_openList.reset();
-		parentCell->putOnSortedOpenList(m_openList);
-	}
+	m_openList.reset();
+	parentCell->putOnSortedOpenList(m_openList);
 
 	// "closed" list is initially empty
 	m_closedList.reset();
@@ -9247,16 +9358,8 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 	Real closestDistScreenSqr = FLT_MAX;
 
 	// initialize "open" list to contain start cell
-#if RETAIL_COMPATIBLE_PATHFINDING
-	if (!s_useFixedPathfinding) {
-		m_openList.reset(parentCell);
-	}
-	else
-#endif
-	{
-		m_openList.reset();
-		parentCell->putOnSortedOpenList(m_openList);
-	}
+	m_openList.reset();
+	parentCell->putOnSortedOpenList(m_openList);
 
 	// "closed" list is initially empty
 	m_closedList.reset();
@@ -10809,16 +10912,8 @@ Path *Pathfinder::getMoveAwayFromPath(Object* obj, Object *otherObj,
 	parentCell->startPathfind(nullptr);
 
 	// initialize "open" list to contain start cell
-#if RETAIL_COMPATIBLE_PATHFINDING
-	if (!s_useFixedPathfinding) {
-		m_openList.reset(parentCell);
-	}
-	else
-#endif
-	{
-		m_openList.reset();
-		parentCell->putOnSortedOpenList(m_openList);
-	}
+	m_openList.reset();
+	parentCell->putOnSortedOpenList(m_openList);
 
 	// "closed" list is initially empty
 	m_closedList.reset();
@@ -10986,16 +11081,8 @@ Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet
 	parentCell->startPathfind( nullptr);
 
 	// initialize "open" list to contain start cell
-#if RETAIL_COMPATIBLE_PATHFINDING
-	if (!s_useFixedPathfinding) {
-		m_openList.reset(parentCell);
-	}
-	else
-#endif
-	{
-		m_openList.reset();
-		parentCell->putOnSortedOpenList(m_openList);
-	}
+	m_openList.reset();
+	parentCell->putOnSortedOpenList(m_openList);
 
 	// "closed" list is initially empty
 	m_closedList.reset();
@@ -11286,16 +11373,8 @@ Path *Pathfinder::findAttackPath( const Object *obj, const LocomotorSet& locomot
 	}
 
 	// initialize "open" list to contain start cell
-#if RETAIL_COMPATIBLE_PATHFINDING
-	if (!s_useFixedPathfinding) {
-		m_openList.reset(parentCell);
-	}
-	else
-#endif
-	{
-		m_openList.reset();
-		parentCell->putOnSortedOpenList(m_openList);
-	}
+	m_openList.reset();
+	parentCell->putOnSortedOpenList(m_openList);
 
 	// "closed" list is initially empty
 	m_closedList.reset();
@@ -11571,16 +11650,8 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
 	parentCell->startPathfind( nullptr);
 
 	// initialize "open" list to contain start cell
-#if RETAIL_COMPATIBLE_PATHFINDING
-	if (!s_useFixedPathfinding) {
-		m_openList.reset(parentCell);
-	}
-	else
-#endif
-	{
-		m_openList.reset();
-		parentCell->putOnSortedOpenList(m_openList);
-	}
+	m_openList.reset();
+	parentCell->putOnSortedOpenList(m_openList);
 
 	// "closed" list is initially empty
 	m_closedList.reset();
