@@ -259,7 +259,11 @@ class PathfindCellList
 	};
 
 public:
-	PathfindCellList() : m_head(nullptr), m_tail(nullptr), m_nextHeapOrder(0) {}
+	PathfindCellList() : m_head(nullptr), m_tail(nullptr), m_nextHeapOrder(0)
+#if defined(RTS_PROFILE_TRACY)
+		, m_profileSize(0)
+#endif
+	{}
 
 #if RETAIL_COMPATIBLE_PATHFINDING
 	void reset(PathfindCell* newHead = nullptr);
@@ -288,6 +292,9 @@ private:
 	PathfindCell* m_tail;
 	std::vector<HeapEntry> m_heap;
 	UnsignedInt m_nextHeapOrder;
+#if defined(RTS_PROFILE_TRACY)
+	Int m_profileSize; // Legacy .4 counter retained so old insertion helpers still compile; heap path does not trace per insert.
+#endif
 };
 
 /**
