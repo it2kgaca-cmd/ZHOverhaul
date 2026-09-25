@@ -131,7 +131,119 @@ struct PathfindQueueProfileStats
 	Int queueHighWater;
 };
 
+enum PathfindProfileStage
+{
+	PATHFIND_PROFILE_FIND_PATH,
+	PATHFIND_PROFILE_INTERNAL_FIND_PATH,
+	PATHFIND_PROFILE_CLOSEST_PATH,
+	PATHFIND_PROFILE_PATCH_PATH
+};
+
+struct PathfindRequestProfileStats
+{
+	Bool active;
+	Int findPathCalls;
+	Int findPathCells;
+	Int findPathSuccesses;
+	Int internalFindPathCalls;
+	Int internalFindPathCells;
+	Int internalFindPathSuccesses;
+	Int closestPathCalls;
+	Int closestPathCells;
+	Int closestPathSuccesses;
+	Int patchPathCalls;
+	Int patchPathCells;
+	Int patchPathSuccesses;
+};
+
+struct PathfindStageFrameProfileStats
+{
+	Int findPathCalls;
+	Int findPathCells;
+	Int findPathSuccesses;
+	Int internalFindPathCalls;
+	Int internalFindPathCells;
+	Int internalFindPathSuccesses;
+	Int closestPathCalls;
+	Int closestPathCells;
+	Int closestPathSuccesses;
+	Int patchPathCalls;
+	Int patchPathCells;
+	Int patchPathSuccesses;
+	Int slowRequests;
+	Int slowFallbackRequests;
+};
+
 static PathfindQueueProfileStats s_pathfindQueueProfileStats = { 0, 0, 0, 0 };
+static PathfindRequestProfileStats s_pathfindRequestProfileStats = {};
+static PathfindStageFrameProfileStats s_pathfindStageFrameProfileStats = {};
+
+static void beginQueuedPathfindRequestProfile()
+{
+	s_pathfindRequestProfileStats = {};
+	s_pathfindRequestProfileStats.active = true;
+}
+
+static void endQueuedPathfindRequestProfile()
+{
+	s_pathfindRequestProfileStats.active = false;
+}
+
+static void beginPathfindProfileStage(PathfindProfileStage stage)
+{
+	if (!s_pathfindRequestProfileStats.active)
+		return;
+
+	switch (stage)
+	{
+		case PATHFIND_PROFILE_FIND_PATH:
+			++s_pathfindRequestProfileStats.findPathCalls;
+			++s_pathfindStageFrameProfileStats.findPathCalls;
+			break;
+		case PATHFIND_PROFILE_INTERNAL_FIND_PATH:
+			++s_pathfindRequestProfileStats.internalFindPathCalls;
+			++s_pathfindStageFrameProfileStats.internalFindPathCalls;
+			break;
+		case PATHFIND_PROFILE_CLOSEST_PATH:
+			++s_pathfindRequestProfileStats.closestPathCalls;
+			++s_pathfindStageFrameProfileStats.closestPathCalls;
+			break;
+		case PATHFIND_PROFILE_PATCH_PATH:
+			++s_pathfindRequestProfileStats.patchPathCalls;
+			++s_pathfindStageFrameProfileStats.patchPathCalls;
+			break;
+	}
+}
+
+static void endPathfindProfileStage(PathfindProfileStage stage, Int cells, Bool success)
+{
+	if (!s_pathfindRequestProfileStats.active)
+		return;
+
+	switch (stage)
+	{
+		case PATHFIND_PROFILE_FIND_PATH:
+			s_pathfindRequestProfileStats.findPathCells += cells;
+			s_pathfindStageFrameProfileStats.findPathCells += cells;
+			if (success) { ++s_pathfindRequestProfileStats.findPathSuccesses; ++s_pathfindStageFrameProfileStats.findPathSuccesses; }
+			break;
+		case PATHFIND_PROFILE_INTERNAL_FIND_PATH:
+			s_pathfindRequestProfileStats.internalFindPathCells += cells;
+			s_pathfindStageFrameProfileStats.internalFindPathCells += cells;
+			if (success) { ++s_pathfindRequestProfileStats.internalFindPathSuccesses; ++s_pathfindStageFrameProfileStats.internalFindPathSuccesses; }
+			break;
+		case PATHFIND_PROFILE_CLOSEST_PATH:
+			s_pathfindRequestProfileStats.closestPathCells += cells;
+			s_pathfindStageFrameProfileStats.closestPathCells += cells;
+			if (success) { ++s_pathfindRequestProfileStats.closestPathSuccesses; ++s_pathfindStageFrameProfileStats.closestPathSuccesses; }
+			break;
+		case PATHFIND_PROFILE_PATCH_PATH:
+			s_pathfindRequestProfileStats.patchPathCells += cells;
+			s_pathfindStageFrameProfileStats.patchPathCells += cells;
+			if (success) { ++s_pathfindRequestProfileStats.patchPathSuccesses; ++s_pathfindStageFrameProfileStats.patchPathSuccesses; }
+			break;
+	}
+}
 
 static Int getPathfindQueueDepth(Int head, Int tail)
 {
@@ -6037,6 +6149,7 @@ void Pathfinder::processPathfindQueue()
 	s_pathfindQueueProfileStats.acceptedRequests = 0;
 	s_pathfindQueueProfileStats.duplicateRequests = 0;
 	s_pathfindQueueProfileStats.queueHighWater = queueDepthBefore;
+	s_pathfindStageFrameProfileStats = {};
 #endif
 	if (!m_isMapReady) {
 		return;
@@ -6096,6 +6209,7 @@ void Pathfinder::processPathfindQueue()
 			if (ai) {
 #if defined(RTS_PROFILE_TRACY)
 				const Int cellsBeforeRequest = m_cumulativeCellsAllocated;
+				beginQueuedPathfindRequestProfile();
 #endif
 				{
 					PROFILER_SECTION_NAME("Pathfinder::queuedDoPathfind");
@@ -6110,6 +6224,40 @@ void Pathfinder::processPathfindQueue()
 				if (cellsForRequest == 0) {
 					++zeroCellRequests;
 				}
+
+				if (cellsForRequest >= (Int)PATHFIND_CELLS_PER_FRAME) {
+					++s_pathfindStageFrameProfileStats.slowRequests;
+					if (s_pathfindRequestProfileStats.closestPathCalls > 0) {
+						++s_pathfindStageFrameProfileStats.slowFallbackRequests;
+					}
+
+					const Coord3D *start = obj->getPosition();
+					const Coord3D *requested = ai->friend_getRequestedDestination();
+					const Coord3D *goal = ai->getGoalPosition();
+					Player *player = obj->getControllingPlayer();
+					const Int playerIndex = player ? player->getPlayerIndex() : -1;
+					const Int playerType = player ? (Int)player->getPlayerType() : -1;
+					const Int accountedCells = s_pathfindRequestProfileStats.findPathCells +
+						s_pathfindRequestProfileStats.closestPathCells + s_pathfindRequestProfileStats.patchPathCells;
+					const Int otherCells = cellsForRequest > accountedCells ? cellsForRequest - accountedCells : 0;
+
+					AsciiString message;
+					message.format(
+						"SlowPath frame=%u obj=%u unit=%s player=%d type=%d state=%d:%s stuck=%d retry=%d "
+						"cells=%d find=%d/%d/%d internal=%d/%d/%d closest=%d/%d/%d patch=%d/%d/%d other=%d "
+						"start=(%.1f,%.1f) requested=(%.1f,%.1f) goal=(%.1f,%.1f)",
+						TheGameLogic->getFrame(), obj->getID(), obj->getTemplate()->getName().str(), playerIndex, playerType,
+						(Int)ai->getCurrentStateID(), ai->getCurrentStateName().str(), ai->isBlockedAndStuck() ? 1 : 0, ai->getRetryPath() ? 1 : 0,
+						cellsForRequest,
+						s_pathfindRequestProfileStats.findPathCalls, s_pathfindRequestProfileStats.findPathCells, s_pathfindRequestProfileStats.findPathSuccesses,
+						s_pathfindRequestProfileStats.internalFindPathCalls, s_pathfindRequestProfileStats.internalFindPathCells, s_pathfindRequestProfileStats.internalFindPathSuccesses,
+						s_pathfindRequestProfileStats.closestPathCalls, s_pathfindRequestProfileStats.closestPathCells, s_pathfindRequestProfileStats.closestPathSuccesses,
+						s_pathfindRequestProfileStats.patchPathCalls, s_pathfindRequestProfileStats.patchPathCells, s_pathfindRequestProfileStats.patchPathSuccesses, otherCells,
+						start ? start->x : 0.0f, start ? start->y : 0.0f, requested ? requested->x : 0.0f, requested ? requested->y : 0.0f,
+						goal ? goal->x : 0.0f, goal ? goal->y : 0.0f);
+					PROFILER_MSG(message.str(), message.getLength());
+				}
+				endQueuedPathfindRequestProfile();
 #endif
 			}
 #if defined(RTS_PROFILE_TRACY)
@@ -6147,6 +6295,20 @@ void Pathfinder::processPathfindQueue()
 	PROFILER_PLOT("PathfindMissingAIUpdates", (double)missingAIUpdates);
 	PROFILER_PLOT("PathfindBudgetExhausted", budgetExhausted ? 1.0 : 0.0);
 	PROFILER_PLOT("PathfindCellsPerRequestAvg", pathsFound > 0 ? (double)m_cumulativeCellsAllocated / (double)pathsFound : 0.0);
+	PROFILER_PLOT("PathfindFindPathCalls", (double)s_pathfindStageFrameProfileStats.findPathCalls);
+	PROFILER_PLOT("PathfindFindPathCells", (double)s_pathfindStageFrameProfileStats.findPathCells);
+	PROFILER_PLOT("PathfindFindPathSuccesses", (double)s_pathfindStageFrameProfileStats.findPathSuccesses);
+	PROFILER_PLOT("PathfindInternalCalls", (double)s_pathfindStageFrameProfileStats.internalFindPathCalls);
+	PROFILER_PLOT("PathfindInternalCells", (double)s_pathfindStageFrameProfileStats.internalFindPathCells);
+	PROFILER_PLOT("PathfindInternalSuccesses", (double)s_pathfindStageFrameProfileStats.internalFindPathSuccesses);
+	PROFILER_PLOT("PathfindClosestPathCalls", (double)s_pathfindStageFrameProfileStats.closestPathCalls);
+	PROFILER_PLOT("PathfindClosestPathCells", (double)s_pathfindStageFrameProfileStats.closestPathCells);
+	PROFILER_PLOT("PathfindClosestPathSuccesses", (double)s_pathfindStageFrameProfileStats.closestPathSuccesses);
+	PROFILER_PLOT("PathfindPatchPathCalls", (double)s_pathfindStageFrameProfileStats.patchPathCalls);
+	PROFILER_PLOT("PathfindPatchPathCells", (double)s_pathfindStageFrameProfileStats.patchPathCells);
+	PROFILER_PLOT("PathfindPatchPathSuccesses", (double)s_pathfindStageFrameProfileStats.patchPathSuccesses);
+	PROFILER_PLOT("PathfindSlowRequests", (double)s_pathfindStageFrameProfileStats.slowRequests);
+	PROFILER_PLOT("PathfindSlowFallbackRequests", (double)s_pathfindStageFrameProfileStats.slowFallbackRequests);
 #endif
 #ifdef DEBUG_QPF
 	if (pathsFound>0) {
@@ -6551,7 +6713,14 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 													 const Coord3D *rawTo)
 {
 	PROFILER_SECTION_NAME("Pathfinder::findPath");
+#if defined(RTS_PROFILE_TRACY)
+	const Int profileCellsBefore = m_cumulativeCellsAllocated;
+	beginPathfindProfileStage(PATHFIND_PROFILE_FIND_PATH);
+#endif
 	if (!clientSafeQuickDoesPathExist(locomotorSet, from, rawTo)) {
+#if defined(RTS_PROFILE_TRACY)
+		endPathfindProfileStage(PATHFIND_PROFILE_FIND_PATH, m_cumulativeCellsAllocated - profileCellsBefore, false);
+#endif
 		return nullptr;
 	}
 	Bool isHuman = true;
@@ -6568,6 +6737,9 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 	}
 
 	Path *pat = internalFindPath(obj, locomotorSet, from, rawTo);
+#if defined(RTS_PROFILE_TRACY)
+	endPathfindProfileStage(PATHFIND_PROFILE_FIND_PATH, m_cumulativeCellsAllocated - profileCellsBefore, pat != nullptr);
+#endif
 	if (pat!=nullptr) {
 		return pat;
 	}
@@ -6582,6 +6754,10 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 													 const Coord3D *rawTo)
 {
 	PROFILER_SECTION_NAME("Pathfinder::internalFindPath");
+#if defined(RTS_PROFILE_TRACY)
+	const Int profileCellsBefore = m_cumulativeCellsAllocated;
+	beginPathfindProfileStage(PATHFIND_PROFILE_INTERNAL_FIND_PATH);
+#endif
 	//CRCDEBUG_LOG(("Pathfinder::findPath()"));
 #ifdef INTENSE_DEBUG
 	DEBUG_LOG(("internal find path..."));
@@ -6780,6 +6956,9 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 				cleanOpenAndClosedLists();
 				parentCell->releaseInfo();
 			}
+#if defined(RTS_PROFILE_TRACY)
+			endPathfindProfileStage(PATHFIND_PROFILE_INTERNAL_FIND_PATH, m_cumulativeCellsAllocated - profileCellsBefore, true);
+#endif
 			return path;
 		}
 
@@ -6868,6 +7047,9 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 		parentCell->releaseInfo();
 		goalCell->releaseInfo();
 	}
+#if defined(RTS_PROFILE_TRACY)
+	endPathfindProfileStage(PATHFIND_PROFILE_INTERNAL_FIND_PATH, m_cumulativeCellsAllocated - profileCellsBefore, false);
+#endif
 	return nullptr;
 }
 
@@ -8770,6 +8952,11 @@ Int Pathfinder::checkPathCost(Object *obj, const LocomotorSet& locomotorSet, con
 Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 																	Coord3D *rawTo, Bool blocked, Real pathCostMultiplier, Bool moveAllies)
 {
+	PROFILER_SECTION_NAME("Pathfinder::findClosestPath");
+#if defined(RTS_PROFILE_TRACY)
+	const Int profileCellsBefore = m_cumulativeCellsAllocated;
+	beginPathfindProfileStage(PATHFIND_PROFILE_CLOSEST_PATH);
+#endif
 	//CRCDEBUG_LOG(("Pathfinder::findClosestPath()"));
 #ifdef DEBUG_LOGGING
 	Int startTimeMS = ::GetTickCount();
@@ -8990,6 +9177,9 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 				parentCell->releaseInfo();
 				goalCell->releaseInfo();
 			}
+#if defined(RTS_PROFILE_TRACY)
+			endPathfindProfileStage(PATHFIND_PROFILE_CLOSEST_PATH, m_cumulativeCellsAllocated - profileCellsBefore, true);
+#endif
 
 			return path;
 		}
@@ -9081,6 +9271,9 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 			parentCell->releaseInfo();
 			goalCell->releaseInfo();
 		}
+#if defined(RTS_PROFILE_TRACY)
+		endPathfindProfileStage(PATHFIND_PROFILE_CLOSEST_PATH, m_cumulativeCellsAllocated - profileCellsBefore, true);
+#endif
 		return path;
 	}
 
@@ -9112,6 +9305,9 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 		parentCell->releaseInfo();
 		goalCell->releaseInfo();
 	}
+#if defined(RTS_PROFILE_TRACY)
+	endPathfindProfileStage(PATHFIND_PROFILE_CLOSEST_PATH, m_cumulativeCellsAllocated - profileCellsBefore, false);
+#endif
 	return nullptr;
 }
 
@@ -10588,6 +10784,11 @@ Path *Pathfinder::getMoveAwayFromPath(Object* obj, Object *otherObj,
 Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet,
 		Path *originalPath, Bool blocked )
 {
+	PROFILER_SECTION_NAME("Pathfinder::patchPath");
+#if defined(RTS_PROFILE_TRACY)
+	const Int profileCellsBefore = m_cumulativeCellsAllocated;
+	beginPathfindProfileStage(PATHFIND_PROFILE_PATCH_PATH);
+#endif
 	//CRCDEBUG_LOG(("Pathfinder::patchPath()"));
 #ifdef DEBUG_LOGGING
 	Int startTimeMS = ::GetTickCount();
@@ -10771,6 +10972,9 @@ Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet
 				parentCell->releaseInfo();
 				candidateGoal->releaseInfo();
 			}
+#if defined(RTS_PROFILE_TRACY)
+			endPathfindProfileStage(PATHFIND_PROFILE_PATCH_PATH, m_cumulativeCellsAllocated - profileCellsBefore, true);
+#endif
 
 			return path;
 		}
@@ -10809,6 +11013,9 @@ Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet
 		parentCell->releaseInfo();
 		candidateGoal->releaseInfo();
 	}
+#if defined(RTS_PROFILE_TRACY)
+	endPathfindProfileStage(PATHFIND_PROFILE_PATCH_PATH, m_cumulativeCellsAllocated - profileCellsBefore, false);
+#endif
 	return nullptr;
 }
 
