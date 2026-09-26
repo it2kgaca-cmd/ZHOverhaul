@@ -330,3 +330,29 @@ The alpha.1 convoy-speed fix reduced the compounded retail slowdown, but the Twi
 This is the first true local-flow slice. It should make a mass of armor pour around slower members where the ramp or ravine has lateral capacity, while naturally compressing into a queue only where terrain is genuinely one-vehicle-wide.
 
 It is still not the full group/blob system. Follow-up 0.1 work can move the same idea from collision-reactive steering to predictive group flow: shared movement-group context, look-ahead width sampling, lane capacity, cohesion/separation and zipper merging before contact.
+
+
+## 0.1.0-alpha.3 - Preserve forward group intent through congestion
+
+The alpha.2 test exposed a legacy-state regression: vehicles could initially squeeze through a choke, briefly ignore collision, then stop and sometimes circle or drive back into the jam.
+
+### Root cause
+- Alpha.2 classified convoy traffic from current hull headings.
+- Local bypass steering intentionally rotates hulls away from one another.
+- Once that divergence exceeded the convoy threshold, the next collision fell back to retail deadlock handling.
+- Retail `privateMoveAwayFromUnit()` may replace the current path with a path whose purpose is to escape another unit, keep `AI_MOVE_OUT_OF_THE_WAY` active for up to 10 seconds, and enable the existing two-second ignore-collision cheat when repeatedly blocked by the same unit.
+- This matches the observed sequence: brief overlap/flow, collision timer expiry, then backward/circling detours and a larger jam.
+
+### Changes
+- Same moving `AIGroup` membership is now authoritative shared vehicle flow. Hull facing may diverge while units squeeze through a choke.
+- "Ahead" is measured against the original requested movement direction rather than temporary hull facing.
+- Lateral contacts inside one moving group never enter retail deadlock/move-away handling.
+- `privateMoveAwayFromUnit()` refuses to replace the route of vehicles participating in the same movement flow.
+- Local passing commits to one side of a blocker and remains active across brief collision-free frames for up to three seconds or until the blocker has actually been passed.
+- If exact-path reacquisition points backward during that pass, local steering follows the original forward movement intent instead.
+- The player/strategic route remains authoritative.
+
+### Expected behavior
+A congested group may temporarily overlap or squeeze more aggressively than retail, but it should retain positive forward intent. Local avoidance can bend vehicles sideways; it must not reinterpret friendly congestion as permission to retreat or circle back.
+
+This remains collision-reactive flow. True predictive blob movement—group look-ahead, width/lane estimation, cohesion/separation and pre-choke compression—remains the next architecture step.

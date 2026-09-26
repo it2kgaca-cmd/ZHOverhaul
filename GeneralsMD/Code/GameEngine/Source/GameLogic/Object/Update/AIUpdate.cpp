@@ -275,6 +275,9 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_convoyBlocked = FALSE;
 	m_nonConvoyBlocked = FALSE;
 	m_convoyBlockerID = INVALID_ID;
+	m_flowAroundBlockerID = INVALID_ID;
+	m_flowAroundSide = 0.0f;
+	m_flowAroundUntil = 0;
 	m_isBlockedAndStuck = FALSE;
 	m_upgradedLocomotors = FALSE;
 	m_canPathThroughUnits = FALSE;
@@ -1249,20 +1252,20 @@ Bool AIUpdateInterface::hasHigherPathPriority(AIUpdateInterface *otherAI) const
 }
 
 //-------------------------------------------------------------------------------------------------
-/* Returns TRUE when "other" is an allied moving vehicle ahead of us and both vehicles are
- * already travelling in roughly the same direction.  This is queue/convoy traffic, not a
- * crossing or head-on blocker. */
-Bool AIUpdateInterface::isSameDirectionConvoyFollower(Object *other) const
+/* Returns TRUE when two allied moving ground vehicles belong to the same movement flow.
+ * Same AIGroup membership is authoritative: hull facing is allowed to diverge while the
+ * group squeezes through a choke.  Unrelated groups keep a conservative heading test. */
+Bool AIUpdateInterface::isSharedVehicleFlowTraffic(Object *other) const
 {
 	const Object *obj = getObject();
 	if (obj == nullptr || other == nullptr)
 		return FALSE;
 
-	if (obj->getRelationship(other) != ALLIES)
+	if (obj->getRelationship(other) != ALLIES ||
+			!obj->isKindOf(KINDOF_VEHICLE) || !other->isKindOf(KINDOF_VEHICLE))
+	{
 		return FALSE;
-
-	if (!obj->isKindOf(KINDOF_VEHICLE) || !other->isKindOf(KINDOF_VEHICLE))
-		return FALSE;
+	}
 
 	AIUpdateInterface *aiOther = other->getAI();
 	if (aiOther == nullptr || !isMoving() || !aiOther->isMoving())
@@ -1271,28 +1274,55 @@ Bool AIUpdateInterface::isSameDirectionConvoyFollower(Object *other) const
 	if (!isDoingGroundMovement() || !aiOther->isDoingGroundMovement())
 		return FALSE;
 
+	// Object::getGroup() is historically non-const, though this is read-only.
+	AIGroup *ourGroup = const_cast<Object *>(obj)->getGroup();
+	AIGroup *theirGroup = other->getGroup();
+	if (ourGroup != nullptr && ourGroup == theirGroup)
+		return TRUE;
+
 	Coord3D ourDir = *obj->getUnitDirectionVector2D();
 	Coord3D otherDir = *other->getUnitDirectionVector2D();
 	const Real headingDot = ourDir.x * otherDir.x + ourDir.y * otherDir.y;
-	const Real MIN_CONVOY_HEADING_DOT = 0.70710678f; // within 45 degrees
-	if (headingDot < MIN_CONVOY_HEADING_DOT)
+	return headingDot >= 0.70710678f;
+}
+
+//-------------------------------------------------------------------------------------------------
+/* Returns TRUE when "other" is ahead along our movement intent.  Movement intent, not
+ * temporary hull facing, defines forward while local avoidance is steering around traffic. */
+Bool AIUpdateInterface::isSameDirectionConvoyFollower(Object *other) const
+{
+	if (!isSharedVehicleFlowTraffic(other))
 		return FALSE;
+
+	const Object *obj = getObject();
+	Coord2D forward;
+	forward.x = m_requestedDestination.x - obj->getPosition()->x;
+	forward.y = m_requestedDestination.y - obj->getPosition()->y;
+	Real forwardLen = forward.length();
+	if (forwardLen < PATHFIND_CELL_SIZE_F)
+	{
+		const Coord3D *unitDir = obj->getUnitDirectionVector2D();
+		forward.x = unitDir->x;
+		forward.y = unitDir->y;
+		forwardLen = forward.length();
+	}
+	if (forwardLen < 0.01f)
+		return FALSE;
+
+	forward.x /= forwardLen;
+	forward.y /= forwardLen;
 
 	Coord2D vectorToOther;
 	vectorToOther.x = other->getPosition()->x - obj->getPosition()->x;
 	vectorToOther.y = other->getPosition()->y - obj->getPosition()->y;
-
-	// Only the rear vehicle gets convoy-following treatment.  The vehicle in front
-	// keeps priority, which gives a choke a stable forward queue instead of swapping.
-	const Real ahead = vectorToOther.x * ourDir.x + vectorToOther.y * ourDir.y;
-	return ahead > 0.0f;
+	return vectorToOther.x * forward.x + vectorToOther.y * forward.y > 0.0f;
 }
 
 //-------------------------------------------------------------------------------------------------
 /* Try to keep a same-direction vehicle flowing around the vehicle ahead without changing its
  * strategic path.  This is intentionally local steering: the existing path remains authoritative,
  * and the temporary goal is used only when terrain beside the blocker can fit this unit. */
-Bool AIUpdateInterface::tryConvoyFlowAround(ObjectID blockerID, const Coord3D& pathGoal, Coord3D *outGoal) const
+Bool AIUpdateInterface::tryConvoyFlowAround(ObjectID blockerID, const Coord3D& pathGoal, Coord3D *outGoal)
 {
 	if (outGoal == nullptr || blockerID == INVALID_ID)
 		return FALSE;
@@ -1309,16 +1339,40 @@ Bool AIUpdateInterface::tryConvoyFlowAround(ObjectID blockerID, const Coord3D& p
 	}
 
 	Coord3D pos = *obj->getPosition();
+
+	Coord2D intent;
+	intent.x = m_requestedDestination.x - pos.x;
+	intent.y = m_requestedDestination.y - pos.y;
+	Real intentLen = intent.length();
+	if (intentLen >= PATHFIND_CELL_SIZE_F)
+	{
+		intent.x /= intentLen;
+		intent.y /= intentLen;
+	}
+
 	Coord2D forward;
 	forward.x = pathGoal.x - pos.x;
 	forward.y = pathGoal.y - pos.y;
-	Real forwardLen = sqrtf(forward.x * forward.x + forward.y * forward.y);
+	Real forwardLen = forward.length();
+
+	// A lateral pass can put us far enough off the old exact path that path
+	// reacquisition briefly points behind us.  Do not let that turn a forward
+	// player order into a retreat.
+	if (intentLen >= PATHFIND_CELL_SIZE_F)
+	{
+		if (forwardLen < 0.01f ||
+				(forward.x * intent.x + forward.y * intent.y) <= 0.0f)
+		{
+			forward = intent;
+			forwardLen = 1.0f;
+		}
+	}
 	if (forwardLen < 0.01f)
 	{
 		const Coord3D *unitDir = obj->getUnitDirectionVector2D();
 		forward.x = unitDir->x;
 		forward.y = unitDir->y;
-		forwardLen = sqrtf(forward.x * forward.x + forward.y * forward.y);
+		forwardLen = forward.length();
 	}
 	if (forwardLen < 0.01f)
 		return FALSE;
@@ -1337,15 +1391,22 @@ Bool AIUpdateInterface::tryConvoyFlowAround(ObjectID blockerID, const Coord3D& p
 	const Real lateralClearance = combinedRadius + PATHFIND_CELL_SIZE_F * 0.5f;
 	const Real forwardClearance = combinedRadius + PATHFIND_CELL_SIZE_F;
 
-	// Prefer the side we are already on relative to the blocker.  That prevents
-	// neighboring followers from needlessly crossing through one another to pass.
-	const Real currentLateral =
-		(pos.x - blockerPos.x) * side.x + (pos.y - blockerPos.y) * side.y;
-	const Real preferredSign = currentLateral >= 0.0f ? 1.0f : -1.0f;
+	// Commit to one side while passing this blocker.  Re-selecting left/right
+	// every collision frame creates weaving and can turn path reacquisition back
+	// into the pack.
+	if (m_flowAroundSide == 0.0f)
+	{
+		const Real currentLateral =
+			(pos.x - blockerPos.x) * side.x + (pos.y - blockerPos.y) * side.y;
+		if (fabs(currentLateral) > PATHFIND_CELL_SIZE_F * 0.25f)
+			m_flowAroundSide = currentLateral >= 0.0f ? 1.0f : -1.0f;
+		else
+			m_flowAroundSide = ((obj->getID() ^ blocker->getID()) & 1) ? 1.0f : -1.0f;
+	}
 
 	for (Int attempt = 0; attempt < 2; ++attempt)
 	{
-		const Real sign = attempt == 0 ? preferredSign : -preferredSign;
+		const Real sign = attempt == 0 ? m_flowAroundSide : -m_flowAroundSide;
 		Coord3D candidate = blockerPos;
 		candidate.x += forward.x * forwardClearance + side.x * lateralClearance * sign;
 		candidate.y += forward.y * forwardClearance + side.y * lateralClearance * sign;
@@ -1372,6 +1433,7 @@ Bool AIUpdateInterface::tryConvoyFlowAround(ObjectID blockerID, const Coord3D& p
 			continue;
 		}
 
+		m_flowAroundSide = sign;
 		*outGoal = candidate;
 		return TRUE;
 	}
@@ -1611,7 +1673,13 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 		Bool blocked = blockedBy(other);
 		if (blocked)
 		{
-			const Bool convoyFollower = isSameDirectionConvoyFollower(other);
+			const Bool sharedFlowTraffic = isSharedVehicleFlowTraffic(other);
+			const Bool convoyFollower = sharedFlowTraffic && isSameDirectionConvoyFollower(other);
+
+			// Side-by-side contact inside one moving pack is not a reason to replace
+			// the forward order with the retail move-out-of-the-way state.
+			if (sharedFlowTraffic && !convoyFollower)
+				return FALSE;
 			if (getObject()->isKindOf(KINDOF_INFANTRY))
 			{
 				// Panic bounces around.
@@ -1655,9 +1723,9 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 				m_curMaxBlockedSpeed = maxSpeed;
 			}
 
-			// Same-direction traffic is handled by local flow steering in doLocomotor().
-			// Do not kick either vehicle into the old deadlock/move-away state machine.
-			if (convoyFollower)
+			// Shared traffic is handled by local flow steering in doLocomotor().
+			// Never hand a moving pack back to retail deadlock/move-away handling.
+			if (sharedFlowTraffic)
 				return FALSE;
 
 			if (!aiOther->isMovingAwayFrom(getObject())) {
@@ -2229,6 +2297,9 @@ void AIUpdateInterface::friend_startingMove()
 	m_convoyBlocked = FALSE;
 	m_nonConvoyBlocked = FALSE;
 	m_convoyBlockerID = INVALID_ID;
+	m_flowAroundBlockerID = INVALID_ID;
+	m_flowAroundSide = 0.0f;
+	m_flowAroundUntil = 0;
 	m_isBlockedAndStuck = FALSE;
 }
 
@@ -2243,6 +2314,9 @@ void AIUpdateInterface::friend_endingMove()
 	m_convoyBlocked = FALSE;
 	m_nonConvoyBlocked = FALSE;
 	m_convoyBlockerID = INVALID_ID;
+	m_flowAroundBlockerID = INVALID_ID;
+	m_flowAroundSide = 0.0f;
+	m_flowAroundUntil = 0;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2343,6 +2417,17 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 	Bool blocked = m_blockedFrames > 0;
 	const Bool convoyBlocked = blocked && m_convoyBlocked && !m_nonConvoyBlocked;
 	const ObjectID convoyBlockerID = m_convoyBlockerID;
+
+	if (convoyBlocked && convoyBlockerID != INVALID_ID)
+	{
+		if (m_flowAroundBlockerID != convoyBlockerID)
+		{
+			m_flowAroundBlockerID = convoyBlockerID;
+			m_flowAroundSide = 0.0f;
+		}
+		m_flowAroundUntil = TheGameLogic->getFrame() + 3 * LOGICFRAMES_PER_SECOND;
+	}
+
 	// Collision callbacks refill these for the next frame.  A real non-convoy
 	// blocker always wins over convoy-following treatment when both are present.
 	m_convoyBlocked = FALSE;
@@ -2418,15 +2503,51 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 							speed = myMaxSpeed;
 
 						Bool convoyFlowAround = FALSE;
-						if (convoyBlocked)
+						if (m_flowAroundBlockerID != INVALID_ID)
 						{
-							Coord3D flowGoal;
-							if (tryConvoyFlowAround(convoyBlockerID, goalPos, &flowGoal))
+							Object *flowBlocker = TheGameLogic->findObjectByID(m_flowAroundBlockerID);
+							Bool keepFlow = flowBlocker != nullptr &&
+								TheGameLogic->getFrame() <= m_flowAroundUntil &&
+								isSharedVehicleFlowTraffic(flowBlocker);
+
+							if (keepFlow)
 							{
-								goalPos = flowGoal;
-								blocked = FALSE;
-								convoyFlowAround = TRUE;
-								m_bumpSpeedLimit = FAST_AS_POSSIBLE;
+								Coord2D intent;
+								intent.x = m_requestedDestination.x - getObject()->getPosition()->x;
+								intent.y = m_requestedDestination.y - getObject()->getPosition()->y;
+								Real intentLen = intent.length();
+								if (intentLen > 0.01f)
+								{
+									intent.x /= intentLen;
+									intent.y /= intentLen;
+									Coord2D toBlocker;
+									toBlocker.x = flowBlocker->getPosition()->x - getObject()->getPosition()->x;
+									toBlocker.y = flowBlocker->getPosition()->y - getObject()->getPosition()->y;
+									const Real passedBy = toBlocker.x * intent.x + toBlocker.y * intent.y;
+									const Real clearDist = getObject()->getGeometryInfo().getBoundingCircleRadius() +
+										flowBlocker->getGeometryInfo().getBoundingCircleRadius();
+									if (passedBy < -clearDist)
+										keepFlow = FALSE;
+								}
+							}
+
+							if (keepFlow)
+							{
+								Coord3D flowGoal;
+								if (tryConvoyFlowAround(m_flowAroundBlockerID, goalPos, &flowGoal))
+								{
+									goalPos = flowGoal;
+									blocked = FALSE;
+									convoyFlowAround = TRUE;
+									m_bumpSpeedLimit = FAST_AS_POSSIBLE;
+								}
+							}
+
+							if (!keepFlow)
+							{
+								m_flowAroundBlockerID = INVALID_ID;
+								m_flowAroundSide = 0.0f;
+								m_flowAroundUntil = 0;
 							}
 						}
 
@@ -3446,6 +3567,11 @@ void AIUpdateInterface::privateMoveAwayFromUnit( Object *unit, CommandSourceType
 	// TheSuperHacker @bugfix Mauller 26/05/2025 Fix dereferencing a nullptr when a delayed ai command refers to a deleted object.
 	// This can occur when a hacker is told to move away from an object when in its hacking state and is transitioning to a movement state.
 	if (!unit)
+		return;
+
+	// Moving vehicles in one flow must not throw away the player's route to run
+	// a multi-second "escape this unit" path.  Local steering owns this case.
+	if (isSharedVehicleFlowTraffic(unit))
 		return;
 
 	ObjectID id = unit->getID();

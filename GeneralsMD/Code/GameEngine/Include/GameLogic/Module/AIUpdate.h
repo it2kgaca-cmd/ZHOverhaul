@@ -616,8 +616,9 @@ protected:
 
 	Bool blockedBy(Object *other); ///< Returns true if we are blocked by "other"
 	Bool needToRotate(); ///< Returns true if we are not pointing in the right direction for movement.
+	Bool isSharedVehicleFlowTraffic(Object *other) const;
 	Bool isSameDirectionConvoyFollower(Object *other) const;
-	Bool tryConvoyFlowAround(ObjectID blockerID, const Coord3D& pathGoal, Coord3D *outGoal) const;
+	Bool tryConvoyFlowAround(ObjectID blockerID, const Coord3D& pathGoal, Coord3D *outGoal);
 	Real calculateMaxBlockedSpeed(Object *other, Bool convoyFollower) const;
 
 	virtual UpdateSleepTime doLocomotor();	// virtual so subclasses can override
@@ -794,6 +795,9 @@ private:
 	Bool				m_convoyBlocked;					///< Last collision frame included a same-direction allied vehicle ahead.
 	Bool				m_nonConvoyBlocked;				///< Last collision frame included a blocker that was not convoy-following traffic.
 	ObjectID		m_convoyBlockerID;				///< Nearest same-direction vehicle ahead from the last collision frame.
+	ObjectID		m_flowAroundBlockerID;			///< Blocker currently being passed by local flow steering.
+	Real				m_flowAroundSide;				///< Persisted side choice (-1/+1) while passing a blocker.
+	UnsignedInt	m_flowAroundUntil;				///< Safety timeout for a local flow commitment.
 	Bool				m_isBlockedAndStuck;				///< True if we are stuck & need to recompute path.
 	Bool				m_upgradedLocomotors;
 	Bool				m_canPathThroughUnits;			///< Can path through units.
