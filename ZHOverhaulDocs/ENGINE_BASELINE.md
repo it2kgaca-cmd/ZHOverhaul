@@ -239,3 +239,36 @@ The Crusader muzzle-flash follow-up is included in the same test build. Muzzle-f
 - `PathfindSharedRouteClosestRejected`
 
 The goal is to finish the macro-routing baseline before 0.1 introduces destination spreading, yielding, local avoidance, choke flow, and attack-move movement changes.
+
+
+## 0.1.0-alpha - Movement and combat-motion integration
+
+This is the first testable 0.1 slice. It intentionally changes visible unit behavior, so it should be validated before adding more local-avoidance complexity.
+
+### Movement
+- Tracked locomotors now honor a configured `MinTurnSpeed`; the field was parsed but effectively unused by tread movement. Unspecified locomotors retain their old behavior.
+- Group attack-move now uses the same per-unit destination spreading already used by ordinary group movement instead of sending every member to one exact coordinate.
+- Friendly infantry no longer treats an allied vehicle as a hard blocker. Existing vehicle collision code still asks idle infantry to move aside; vehicle-vs-vehicle collision remains real.
+- Hierarchical path scans now use the request's actual locomotor-surface mask instead of hard-coding `LOCOMOTORSURFACE_GROUND`. This allows legal combined surface sets such as ground+cliff and ground+rubble to participate in macro routing.
+
+### Attack-move combat motion
+- Explicit attack-move may acquire hostile buildings even when a unit's idle auto-acquire INI does not include buildings. Ordinary idle behavior remains data-driven.
+- Turreted ground vehicles can retain their movement path while an in-range target is aimed at and fired upon.
+- Turreted units may pre-acquire visible hostile targets outside current weapon range, begin traversing the turret while advancing, and enter the attack state once the retained target becomes legal to fire upon.
+- Wider pre-acquisition is limited to independently turning turrets; infantry and fixed-gun units retain the normal in-range acquisition behavior.
+- This is deliberately conservative: it does not yet replace the general attack-state semantics or implement the later persistent Guard / Structure Assault systems.
+
+### Monster-search diagnostics
+SlowPath messages now include aggregate route context:
+- hierarchical attempts / failures;
+- shared-corridor hits / rejected reuse;
+- all-passable fallbacks;
+- tunneling searches.
+
+These counters are per queued request and do not add per-cell or per-heap-operation Tracy events. The purpose is to identify why the remaining rare 100k+ exact searches escape the macro corridor before the later resumable PathSearchJob architecture is attempted.
+
+### Test focus
+- Large Tank General attack-moves on Twilight Flame.
+- Observe tracked turning, destination spread, choke behavior, tank fire-on-the-move, turret pre-aim and hostile-building acquisition.
+- Test Burton / other secondary-surface movers and rubble-capable locomotors where available.
+- Capture Tracy messages if a large hitch occurs so the new `route=hier/shared/all/tunnel` context can identify the monster-search path.
