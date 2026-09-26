@@ -1200,9 +1200,20 @@ void Locomotor::moveTowardsPositionTreads(Object* obj, PhysicsBehavior *physics,
 
 	Real goalSpeed = (1.0f - angleCoeff) * desiredSpeed;
 
-
-//	if (speed < m_minTurnSpeed)
-//		speed = m_minTurnSpeed;
+	// ZH Overhaul 0.1.0: tracked locomotors parsed MinTurnSpeed but never used it.
+	// Preserve the existing turn slowdown, but do not let a real configured
+	// MinTurnSpeed bleed all forward momentum away during an ordinary turn.
+	// BIGNUM is the "unspecified" default, so locomotors that omit the field keep
+	// their historical behavior. Destination braking below is still allowed to
+	// reduce the speed all the way to zero for precise stopping/pivoting.
+	if (angleCoeff > 0.0f && m_template->m_minTurnSpeed < BIGNUM)
+	{
+		Real minTurnSpeed = m_template->m_minTurnSpeed;
+		if (minTurnSpeed > desiredSpeed)
+			minTurnSpeed = desiredSpeed;
+		if (goalSpeed < minTurnSpeed)
+			goalSpeed = minTurnSpeed;
+	}
 
 	Real actualSpeed = physics->getForwardSpeed2D();
 	Real slowDownTime = actualSpeed / getBraking();
