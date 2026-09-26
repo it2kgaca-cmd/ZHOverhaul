@@ -305,3 +305,28 @@ Repeat the large Tank General movement test on Twilight Flame, especially the ra
 - crossing, opposing, static, and mixed-obstacle collisions should retain the old conservative behavior.
 
 This is intentionally the smallest choke-flow slice. Stable zipper merging and predictive side-flow/local avoidance remain follow-up 0.1 work if the actual ramp entrance still oscillates after the accordion effect is removed.
+
+
+## 0.1.0-alpha.2 - Local vehicle flow-around
+
+The alpha.1 convoy-speed fix reduced the compounded retail slowdown, but the Twilight Flame ramp test still showed moving armor piling behind the first slower vehicle. Matching the leader's speed is still queueing; it does not produce StarCraft-style continuous local flow.
+
+### Change
+- Remember the nearest same-direction allied vehicle that blocked the current vehicle during the previous collision frame.
+- Before accepting the convoy speed cap, try a short local bypass on the left and right side of that vehicle.
+- The bypass:
+  - preserves the existing strategic path;
+  - places a temporary local steering goal ahead-and-to-the-side of the blocking vehicle;
+  - accounts for both vehicles' bounding-circle radii plus clearance;
+  - requires forward progress;
+  - requires a legal endpoint for the unit's locomotor surfaces and footprint;
+  - requires a terrain/static-geometry-passable line to the temporary goal.
+- Moving-unit occupancy is deliberately ignored only by this tiny local terrain probe. Units still have normal vehicle collision, so the steering system reacts again if another moving vehicle occupies that side.
+- When a bypass is available, the follower keeps its normal desired speed and does not enter the convoy speed cap for that tick.
+- Same-direction convoy collisions no longer enter the old retail deadlock `aiMoveAwayFromUnit` handling; local steering owns that case.
+- If neither side is passable, alpha.1 behavior remains: follow/queue behind the leader rather than compound the retail slowdown.
+
+### Intent
+This is the first true local-flow slice. It should make a mass of armor pour around slower members where the ramp or ravine has lateral capacity, while naturally compressing into a queue only where terrain is genuinely one-vehicle-wide.
+
+It is still not the full group/blob system. Follow-up 0.1 work can move the same idea from collision-reactive steering to predictive group flow: shared movement-group context, look-ahead width sampling, lane capacity, cohesion/separation and zipper merging before contact.

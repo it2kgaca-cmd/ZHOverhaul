@@ -617,6 +617,7 @@ protected:
 	Bool blockedBy(Object *other); ///< Returns true if we are blocked by "other"
 	Bool needToRotate(); ///< Returns true if we are not pointing in the right direction for movement.
 	Bool isSameDirectionConvoyFollower(Object *other) const;
+	Bool tryConvoyFlowAround(ObjectID blockerID, const Coord3D& pathGoal, Coord3D *outGoal) const;
 	Real calculateMaxBlockedSpeed(Object *other, Bool convoyFollower) const;
 
 	virtual UpdateSleepTime doLocomotor();	// virtual so subclasses can override
@@ -792,6 +793,7 @@ private:
 	Bool				m_isBlocked;
 	Bool				m_convoyBlocked;					///< Last collision frame included a same-direction allied vehicle ahead.
 	Bool				m_nonConvoyBlocked;				///< Last collision frame included a blocker that was not convoy-following traffic.
+	ObjectID		m_convoyBlockerID;				///< Nearest same-direction vehicle ahead from the last collision frame.
 	Bool				m_isBlockedAndStuck;				///< True if we are stuck & need to recompute path.
 	Bool				m_upgradedLocomotors;
 	Bool				m_canPathThroughUnits;			///< Can path through units.

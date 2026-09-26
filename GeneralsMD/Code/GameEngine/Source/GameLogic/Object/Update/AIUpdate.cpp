@@ -274,6 +274,7 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_isBlocked = FALSE;
 	m_convoyBlocked = FALSE;
 	m_nonConvoyBlocked = FALSE;
+	m_convoyBlockerID = INVALID_ID;
 	m_isBlockedAndStuck = FALSE;
 	m_upgradedLocomotors = FALSE;
 	m_canPathThroughUnits = FALSE;
@@ -1288,6 +1289,97 @@ Bool AIUpdateInterface::isSameDirectionConvoyFollower(Object *other) const
 }
 
 //-------------------------------------------------------------------------------------------------
+/* Try to keep a same-direction vehicle flowing around the vehicle ahead without changing its
+ * strategic path.  This is intentionally local steering: the existing path remains authoritative,
+ * and the temporary goal is used only when terrain beside the blocker can fit this unit. */
+Bool AIUpdateInterface::tryConvoyFlowAround(ObjectID blockerID, const Coord3D& pathGoal, Coord3D *outGoal) const
+{
+	if (outGoal == nullptr || blockerID == INVALID_ID)
+		return FALSE;
+
+	const Object *obj = getObject();
+	Object *blocker = TheGameLogic->findObjectByID(blockerID);
+	if (obj == nullptr || blocker == nullptr)
+		return FALSE;
+
+	if (obj->getRelationship(blocker) != ALLIES ||
+			!obj->isKindOf(KINDOF_VEHICLE) || !blocker->isKindOf(KINDOF_VEHICLE))
+	{
+		return FALSE;
+	}
+
+	Coord3D pos = *obj->getPosition();
+	Coord2D forward;
+	forward.x = pathGoal.x - pos.x;
+	forward.y = pathGoal.y - pos.y;
+	Real forwardLen = sqrtf(forward.x * forward.x + forward.y * forward.y);
+	if (forwardLen < 0.01f)
+	{
+		const Coord3D *unitDir = obj->getUnitDirectionVector2D();
+		forward.x = unitDir->x;
+		forward.y = unitDir->y;
+		forwardLen = sqrtf(forward.x * forward.x + forward.y * forward.y);
+	}
+	if (forwardLen < 0.01f)
+		return FALSE;
+
+	forward.x /= forwardLen;
+	forward.y /= forwardLen;
+
+	Coord2D side;
+	side.x = -forward.y;
+	side.y = forward.x;
+
+	const Coord3D blockerPos = *blocker->getPosition();
+	const Real ourRadius = obj->getGeometryInfo().getBoundingCircleRadius();
+	const Real blockerRadius = blocker->getGeometryInfo().getBoundingCircleRadius();
+	const Real combinedRadius = ourRadius + blockerRadius;
+	const Real lateralClearance = combinedRadius + PATHFIND_CELL_SIZE_F * 0.5f;
+	const Real forwardClearance = combinedRadius + PATHFIND_CELL_SIZE_F;
+
+	// Prefer the side we are already on relative to the blocker.  That prevents
+	// neighboring followers from needlessly crossing through one another to pass.
+	const Real currentLateral =
+		(pos.x - blockerPos.x) * side.x + (pos.y - blockerPos.y) * side.y;
+	const Real preferredSign = currentLateral >= 0.0f ? 1.0f : -1.0f;
+
+	for (Int attempt = 0; attempt < 2; ++attempt)
+	{
+		const Real sign = attempt == 0 ? preferredSign : -preferredSign;
+		Coord3D candidate = blockerPos;
+		candidate.x += forward.x * forwardClearance + side.x * lateralClearance * sign;
+		candidate.y += forward.y * forwardClearance + side.y * lateralClearance * sign;
+		candidate.z = pathGoal.z;
+
+		// Never select a local bypass that does not make forward progress.
+		const Real forwardProgress =
+			(candidate.x - pos.x) * forward.x + (candidate.y - pos.y) * forward.y;
+		if (forwardProgress <= 0.0f)
+			continue;
+
+		if (!TheAI->pathfinder()->validMovementPosition(
+				obj->getCrusherLevel() > 0, obj->getLayer(), m_locomotorSet, &candidate))
+		{
+			continue;
+		}
+
+		// Ignore transient moving-unit occupancy for this short probe.  Dynamic units
+		// are still real collisions and will be handled on the next frame; this check
+		// is only asking whether terrain/static geometry permits flowing to this side.
+		if (!TheAI->pathfinder()->isLinePassable(obj, m_locomotorSet.getValidSurfaces(),
+				obj->getLayer(), pos, candidate, FALSE, TRUE))
+		{
+			continue;
+		}
+
+		*outGoal = candidate;
+		return TRUE;
+	}
+
+	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
 /* Returns max speed we can have and not run into unit that is blocking us.
 */
 Real AIUpdateInterface::calculateMaxBlockedSpeed(Object *other, Bool convoyFollower) const
@@ -1530,9 +1622,28 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 			}
 			m_isBlocked = TRUE; // we are blocked.
 			if (convoyFollower)
+			{
 				m_convoyBlocked = TRUE;
+				Object *priorBlocker = TheGameLogic->findObjectByID(m_convoyBlockerID);
+				if (priorBlocker == nullptr)
+				{
+					m_convoyBlockerID = other->getID();
+				}
+				else
+				{
+					const Coord3D *ourPos = getObject()->getPosition();
+					const Coord3D *otherPos = other->getPosition();
+					const Coord3D *priorPos = priorBlocker->getPosition();
+					const Real otherDistSqr = sqr(otherPos->x - ourPos->x) + sqr(otherPos->y - ourPos->y);
+					const Real priorDistSqr = sqr(priorPos->x - ourPos->x) + sqr(priorPos->y - ourPos->y);
+					if (otherDistSqr < priorDistSqr)
+						m_convoyBlockerID = other->getID();
+				}
+			}
 			else
+			{
 				m_nonConvoyBlocked = TRUE;
+			}
  			if (otherMoving && aiOther->isWaitingForPath())
 			{
 				return FALSE; // let them get their path;
@@ -1543,6 +1654,11 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 			{
 				m_curMaxBlockedSpeed = maxSpeed;
 			}
+
+			// Same-direction traffic is handled by local flow steering in doLocomotor().
+			// Do not kick either vehicle into the old deadlock/move-away state machine.
+			if (convoyFollower)
+				return FALSE;
 
 			if (!aiOther->isMovingAwayFrom(getObject())) {
 
@@ -2112,6 +2228,7 @@ void AIUpdateInterface::friend_startingMove()
 	m_blockedFrames = 0;
 	m_convoyBlocked = FALSE;
 	m_nonConvoyBlocked = FALSE;
+	m_convoyBlockerID = INVALID_ID;
 	m_isBlockedAndStuck = FALSE;
 }
 
@@ -2123,6 +2240,9 @@ void AIUpdateInterface::friend_endingMove()
 {
 	m_movementComplete = TRUE;
 	m_isMoving = FALSE;
+	m_convoyBlocked = FALSE;
+	m_nonConvoyBlocked = FALSE;
+	m_convoyBlockerID = INVALID_ID;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2222,10 +2342,12 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 
 	Bool blocked = m_blockedFrames > 0;
 	const Bool convoyBlocked = blocked && m_convoyBlocked && !m_nonConvoyBlocked;
+	const ObjectID convoyBlockerID = m_convoyBlockerID;
 	// Collision callbacks refill these for the next frame.  A real non-convoy
 	// blocker always wins over convoy-following treatment when both are present.
 	m_convoyBlocked = FALSE;
 	m_nonConvoyBlocked = FALSE;
+	m_convoyBlockerID = INVALID_ID;
 	Bool requiresConstantCalling = TRUE;	// assume the worst.
 
 	if (m_curLocomotor)
@@ -2295,7 +2417,20 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 						if( speed == FAST_AS_POSSIBLE || speed > myMaxSpeed )
 							speed = myMaxSpeed;
 
-						if (blocked && speed>m_curMaxBlockedSpeed)
+						Bool convoyFlowAround = FALSE;
+						if (convoyBlocked)
+						{
+							Coord3D flowGoal;
+							if (tryConvoyFlowAround(convoyBlockerID, goalPos, &flowGoal))
+							{
+								goalPos = flowGoal;
+								blocked = FALSE;
+								convoyFlowAround = TRUE;
+								m_bumpSpeedLimit = FAST_AS_POSSIBLE;
+							}
+						}
+
+						if (!convoyFlowAround && blocked && speed>m_curMaxBlockedSpeed)
 						{
 							speed = m_curMaxBlockedSpeed;
 							if (convoyBlocked)
