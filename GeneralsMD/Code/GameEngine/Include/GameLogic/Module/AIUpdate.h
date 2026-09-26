@@ -552,7 +552,8 @@ public:
 	///< States should call this with calledByAI set true to prevent them from checking every frame
 	///< States that are doing idle checks should call with calledDuringIdle set true so that they check their
 
-	Object *getNextMoodTarget( Bool calledByAI, Bool calledDuringIdle, Bool includeBuildings = false );
+	Object *getNextMoodTarget( Bool calledByAI, Bool calledDuringIdle,
+		Bool includeBuildings = false, Bool restrictToAttackRange = true );
 	UnsignedInt getNextMoodCheckTime() const { return m_nextMoodCheckTime; }
 
 	// This function will return a combination of MoodMatrixParameter flags.
