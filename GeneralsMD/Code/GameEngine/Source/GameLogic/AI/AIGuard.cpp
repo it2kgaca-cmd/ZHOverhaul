@@ -258,6 +258,12 @@ Bool AIGuardMachine::lookForInnerTarget()
 	if (owner->getTeam()->getPrototype()->getTemplateInfo()->m_attackCommonTarget)
 	{
 		teamVictim = owner->getTeam()->getTeamTargetObject();
+		if (teamVictim && isStationaryGuardArtillery(owner))
+		{
+			Weapon *weapon = owner->getCurrentWeapon();
+			if (weapon == nullptr || !weapon->isWithinAttackRange(owner, teamVictim))
+				teamVictim = nullptr;
+		}
 		if (teamVictim)
 		{
 			setNemesisID(teamVictim->getID());
@@ -903,6 +909,13 @@ StateReturnType AIGuardAttackAggressorState::onEnter()
 	{
 		DEBUG_LOG(("Unexpected null nemesis in AIGuardAttackAggressorState."));
 		return STATE_SUCCESS;
+	}
+
+	if (isStationaryGuardArtillery(obj))
+	{
+		Weapon *weapon = obj->getCurrentWeapon();
+		if (weapon == nullptr || !weapon->isWithinAttackRange(obj, nemesis))
+			return STATE_SUCCESS;
 	}
 
 	Object* targetToGuard = getGuardMachine()->findTargetToGuardByID();
