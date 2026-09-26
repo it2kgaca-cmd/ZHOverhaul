@@ -5866,8 +5866,10 @@ Bool Pathfinder::checkForMovement(const Object *obj, TCheckMovementInfo &info)
 			Object *unit = nullptr;
 			if (flags == PathfindCell::UNIT_PRESENT_MOVING || flags == PathfindCell::UNIT_GOAL_OTHER_MOVING) {
 				unit = TheGameLogic->findObjectByID(posUnit);
-				// order matters: we want to know if I consider it to be an ally, not vice versa
-				if (unit && obj->getRelationship(unit) == ALLIES) {
+				// Soft friendly traffic must not bias strategic A* away from the army's
+				// shared corridor.  Local blob steering owns that density.
+				if (unit && obj->getRelationship(unit) == ALLIES &&
+						!isSoftFriendlyPathTraffic(obj, unit)) {
 					info.allyMoving = true;
 				}
 				if (info.considerTransient) {
@@ -5889,7 +5891,6 @@ Bool Pathfinder::checkForMovement(const Object *obj, TCheckMovementInfo &info)
 			}
 
 			if (isSoftFriendlyPathTraffic(obj, unit)) {
-				info.allyMoving = true;
 				continue;
 			}
 
