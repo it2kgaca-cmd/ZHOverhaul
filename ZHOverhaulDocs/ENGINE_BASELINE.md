@@ -513,10 +513,19 @@ Destroyed building footprints become `CELL_RUBBLE`. Retail maps that exclusively
 
 This keeps rubble as a distinct cell type while allowing ordinary ground vehicles and infantry to route through it.
 
+### Docking precision
+
+Resource gathering uses a dedicated dock state machine with reserved queue, entry, action and exit points. Those are precision-lane semantics and must not be distorted by army crowd steering.
+
+- While an AI is in `AI_DOCK`, the local blob solver is disabled and any cached traffic steering goal is discarded.
+- Friendly mobile collision remains soft, so other gatherers do not create the old stop/repath traffic failure.
+- Supply warehouse action no longer uses retail's random positional twitch when a docker is marginally outside the action tolerance. If the dock state has already completed and the gatherer is within one footprint/path-cell of the authored DockAction point, it is corrected deterministically to that point; a genuinely distant unit still fails rather than harvesting remotely.
+
 ### Regression tests
 
 1. Twilight Flame: select armor from multiple bases/plateaus and order the whole selection across the map. Each origin should independently discover the correct ramp rather than driving toward another subgroup's corridor.
 2. Large BattleMaster/Gattling/Overlord blob: move to open ground and verify the final formation remains spread and stops, rather than collapsing onto the click and swiveling indefinitely.
 3. Repeat with attack-move.
 4. China Mission 2: destroy buildings and route tanks directly across the resulting rubble footprint.
-5. Repeat the previous choke-flow tests to ensure staggered crowd solving does not materially reduce responsiveness.
+5. China/GLA/USA economy: run several gatherers per supply source and verify approach queue, resource pickup, return-to-center and repeated docking remain reliable.
+6. Repeat the previous choke-flow tests to ensure staggered crowd solving does not materially reduce responsiveness.

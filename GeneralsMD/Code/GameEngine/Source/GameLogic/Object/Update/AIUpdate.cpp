@@ -1510,6 +1510,16 @@ Bool AIUpdateInterface::computeBlobTrafficGoal(const Coord3D& pathGoal, Coord3D 
 	if (obj == nullptr || !isDoingGroundMovement())
 		return FALSE;
 
+	// Docking is a precision-lane maneuver, not crowd movement.  Supply trucks,
+	// workers and Chinooks must hit the dock's reserved approach/entry/action
+	// points exactly enough for the dock state machine to advance.
+	if (getAIStateType() == AI_DOCK)
+	{
+		m_cachedTrafficGoalValid = FALSE;
+		m_nextTrafficSolveFrame = 0;
+		return FALSE;
+	}
+
 	const UnsignedInt now = TheGameLogic->getFrame();
 	if (m_nextTrafficSolveFrame == 0)
 		m_nextTrafficSolveFrame = now + (obj->getID() % 3);

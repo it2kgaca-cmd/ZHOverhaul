@@ -95,14 +95,31 @@ Bool SupplyWarehouseDockUpdate::action( Object* docker, Object *drone )
 	Real closeEnoughSqr = sqr(docker->getGeometryInfo().getBoundingCircleRadius()*2);
 	Real curDistSqr = ThePartitionManager->getDistanceSquared(docker, getObject(), FROM_BOUNDINGSPHERE_2D);
 	if (curDistSqr > closeEnoughSqr) {
-		DEBUG_LOG(("Failing dock, dist %f, not close enough(%f).", sqrt(curDistSqr), sqrt(closeEnoughSqr)));
-		// Make it twitch a little.
-		Coord3D newPos = *docker->getPosition();
-		Real range = 0.4*PATHFIND_CELL_SIZE_F;
-		newPos.x += GameLogicRandomValue(-range, range);
-		newPos.y += GameLogicRandomValue(-range, range);
-		docker->setPosition(&newPos);
-		return FALSE;  //not close enough.
+		DEBUG_LOG(("Supply dock correction, dist %f, expected <= %f.", sqrt(curDistSqr), sqrt(closeEnoughSqr)));
+
+		// Retail randomly teleported the gatherer when this precision check failed.
+		// That can turn a minor locomotor tolerance error into repeated dock fumbling.
+		// The AIDock machine has already completed MOVE_TO_DOCK at this point, so if
+		// the unit is only slightly off its authored DockAction point, correct it
+		// deterministically and let the transaction proceed.
+		Coord3D dockPos;
+		getDockPosition(docker, &dockPos);
+		Real dx = dockPos.x - docker->getPosition()->x;
+		Real dy = dockPos.y - docker->getPosition()->y;
+		Real correctionDistSqr = dx*dx + dy*dy;
+		Real correctionTolerance = docker->getGeometryInfo().getBoundingCircleRadius();
+		if (correctionTolerance < PATHFIND_CELL_SIZE_F)
+			correctionTolerance = PATHFIND_CELL_SIZE_F;
+
+		if (correctionDistSqr <= sqr(correctionTolerance))
+		{
+			dockPos.z = TheTerrainLogic->getLayerHeight(dockPos.x, dockPos.y, docker->getLayer());
+			docker->setPosition(&dockPos);
+		}
+		else
+		{
+			return FALSE; // genuinely missed the dock; do not harvest remotely.
+		}
 	}
 
 	--m_boxesStored;// so the docker sees that I am shy by one box (or empty) from within his gainOneBox()
