@@ -2326,16 +2326,36 @@ void AIGroup::groupAttackPosition( const Coord3D *pos, Int maxShotsToFire, Comma
  */
 void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire, CommandSourceType cmdSource )
 {
+	// ZH Overhaul 0.1.0: ordinary group movement already gives each unit a
+	// nearby destination based on its current/formation offset, but retail
+	// attack-move sent every unit to the exact same coordinate. Reuse the same
+	// destination-spreading rule here so an attacking column does not converge
+	// onto a single pathfinding cell.
+	Coord3D center;
+	if (!getCenter(&center))
+		return;
+
+	Coord2D min;
+	Coord2D max;
+	const Bool isFormation = getMinMaxAndCenter(&min, &max, &center);
+
 	std::list<Object *>::iterator i;
 	for( i = m_memberList.begin(); i != m_memberList.end(); ++i )
 	{
-		AIUpdateInterface *ai = (*i)->getAIUpdateInterface();
+		Object *member = *i;
+		if (member->isDisabledByType(DISABLED_HELD) || member->isKindOf(KINDOF_IMMOBILE))
+			continue;
+
+		AIUpdateInterface *ai = member->getAIUpdateInterface();
 		if (ai)
 		{
-			if ((*i)->isAbleToAttack())
-				ai->aiAttackMoveToPosition( pos, maxShotsToFire, cmdSource );
+			Coord3D dest;
+			computeIndividualDestination(&dest, pos, member, &center, isFormation);
+
+			if (member->isAbleToAttack())
+				ai->aiAttackMoveToPosition(&dest, maxShotsToFire, cmdSource);
 			else
-				ai->aiMoveToPosition( pos, cmdSource );
+				ai->aiMoveToPosition(&dest, cmdSource);
 		}
 	}
 }
