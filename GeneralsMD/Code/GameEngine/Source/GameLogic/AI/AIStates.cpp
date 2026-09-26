@@ -1905,14 +1905,28 @@ StateReturnType AIInternalMoveToState::update()
 	//
 	// Check if we have reached our destination
 	//
-	Real onPathDistToGoal = ai->getLocomotorDistanceToGoal();
-	// A group arrival is a soft parking contract, not an exact coordinate.  The
-	// destination-envelope tolerance lets a unit settle without endlessly swiveling
-	// around a crowded final point.
+	// A destination-envelope anchor is authoritative at the terminal end. Path
+	// projection can otherwise keep returning a tiny side goal after the unit is
+	// already parked, producing the classic solo/group "swivel forever" behavior.
 	Real closeEnoughDist = ai->getCurLocomotor() ? ai->getCurLocomotor()->getCloseEnoughDist() : 0.0f;
 	if (ai->friend_hasGroupArrival() && ai->friend_getGroupArrivalTolerance() > closeEnoughDist)
 		closeEnoughDist = ai->friend_getGroupArrivalTolerance();
 
+	if (ai->friend_hasGroupArrival())
+	{
+		const Coord3D& arrival = ai->friend_getGroupArrivalAnchor();
+		const Real arrivalDx = obj->getPosition()->x - arrival.x;
+		const Real arrivalDy = obj->getPosition()->y - arrival.y;
+		if (arrivalDx*arrivalDx + arrivalDy*arrivalDy <= sqr(closeEnoughDist))
+		{
+			if (getAdjustsDestination())
+				ai->setLocomotorGoalNone();
+			obj->clearModelConditionState(MODELCONDITION_MOVING);
+			return STATE_SUCCESS;
+		}
+	}
+
+	Real onPathDistToGoal = ai->getLocomotorDistanceToGoal();
 	//DEBUG_LOG(("onPathDistToGoal = %f %s",onPathDistToGoal, obj->getTemplate()->getName().str()));
 	if (ai->getCurLocomotor() && (onPathDistToGoal < closeEnoughDist))
 	{
@@ -3710,8 +3724,19 @@ StateReturnType AIAttackMoveToState::update()
 		// hostile structures are valid targets. For turreted units, scan the
 		// visible engagement area rather than only current weapon range so the
 		// turret can begin traversing before the hull arrives.
-		Object *scannedTarget = ai->getNextMoodTarget(
-			!forceRetargetThisFrame, false, true, !canPreAimCurrentWeapon);
+		// Attack-move is an explicit combat order, not ambient idle behavior.
+		// Spread searches deterministically over three frames, but force the mood
+		// timer due on those frames so normal fog/shroud legality is preserved.
+		const UnsignedInt now = TheGameLogic->getFrame();
+		const Bool explicitCombatScan =
+			forceRetargetThisFrame || (((now + owner->getID()) % 3) == 0);
+		Object *scannedTarget = nullptr;
+		if (explicitCombatScan)
+		{
+			ai->setNextMoodCheckTime(now);
+			scannedTarget = ai->getNextMoodTarget(
+				true, false, true, !canPreAimCurrentWeapon);
+		}
 		Object *nextObjectToAttack = scannedTarget ? scannedTarget : preAimTarget;
 
 		if (nextObjectToAttack != nullptr)

@@ -52,8 +52,37 @@
 #include "GameLogic/Object.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/PolygonTrigger.h"
+#include "GameLogic/Weapon.h"
 
 const Real CLOSE_ENOUGH = (25.0f);
+
+static Bool isStationaryGuardArtillery(Object *obj)
+{
+	if (obj == nullptr)
+		return FALSE;
+
+	AIUpdateInterface *ai = obj->getAIUpdateInterface();
+	Weapon *weapon = obj->getCurrentWeapon();
+	if (ai == nullptr || weapon == nullptr)
+		return FALSE;
+
+	const WhichTurretType turret = ai->getWhichTurretForCurWeapon();
+	if (turret == TURRET_INVALID || ai->getTurretTurnRate(turret) <= 0.0f)
+		return FALSE;
+
+	const Real visionRange = TheAI->getAdjustedVisionRangeForObject(obj,
+		AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD | AI_VISIONFACTOR_GUARDINNER);
+	return weapon->getAttackRange(obj) > visionRange * 1.10f;
+}
+
+static void prepareGuardWeapon(Object *obj)
+{
+	if (!isStationaryGuardArtillery(obj))
+		return;
+
+	AIUpdateInterface *ai = obj->getAIUpdateInterface();
+	ai->prepareTurretForGuard(ai->getWhichTurretForCurWeapon());
+}
 
 
 static Bool hasAttackedMeAndICanReturnFire( State *thisState, void* /*userData*/ )
@@ -205,6 +234,13 @@ AIGuardMachine::~AIGuardMachine()
 	Real visionRange = TheAI->getAdjustedVisionRangeForObject(obj,
 		AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD | AI_VISIONFACTOR_GUARDINNER);
 
+	if (isStationaryGuardArtillery(const_cast<Object *>(obj)))
+	{
+		Weapon *weapon = const_cast<Object *>(obj)->getCurrentWeapon();
+		if (weapon)
+			return weapon->getAttackRange(obj);
+	}
+
 	return visionRange;
 }
 
@@ -300,16 +336,34 @@ Bool AIGuardMachine::lookForInnerTarget()
 // just ask for that; the above has to find ALL objects in range, but we ignore all
 // but the first (closest).
 //
-	Object* target = ThePartitionManager->getClosestObject(&pos, visionRange, FROM_CENTER_2D, filters);
-	if (target)
+	Object* target = nullptr;
+	if (isStationaryGuardArtillery(owner))
 	{
-		setNemesisID(target->getID());
-		return true;	// Transitions to AIGuardInnerState.
+		Weapon *weapon = owner->getCurrentWeapon();
+		SimpleObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(
+			&pos, visionRange, FROM_CENTER_2D, filters, ITER_SORTED_NEAR_TO_FAR);
+		MemoryPoolObjectHolder hold(iter);
+		for (Object *candidate = iter ? iter->first() : nullptr;
+			 candidate != nullptr; candidate = iter->next())
+		{
+			if (weapon && weapon->isWithinAttackRange(owner, candidate))
+			{
+				target = candidate;
+				break;
+			}
+		}
 	}
 	else
 	{
-		return false;
+		target = ThePartitionManager->getClosestObject(&pos, visionRange, FROM_CENTER_2D, filters);
 	}
+
+	if (target)
+	{
+		setNemesisID(target->getID());
+		return true;
+	}
+	return false;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -524,6 +578,9 @@ AIGuardOuterState::~AIGuardOuterState()
 //--------------------------------------------------------------------------------------
 StateReturnType AIGuardOuterState::onEnter()
 {
+	if (isStationaryGuardArtillery(getMachineOwner()))
+		return STATE_SUCCESS;
+
 	if (getGuardMachine()->getGuardMode() == GUARDMODE_GUARD_WITHOUT_PURSUIT)
 	{
 		// "patrol" mode does not follow targets outside the guard area.
@@ -642,7 +699,8 @@ void AIGuardReturnState::loadPostProcess()
 StateReturnType AIGuardReturnState::onEnter()
 {
 	UnsignedInt now = TheGameLogic->getFrame();
-	m_nextReturnScanTime = now + GameLogicRandomValue(0, TheAI->getAiData()->m_guardEnemyReturnScanRate);
+	m_nextReturnScanTime = now;
+	prepareGuardWeapon(getMachineOwner());
 
 // no, no, no, don't do this in onEnter, unless you like really slow maps. (srj)
 //	if (getGuardMachine()->lookForInnerTarget())
@@ -671,7 +729,8 @@ StateReturnType AIGuardReturnState::update()
 	UnsignedInt now = TheGameLogic->getFrame();
 	if (now >= m_nextReturnScanTime)
 	{
-		m_nextReturnScanTime = now + TheAI->getAiData()->m_guardEnemyReturnScanRate;
+		m_nextReturnScanTime = now + 2 + (getMachineOwner()->getID() % 3);
+		prepareGuardWeapon(getMachineOwner());
 		if (getGuardMachine()->lookForInnerTarget())
 			return STATE_FAILURE; // early termination because we found a target.
 	}
@@ -717,11 +776,8 @@ void AIGuardIdleState::loadPostProcess()
 //--------------------------------------------------------------------------------------
 StateReturnType AIGuardIdleState::onEnter()
 {
-	// first time thru, use a random amount so that everyone doesn't scan on the same frame,
-	// to avoid "spikes".
-	UnsignedInt now = TheGameLogic->getFrame();
-	m_nextEnemyScanTime = now + GameLogicRandomValue(0, TheAI->getAiData()->m_guardEnemyScanRate);
-
+	m_nextEnemyScanTime = TheGameLogic->getFrame();
+	prepareGuardWeapon(getMachineOwner());
 	return STATE_CONTINUE;
 }
 
@@ -734,7 +790,8 @@ StateReturnType AIGuardIdleState::update()
 	if (now < m_nextEnemyScanTime)
 		return STATE_SLEEP(m_nextEnemyScanTime - now);
 
-	m_nextEnemyScanTime = now + TheAI->getAiData()->m_guardEnemyScanRate;
+	m_nextEnemyScanTime = now + 2 + (getMachineOwner()->getID() % 3);
+	prepareGuardWeapon(getMachineOwner());
 
 #ifdef STATE_MACHINE_DEBUG
 	//getMachine()->setDebugOutput(true);
@@ -858,7 +915,8 @@ StateReturnType AIGuardAttackAggressorState::onEnter()
 																						 ExitConditions::ATTACK_ExitIfNoUnitFound |
 																						 ExitConditions::ATTACK_ExitIfOutsideRadius );
 
-	m_attackState = newInstance(AIAttackState)(getMachine(), true, true, false, &m_exitConditions);
+	const Bool followAggressor = !isStationaryGuardArtillery(obj);
+	m_attackState = newInstance(AIAttackState)(getMachine(), followAggressor, true, false, &m_exitConditions);
 	m_attackState->getMachine()->setGoalObject(nemesis);
 
 	StateReturnType returnVal = m_attackState->onEnter();

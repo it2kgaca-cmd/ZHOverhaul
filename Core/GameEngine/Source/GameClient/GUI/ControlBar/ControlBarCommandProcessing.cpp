@@ -537,19 +537,40 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 		{
 			const UpgradeTemplate *upgradeT = commandButton->getUpgradeTemplate();
 			DEBUG_ASSERTCRASH( upgradeT, ("Undefined upgrade '%s' in object upgrade command", "UNKNOWN") );
-			// sanity
 			if( upgradeT == nullptr )
 				break;
 
-			//Make sure the player can really make this
 			if( TheUpgradeCenter->canAffordUpgrade( ThePlayerList->getLocalPlayer(), upgradeT, TRUE ) == FALSE )
-			{
-				//Kris: Disabled because we can get a valid reason for not being able to afford the upgrade!
-				//TheInGameUI->message( "upgrade unsupported in commandprocessing." );
 				break;
+
+			Object *upgradeObj = obj;
+			if (upgradeObj == nullptr && m_currContext == CB_CONTEXT_MULTI_SELECT)
+			{
+				const DrawableList *selectedDrawables = TheInGameUI->getAllSelectedDrawables();
+				for (DrawableListCIt it = selectedDrawables->begin(); it != selectedDrawables->end(); ++it)
+				{
+					Drawable *draw = *it;
+					Object *candidate = draw ? draw->getObject() : nullptr;
+					if (candidate == nullptr || !candidate->isLocallyControlled())
+						continue;
+					if (candidate->hasUpgrade(upgradeT) || !candidate->affectedByUpgrade(upgradeT))
+						continue;
+
+					CommandAvailability availability = getCommandAvailability(commandButton, candidate, control);
+					if (availability == COMMAND_AVAILABLE || availability == COMMAND_ACTIVE)
+					{
+						upgradeObj = candidate;
+						break;
+					}
+				}
 			}
 
-			ProductionUpdateInterface* pu = obj ? obj->getProductionUpdateInterface() : nullptr;
+			if (upgradeObj == nullptr ||
+					upgradeObj->hasUpgrade(upgradeT) ||
+					!upgradeObj->affectedByUpgrade(upgradeT))
+				break;
+
+			ProductionUpdateInterface* pu = upgradeObj->getProductionUpdateInterface();
 			if (pu != nullptr)
 			{
 				CanMakeType cmt = pu->canQueueUpgrade(upgradeT);
@@ -560,21 +581,11 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 				}
 			}
 
-			ObjectID objID = INVALID_ID;
-			if (obj)
-				objID = obj->getID();
-
-			// make sure that the this object can actually build the upgrade
-			if( obj && (obj->hasUpgrade( upgradeT ) == TRUE || obj->affectedByUpgrade( upgradeT ) == FALSE) )
-				break;
-
-			// send the message
 			GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_QUEUE_UPGRADE );
-			msg->appendObjectIDArgument( objID );
+			msg->appendObjectIDArgument( upgradeObj->getID() );
 			msg->appendIntegerArgument( upgradeT->getUpgradeNameKey() );
 
 			break;
-
 		}
 
 		//---------------------------------------------------------------------------------------------

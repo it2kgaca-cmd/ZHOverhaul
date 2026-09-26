@@ -156,10 +156,25 @@ void ControlBar::addCommonCommands( Drawable *draw, Bool firstDrawable )
 
 			Bool attackMove = (command && command->getCommandType() == GUI_COMMAND_ATTACK_MOVE) ||
 												(m_commonCommands[ i ] && m_commonCommands[ i ]->getCommandType() == GUI_COMMAND_ATTACK_MOVE);
+			Bool objectUpgrade = (command && command->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE) ||
+												(m_commonCommands[ i ] && m_commonCommands[ i ]->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE);
 
+			if (objectUpgrade)
+			{
+				const CommandButton *upgradeCommand =
+					(command && command->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE) ?
+						command : m_commonCommands[i];
+				if (upgradeCommand)
+				{
+					m_commonCommands[i] = upgradeCommand;
+					m_commandWindows[i]->winHide(FALSE);
+					m_commandWindows[i]->winEnable(TRUE);
+					setControlCommand(m_commandWindows[i], upgradeCommand);
+				}
+			}
 			// Kris: When any units have attack move, they all get it. This is to allow
 			// combat units to be selected with the odd dozer or pilot and still retain that ability.
-			if( attackMove && !m_commonCommands[ i ] )
+			else if( attackMove && !m_commonCommands[ i ] )
 			{
 				// put it in the common command set
 				m_commonCommands[ i ] = command;
@@ -363,7 +378,8 @@ void ControlBar::updateContextMultiSelect()
 			switch( availability )
 			{
 				case COMMAND_HIDDEN:
-					win->winHide( TRUE );
+					if (command->getCommandType() != GUI_COMMAND_OBJECT_UPGRADE)
+						win->winHide( TRUE );
 					break;
 				case COMMAND_RESTRICTED:
 					win->winEnable( FALSE );
@@ -410,6 +426,20 @@ void ControlBar::updateContextMultiSelect()
 		// don't consider slots that don't have commands
 		if( m_commonCommands[ i ] == nullptr )
 			continue;
+
+		if (m_commonCommands[i]->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE)
+		{
+			if (objectsThatCanDoCommand[i] > 0)
+			{
+				m_commandWindows[i]->winHide(FALSE);
+				m_commandWindows[i]->winEnable(TRUE);
+			}
+			else
+			{
+				m_commandWindows[i]->winHide(TRUE);
+			}
+			continue;
+		}
 
 		// check the count of objects that can do the command and enable/disable the control,
 		if( objectsThatCanDoCommand[ i ] > 0 )

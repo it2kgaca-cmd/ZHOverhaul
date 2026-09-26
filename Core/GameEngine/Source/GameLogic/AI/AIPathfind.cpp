@@ -974,49 +974,8 @@ void Path::optimize( const Object *obj, LocomotorSurfaceTypeMask acceptableSurfa
 			if (cell && cell->getType()==PathfindCell::CELL_CLIFF && !cell->getPinched()) {
 				isPassable = true;
 			}
-			// Horizontal, diagonal, and vertical steps are passable.
-			if (!isPassable) {
-				Int dx = node->getPosition()->x - anchor->getPosition()->x;
-				Int dy = node->getPosition()->y - anchor->getPosition()->y;
-				Bool mightBePassable = false;
-				if (IABS(dx)==PATHFIND_CELL_SIZE && IABS(dy)==PATHFIND_CELL_SIZE) {
-					isPassable = true;
-				}
-				PathNode *tmpNode;
-				if (dx==0) {
-					mightBePassable = true;
-					for (tmpNode = node->getPrevious(); tmpNode && tmpNode != anchor; tmpNode = tmpNode->getPrevious()) {
-						dx = tmpNode->getNext()->getPosition()->x - tmpNode->getPosition()->x;
-						if (dx!=0) mightBePassable = false;
-					}
-				}
-				if (dy==0) {
-					mightBePassable = true;
-					for (tmpNode = node->getPrevious(); tmpNode && tmpNode != anchor; tmpNode = tmpNode->getPrevious()) {
-						dy = tmpNode->getNext()->getPosition()->y - tmpNode->getPosition()->y;
-						if (dy!=0) mightBePassable = false;
-					}
-				}
-				if (dx == dy) {
-					mightBePassable = true;
-					for (tmpNode = node->getPrevious(); tmpNode &&   tmpNode != anchor; tmpNode = tmpNode->getPrevious()) {
-						dx = tmpNode->getNext()->getPosition()->x - tmpNode->getPosition()->x;
-						dy = tmpNode->getNext()->getPosition()->y - tmpNode->getPosition()->y;
-						if (dy!=dx) mightBePassable = false;
-					}
-				}
-				if (dx == -dy) {
-					mightBePassable = true;
-					for (tmpNode = node->getPrevious(); tmpNode &&   tmpNode != anchor; tmpNode = tmpNode->getPrevious()) {
-						dx = tmpNode->getNext()->getPosition()->x - tmpNode->getPosition()->x;
-						dy = tmpNode->getNext()->getPosition()->y - tmpNode->getPosition()->y;
-						if (dy!=-dx) mightBePassable = false;
-					}
-				}
-				if (mightBePassable) {
-					isPassable = true;
-				}
-			}
+			// Trust footprint-aware clearance. Do not resurrect a shortcut
+			// through a building corner just because the raw cells line up.
 			if (isPassable)
 			{
 				// anchor can directly see this node, make it next in the optimized path
@@ -1087,46 +1046,8 @@ void Path::optimizeGroundPath( Bool crusher, Int pathDiameter )
 			{
 				isPassable = true;
 			}
-			// Horizontal, diagonal, and vertical steps are passable.
-			if (!isPassable) {
-				Int dx = node->getPosition()->x - anchor->getPosition()->x;
-				Int dy = node->getPosition()->y - anchor->getPosition()->y;
-				Bool mightBePassable = false;
-				PathNode *tmpNode;
-				if (dx==0) {
-					mightBePassable = true;
-					for (tmpNode = node->getPrevious(); tmpNode && tmpNode != anchor; tmpNode = tmpNode->getPrevious()) {
-						dx = tmpNode->getNext()->getPosition()->x - tmpNode->getPosition()->x;
-						if (dx!=0) mightBePassable = false;
-					}
-				}
-				if (dy==0) {
-					mightBePassable = true;
-					for (tmpNode = node->getPrevious(); tmpNode && tmpNode != anchor; tmpNode = tmpNode->getPrevious()) {
-						dy = tmpNode->getNext()->getPosition()->y - tmpNode->getPosition()->y;
-						if (dy!=0) mightBePassable = false;
-					}
-				}
-				if (dx == dy) {
-					mightBePassable = true;
-					for (tmpNode = node->getPrevious(); tmpNode &&   tmpNode != anchor; tmpNode = tmpNode->getPrevious()) {
-						dx = tmpNode->getNext()->getPosition()->x - tmpNode->getPosition()->x;
-						dy = tmpNode->getNext()->getPosition()->y - tmpNode->getPosition()->y;
-						if (dy!=dx) mightBePassable = false;
-					}
-				}
-				if (dx == -dy) {
-					mightBePassable = true;
-					for (tmpNode = node->getPrevious(); tmpNode &&   tmpNode != anchor; tmpNode = tmpNode->getPrevious()) {
-						dx = tmpNode->getNext()->getPosition()->x - tmpNode->getPosition()->x;
-						dy = tmpNode->getNext()->getPosition()->y - tmpNode->getPosition()->y;
-						if (dy!=-dx) mightBePassable = false;
-					}
-				}
-				if (mightBePassable) {
-					isPassable = true;
-				}
-			}
+			// Keep the cell-by-cell corner route when real clearance rejects
+			// the direct shortcut.
 			if (isPassable)
 			{
 				// anchor can directly see this node, make it next in the optimized path
@@ -1151,9 +1072,16 @@ void Path::optimizeGroundPath( Bool crusher, Int pathDiameter )
 		if (node && node->getNextOptimized()) {
 			Real dx = node->getPosition()->x - anchor->getPosition()->x;
 			Real dy = node->getPosition()->y - anchor->getPosition()->y;
-			// If the x & y offsets are less than 2 pathfind cells, kill it.
+			// Only remove a short corner when the resulting segment is genuinely
+			// clear for this footprint.
 			if (dx*dx+dy*dy < sqr(PATHFIND_CELL_SIZE_F)*3.9f) {
-				anchor->setNextOptimized(node->getNextOptimized());
+				PathNode *after = node->getNextOptimized();
+				if (after && anchor->getLayer() == after->getLayer() &&
+						TheAI->pathfinder()->isGroundPathPassable(
+							crusher, *anchor->getPosition(), anchor->getLayer(),
+							*after->getPosition(), pathDiameter)) {
+					anchor->setNextOptimized(after);
+				}
 			}
 		}
 	}

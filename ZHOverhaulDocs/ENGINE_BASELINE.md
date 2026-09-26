@@ -529,3 +529,17 @@ Resource gathering uses a dedicated dock state machine with reserved queue, entr
 4. China Mission 2: destroy buildings and route tanks directly across the resulting rubble footprint.
 5. China/GLA/USA economy: run several gatherers per supply source and verify approach queue, resource pickup, return-to-center and repeated docking remain reliable.
 6. Repeat the previous choke-flow tests to ensure staggered crowd solving does not materially reduce responsiveness.
+
+
+## 0.1.0-alpha.6 - Precision builders, terminal settling and combat readiness
+
+- Dozer/worker build and repair movement is a precision lane: blob steering is disabled while an active builder approaches authored interaction points; allied mobile contact remains soft.
+- Construction verifies direct distance to the build action dock instead of assuming an idle locomotor arrived, and reissues the precision approach if it stopped early.
+- The no-dock fallback no longer drives toward the structure center; it reuses the reachability-aware build/repair position helper.
+- Destination-envelope completion checks direct distance to the parking anchor before path projection, addressing solo and group terminal swiveling.
+- Group arrival envelopes are wider and use more terminal hysteresis to reduce final compression.
+- Attack-move target acquisition uses a deterministic three-frame stagger and forces the existing mood scan due on those frames, preserving fog/shroud legality while eliminating random infantry reaction delays.
+- Guard scans immediately, then at a short deterministic cadence. Long-range pitched turret weapons use actual weapon range as the guard envelope, respect minimum range, do not pursue beyond that envelope, and pre-elevate toward configured FirePitch while guarding.
+- Path optimization no longer resurrects straight/diagonal shortcuts rejected by footprint clearance, and short corner nodes are only removed when the resulting segment is actually passable.
+- Multi-select object upgrades use actionable-union visibility; each click purchases the upgrade for the first eligible selected object.
+- Existing AI_DOCK precision exclusion remains for supply gatherers, preserving the alpha.5 docking behavior that tested successfully.

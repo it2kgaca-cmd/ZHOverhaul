@@ -558,7 +558,7 @@ void AIGroup::computeIndividualDestination( Coord3D *dest, const Coord3D *groupD
 		++crowdCount;
 	}
 
-	Real arrivalRadius = 1.35f * sqrtf(footprintSum);
+	Real arrivalRadius = 1.60f * sqrtf(footprintSum);
 	if (arrivalRadius < maxMemberRadius * 2.5f)
 		arrivalRadius = maxMemberRadius * 2.5f;
 
@@ -567,7 +567,7 @@ void AIGroup::computeIndividualDestination( Coord3D *dest, const Coord3D *groupD
 	{
 		// Translate the existing organic blob into a sensibly packed final envelope.
 		// Very scattered selections compress; compact selections may expand modestly.
-		Real targetShapeRadius = arrivalRadius * 0.88f;
+		Real targetShapeRadius = arrivalRadius;
 		if (currentBlobRadius > 0.01f)
 		{
 			Real scale = targetShapeRadius / currentBlobRadius;
@@ -581,7 +581,7 @@ void AIGroup::computeIndividualDestination( Coord3D *dest, const Coord3D *groupD
 
 		// A unit exactly at the group centroid otherwise receives the literal click.
 		// Give centroid units deterministic radial bias so the center cannot collapse.
-		Real minBias = obj->getGeometryInfo().getBoundingCircleRadius() * 1.5f;
+		Real minBias = obj->getGeometryInfo().getBoundingCircleRadius() * 1.8f;
 		if (minBias < PATHFIND_CELL_SIZE_F * 0.45f)
 			minBias = PATHFIND_CELL_SIZE_F * 0.45f;
 		if (length < minBias)
@@ -1852,9 +1852,9 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 		if( !addWaypoint )
 		{
 			ai->aiMoveToPosition( &dest, cmdSource );
-			Real arrivalTolerance = theUnit->getGeometryInfo().getBoundingCircleRadius() * 0.70f;
-			if (arrivalTolerance < PATHFIND_CELL_SIZE_F * 0.40f)
-				arrivalTolerance = PATHFIND_CELL_SIZE_F * 0.40f;
+			Real arrivalTolerance = theUnit->getGeometryInfo().getBoundingCircleRadius() * 0.85f;
+			if (arrivalTolerance < PATHFIND_CELL_SIZE_F * 0.50f)
+				arrivalTolerance = PATHFIND_CELL_SIZE_F * 0.50f;
 			ai->friend_setGroupArrival(dest, arrivalTolerance);
 		}
 		else
@@ -2430,9 +2430,9 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 			else
 				ai->aiMoveToPosition(&dest, cmdSource);
 
-			Real arrivalTolerance = member->getGeometryInfo().getBoundingCircleRadius() * 0.70f;
-			if (arrivalTolerance < PATHFIND_CELL_SIZE_F * 0.40f)
-				arrivalTolerance = PATHFIND_CELL_SIZE_F * 0.40f;
+			Real arrivalTolerance = member->getGeometryInfo().getBoundingCircleRadius() * 0.85f;
+			if (arrivalTolerance < PATHFIND_CELL_SIZE_F * 0.50f)
+				arrivalTolerance = PATHFIND_CELL_SIZE_F * 0.50f;
 			ai->friend_setGroupArrival(dest, arrivalTolerance);
 		}
 	}

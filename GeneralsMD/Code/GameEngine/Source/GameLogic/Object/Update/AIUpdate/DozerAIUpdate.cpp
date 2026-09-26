@@ -209,9 +209,9 @@ StateReturnType DozerActionPickActionPosState::update()
 																								 &goalPos ) == FALSE )
 		{
 
-			// return STATE_FAILURE; no, we don't ever want dozers to fail, particularly
-			// if ai.
-			goalPos = *goalObject->getPosition();
+			// Never fall back to the structure center: that is frequently an
+			// unreachable "dock". Reuse the reachability-aware helper instead.
+			DozerAIUpdate::findGoodBuildOrRepairPosition(dozer, goalObject, goalPos);
 
 		}
 
@@ -508,15 +508,30 @@ StateReturnType DozerActionDoActionState::update()
 
 			}
 
-			// if we're moving to the build dock location, when we become idle we are there
+			// Becoming idle does not prove we reached the construction dock. Verify
+			// direct distance and reissue the exact approach if movement stopped early.
 			if( dozerAI->getBuildSubTask() == DOZER_MOVING_TO_BUILD_DOCK_LOCATION )
 			{
 				if( ai->isIdle() )
 				{
-					dozerAI->setBuildSubTask( DOZER_DO_BUILD_AT_DOCK );
-					// Get the audio sound and start playing the construction sound (get the sound
-					// from the building itself)
-					dozerAI->startBuildingSound( goalObject->getTemplate()->getPerUnitSound( "UnderConstruction" ), goalObject->getID() );
+					const Coord3D *dockLocation = dozerAI->getDockPoint( m_task, DOZER_DOCK_POINT_ACTION );
+					if( dockLocation )
+					{
+						const Real dx = dozer->getPosition()->x - dockLocation->x;
+						const Real dy = dozer->getPosition()->y - dockLocation->y;
+						const Real dockTolerance = max( MIN_ACTION_TOLERANCE,
+							dozer->getGeometryInfo().getBoundingSphereRadius() + 12.0f );
+						if( dx*dx + dy*dy <= sqr(dockTolerance) )
+						{
+							dozerAI->setBuildSubTask( DOZER_DO_BUILD_AT_DOCK );
+							dozerAI->startBuildingSound( goalObject->getTemplate()->getPerUnitSound( "UnderConstruction" ), goalObject->getID() );
+						}
+						else
+						{
+							ai->ignoreObstacle(goalObject);
+							ai->aiMoveToPosition( dockLocation, CMD_FROM_AI );
+						}
+					}
 				}
 			}
 

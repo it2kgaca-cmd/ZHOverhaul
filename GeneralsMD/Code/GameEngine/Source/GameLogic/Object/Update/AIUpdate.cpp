@@ -56,6 +56,7 @@
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/Locomotor.h"
 #include "GameLogic/Module/AIUpdate.h"
+#include "GameLogic/Module/DozerAIUpdate.h"
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
@@ -768,6 +769,21 @@ Real AIUpdateInterface::getTurretTurnRate(WhichTurretType tur) const
 	return (tur != TURRET_INVALID && m_turretAI[tur] != nullptr) ?
 					m_turretAI[tur]->getTurnRate() :
 					0.0f;
+}
+
+//=============================================================================
+void AIUpdateInterface::prepareTurretForGuard(WhichTurretType tur)
+{
+	if (tur == TURRET_INVALID || m_turretAI[tur] == nullptr)
+		return;
+
+	TurretAI *turret = m_turretAI[tur];
+	if (!turret->isTurretEnabled() || !turret->isAllowsPitch())
+		return;
+
+	const Real firePitch = turret->getFirePitch();
+	if (firePitch > 0.0f)
+		turret->friend_turnTowardsPitch(firePitch, 1.0f);
 }
 
 //=============================================================================
@@ -1510,10 +1526,18 @@ Bool AIUpdateInterface::computeBlobTrafficGoal(const Coord3D& pathGoal, Coord3D 
 	if (obj == nullptr || !isDoingGroundMovement())
 		return FALSE;
 
-	// Docking is a precision-lane maneuver, not crowd movement.  Supply trucks,
-	// workers and Chinooks must hit the dock's reserved approach/entry/action
-	// points exactly enough for the dock state machine to advance.
-	if (getAIStateType() == AI_DOCK)
+	// Precision-lane maneuvers must hit authored interaction points without the
+	// local crowd solver bending the final approach sideways. Normal allied
+	// contact remains soft, so this does not bring back stop/repath traffic.
+	Bool precisionLane = (getAIStateType() == AI_DOCK);
+	DozerAIInterface *dozerAI = getDozerAIInterface();
+	if (dozerAI != nullptr)
+	{
+		const DozerTask task = dozerAI->getCurrentTask();
+		if (task == DOZER_TASK_BUILD || task == DOZER_TASK_REPAIR)
+			precisionLane = TRUE;
+	}
+	if (precisionLane)
 	{
 		m_cachedTrafficGoalValid = FALSE;
 		m_nextTrafficSolveFrame = 0;
