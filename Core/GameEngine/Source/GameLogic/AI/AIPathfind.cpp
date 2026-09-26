@@ -423,6 +423,14 @@ struct PathfindRequestProfileStats
 	Int openListTraversalSteps;
 	Int openListMaxTraversal;
 	Int openListMaxSize;
+	// 0.1.0 monster-search context. These remain aggregate per queued request;
+	// they do not create hot-loop Tracy events.
+	Int hierarchicalAttempts;
+	Int hierarchicalFailures;
+	Int sharedCorridorHits;
+	Int sharedCorridorRejected;
+	Int allPassableFallbacks;
+	Int tunnelingSearches;
 };
 
 struct PathfindStageFrameProfileStats
@@ -6804,7 +6812,8 @@ void Pathfinder::processPathfindQueue()
 					message.format(
 						"SlowPath frame=%u obj=%u unit=%s player=%d type=%d state=%d:%s stuck=%d retry=%d "
 						"cells=%d find=%d/%d/%d internal=%d/%d/%d closest=%d/%d/%d patch=%d/%d/%d other=%d "
-						"heap=%d/%d/%d/%d start=(%.1f,%.1f) requested=(%.1f,%.1f) goal=(%.1f,%.1f)",
+						"heap=%d/%d/%d/%d route=hier:%d/%d shared:%d/%d all:%d tunnel:%d "
+						"start=(%.1f,%.1f) requested=(%.1f,%.1f) goal=(%.1f,%.1f)",
 						TheGameLogic->getFrame(), obj->getID(), obj->getTemplate()->getName().str(), playerIndex, playerType,
 						(Int)ai->getCurrentStateID(), ai->getCurrentStateName().str(), ai->isBlockedAndStuck() ? 1 : 0, ai->getRetryPath() ? 1 : 0,
 						cellsForRequest,
@@ -6814,6 +6823,9 @@ void Pathfinder::processPathfindQueue()
 						s_pathfindRequestProfileStats.patchPathCalls, s_pathfindRequestProfileStats.patchPathCells, s_pathfindRequestProfileStats.patchPathSuccesses, otherCells,
 						s_pathfindRequestProfileStats.openListInsertCalls, s_pathfindRequestProfileStats.openListTraversalSteps,
 						s_pathfindRequestProfileStats.openListMaxTraversal, s_pathfindRequestProfileStats.openListMaxSize,
+						s_pathfindRequestProfileStats.hierarchicalAttempts, s_pathfindRequestProfileStats.hierarchicalFailures,
+						s_pathfindRequestProfileStats.sharedCorridorHits, s_pathfindRequestProfileStats.sharedCorridorRejected,
+						s_pathfindRequestProfileStats.allPassableFallbacks, s_pathfindRequestProfileStats.tunnelingSearches,
 						start ? start->x : 0.0f, start ? start->y : 0.0f, requested ? requested->x : 0.0f, requested ? requested->y : 0.0f,
 						goal ? goal->x : 0.0f, goal ? goal->y : 0.0f);
 					PROFILER_MSG(message.str(), message.getLength());
@@ -7345,6 +7357,8 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 				m_zoneManager, *cachedRoute, sharedStartBlock, sharedGoalBlock);
 			reusedSharedMacroRoute = true;
 #if defined(RTS_PROFILE_TRACY)
+			if (s_pathfindRequestProfileStats.active)
+				++s_pathfindRequestProfileStats.sharedCorridorHits;
 			++s_sharedMacroRouteHits;
 			s_sharedMacroRouteBlocksReused += blocksReused;
 			if (neighborStartHit)
@@ -7361,10 +7375,20 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 
 	if (!reusedSharedMacroRoute)
 	{
+#if defined(RTS_PROFILE_TRACY)
+		if (s_pathfindRequestProfileStats.active)
+			++s_pathfindRequestProfileStats.hierarchicalAttempts;
+#endif
 		Path *hPat = findHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
 		if (hPat) {
 			deleteInstance(hPat);
 		}	else {
+#if defined(RTS_PROFILE_TRACY)
+			if (s_pathfindRequestProfileStats.active) {
+				++s_pathfindRequestProfileStats.hierarchicalFailures;
+				++s_pathfindRequestProfileStats.allPassableFallbacks;
+			}
+#endif
 			m_zoneManager.setAllPassable();
 		}
 	}
@@ -7378,12 +7402,22 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 	{
 #if defined(RTS_PROFILE_TRACY)
 		++s_sharedMacroRouteRejected;
+		if (s_pathfindRequestProfileStats.active) {
+			++s_pathfindRequestProfileStats.sharedCorridorRejected;
+			++s_pathfindRequestProfileStats.hierarchicalAttempts;
+		}
 #endif
 		m_zoneManager.clearPassableFlags();
 		Path *hPat = findHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
 		if (hPat) {
 			deleteInstance(hPat);
 		}	else {
+#if defined(RTS_PROFILE_TRACY)
+			if (s_pathfindRequestProfileStats.active) {
+				++s_pathfindRequestProfileStats.hierarchicalFailures;
+				++s_pathfindRequestProfileStats.allPassableFallbacks;
+			}
+#endif
 			m_zoneManager.setAllPassable();
 		}
 		pat = internalFindPath(obj, locomotorSet, from, rawTo);
@@ -7546,6 +7580,11 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 		// somehow we got to an impassable location.
 		m_isTunneling = true;
 	}
+
+#if defined(RTS_PROFILE_TRACY)
+	if (m_isTunneling && s_pathfindRequestProfileStats.active)
+		++s_pathfindRequestProfileStats.tunnelingSearches;
+#endif
 
 	parentCell->startPathfind(goalCell);
 
