@@ -1677,6 +1677,10 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 
 
 	if (!addWaypoint && !isFormation) {
+		// Do not retain a shared corridor from an earlier formation/group move.
+		deleteInstance(m_groundPath);
+		m_groundPath = nullptr;
+
 		// 0.1.0-alpha.5: retire the retail "one shared path for the whole army"
 		// behavior for ordinary moves.  Each unit now requests an exact path from
 		// its own position; nearby units still share coarse macro-route corridors.
