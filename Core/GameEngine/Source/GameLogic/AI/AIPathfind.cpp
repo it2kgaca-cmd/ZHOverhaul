@@ -9741,6 +9741,12 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 		sharedClosestBlockDistance >= SHARED_MACRO_ROUTE_MIN_BLOCK_DISTANCE;
 
 	if (m_isTunneling) {
+#if defined(RTS_PROFILE_TRACY)
+		if (s_pathfindRequestProfileStats.active) {
+			++s_pathfindRequestProfileStats.tunnelingSearches;
+			++s_pathfindRequestProfileStats.allPassableFallbacks;
+		}
+#endif
 		m_zoneManager.setAllPassable(); // can't optimize.
 	}	else {
 		m_zoneManager.clearPassableFlags();
@@ -9760,6 +9766,8 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 				reusedClosestSharedMacroRoute = true;
 				gotHierarchicalPath = true;
 #if defined(RTS_PROFILE_TRACY)
+				if (s_pathfindRequestProfileStats.active)
+					++s_pathfindRequestProfileStats.sharedCorridorHits;
 				++s_sharedMacroRouteHits;
 				++s_sharedMacroRouteClosestHits;
 				s_sharedMacroRouteBlocksReused += blocksReused;
@@ -9777,11 +9785,21 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 
 		if (!reusedClosestSharedMacroRoute)
 		{
+#if defined(RTS_PROFILE_TRACY)
+			if (s_pathfindRequestProfileStats.active)
+				++s_pathfindRequestProfileStats.hierarchicalAttempts;
+#endif
 			Path *hPat = findClosestHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
 			if (hPat) {
 				deleteInstance(hPat);
 				gotHierarchicalPath = true;
 			}	else {
+#if defined(RTS_PROFILE_TRACY)
+				if (s_pathfindRequestProfileStats.active) {
+					++s_pathfindRequestProfileStats.hierarchicalFailures;
+					++s_pathfindRequestProfileStats.allPassableFallbacks;
+				}
+#endif
 				m_zoneManager.setAllPassable();
 			}
 		}
@@ -10034,6 +10052,8 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 #if defined(RTS_PROFILE_TRACY)
 		++s_sharedMacroRouteRejected;
 		++s_sharedMacroRouteClosestRejected;
+		if (s_pathfindRequestProfileStats.active)
+			++s_pathfindRequestProfileStats.sharedCorridorRejected;
 #endif
 		LatchRestore<Bool> disableSharedRetry(s_disableSharedClosestRouteRetry, true);
 		return findClosestPath(obj, locomotorSet, from, rawTo, blocked, pathCostMultiplier, moveAllies);
