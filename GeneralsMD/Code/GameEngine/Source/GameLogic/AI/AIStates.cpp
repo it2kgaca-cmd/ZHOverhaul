@@ -3647,7 +3647,9 @@ StateReturnType AIAttackMoveToState::update()
 		}
 
 		Object* nextObjectToAttack;
-		nextObjectToAttack = ai->getNextMoodTarget( !forceRetargetThisFrame, false );
+		// ZH Overhaul 0.1.0: attack-move is an explicit combat order, so
+		// hostile structures are valid targets even if idle auto-acquire ignores them.
+		nextObjectToAttack = ai->getNextMoodTarget( !forceRetargetThisFrame, false, true );
 		if (nextObjectToAttack != nullptr)
 		{
 			ai->friend_endingMove();
