@@ -3682,10 +3682,56 @@ StateReturnType AIAttackMoveToState::update()
 			return STATE_CONTINUE;
 		}
 
-		Object* nextObjectToAttack;
+		Object *preAimTarget = nullptr;
+		WhichTurretType currentTurret = ai->getWhichTurretForCurWeapon();
+		if (currentTurret != TURRET_INVALID && ai->getTurretTurnRate(currentTurret) != 0.0f)
+		{
+			Object *turretTarget = ai->getTurretTargetObject(currentTurret);
+			if (turretTarget && !turretTarget->isEffectivelyDead() &&
+				owner->getRelationship(turretTarget) == ENEMIES)
+			{
+				preAimTarget = turretTarget;
+			}
+		}
+
 		// ZH Overhaul 0.1.0: attack-move is an explicit combat order, so
-		// hostile structures are valid targets even if idle auto-acquire ignores them.
-		nextObjectToAttack = ai->getNextMoodTarget( !forceRetargetThisFrame, false, true );
+		// hostile structures are valid targets. For turreted units, scan the
+		// visible engagement area rather than only current weapon range so the
+		// turret can begin traversing before the hull arrives.
+		Object *scannedTarget = ai->getNextMoodTarget(
+			!forceRetargetThisFrame, false, true, false);
+		Object *nextObjectToAttack = scannedTarget ? scannedTarget : preAimTarget;
+
+		if (nextObjectToAttack != nullptr)
+		{
+			Bool weaponPicked = owner->chooseBestWeaponForTarget(
+				nextObjectToAttack, PREFER_MOST_DAMAGE, m_commandSrc);
+			if (weaponPicked)
+			{
+				owner->adjustModelConditionForWeaponStatus();
+				Weapon *weapon = owner->getCurrentWeapon();
+				WhichTurretType turret = ai->getWhichTurretForCurWeapon();
+				const Bool independentTurret =
+					turret != TURRET_INVALID && ai->getTurretTurnRate(turret) != 0.0f;
+
+				if (independentTurret)
+					ai->setTurretTargetObject(turret, nextObjectToAttack, FALSE);
+
+				// Pre-aim only while outside range. The outer move state keeps
+				// advancing, and the retained turret target is checked every
+				// frame so firing can begin as soon as range becomes legal.
+				if (weapon && independentTurret &&
+					!weapon->isWithinAttackRange(owner, nextObjectToAttack))
+				{
+					nextObjectToAttack = nullptr;
+				}
+			}
+			else
+			{
+				nextObjectToAttack = nullptr;
+			}
+		}
+
 		if (nextObjectToAttack != nullptr)
 		{
 			m_attackMoveMachine->setGoalObject(nextObjectToAttack);
