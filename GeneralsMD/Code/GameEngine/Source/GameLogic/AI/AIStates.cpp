@@ -3602,6 +3602,25 @@ void AIAttackMoveToState::onExit( StateExitType status )
 }
 
 //----------------------------------------------------------------------------------------------------------
+static Bool canAttackMoveFireWhileMoving(Object *owner, AIUpdateInterface *ai, Object *target)
+{
+	if (!owner || !ai || !target || !ai->isDoingGroundMovement())
+		return false;
+
+	// Turreted ground vehicles are already supported by the attack state as
+	// independent hull/turret actors. Keep the hull's move order alive while
+	// the turret handles a target that is currently in range.
+	if (!owner->isKindOf(KINDOF_VEHICLE))
+		return false;
+
+	Weapon *weapon = owner->getCurrentWeapon();
+	if (!weapon || !weapon->isWithinAttackRange(owner, target))
+		return false;
+
+	WhichTurretType turret = ai->getWhichTurretForCurWeapon();
+	return turret != TURRET_INVALID && ai->getTurretTurnRate(turret) != 0.0f;
+}
+
 StateReturnType AIAttackMoveToState::update()
 {
 
@@ -3620,8 +3639,19 @@ StateReturnType AIAttackMoveToState::update()
 
 	if (!m_attackMoveMachine->isInIdleState())
 	{
-		ai->setLocomotorGoalNone();
-		owner->clearModelConditionState(MODELCONDITION_MOVING);
+		Object *attackTarget = m_attackMoveMachine->getGoalObject();
+		const Bool fireWhileMoving = canAttackMoveFireWhileMoving(owner, ai, attackTarget);
+
+		// Retail attack-move unconditionally killed the locomotor goal here,
+		// forcing even turreted tanks to stop before every engagement. A turreted
+		// ground vehicle with a target already in range can keep advancing while
+		// the existing attack sub-machine independently aims and fires.
+		if (!fireWhileMoving)
+		{
+			ai->setLocomotorGoalNone();
+			owner->clearModelConditionState(MODELCONDITION_MOVING);
+		}
+
 		m_attackMoveMachine->updateStateMachine();
 
 		// if the machine is now idling, then we need to attempt to get a new target
@@ -3630,6 +3660,12 @@ StateReturnType AIAttackMoveToState::update()
 			shouldRepathThisFrame = true;
 			ai->friend_setLastCommandSource(m_commandSrc);
 		} else {
+			if (fireWhileMoving)
+			{
+				// Keep the outer move state feeding path waypoints while the
+				// attack sub-machine owns only the turret/weapon.
+				AIMoveToState::update();
+			}
 			return STATE_CONTINUE;
 		}
 	}
@@ -3652,9 +3688,15 @@ StateReturnType AIAttackMoveToState::update()
 		nextObjectToAttack = ai->getNextMoodTarget( !forceRetargetThisFrame, false, true );
 		if (nextObjectToAttack != nullptr)
 		{
-			ai->friend_endingMove();
 			m_attackMoveMachine->setGoalObject(nextObjectToAttack);
 			m_attackMoveMachine->setState( AI_ATTACK_OBJECT );
+
+			// setState() selects the weapon. If that gives us a real independently
+			// turning turret and the target is already in range, preserve the
+			// movement state instead of declaring the move finished.
+			if (!canAttackMoveFireWhileMoving(owner, ai, nextObjectToAttack))
+				ai->friend_endingMove();
+
 			shouldRepathThisFrame = false;	// we're about to drop out of this function, but this is semantic emphasis.
 			// Note that we picked up this command from the ai.
 			ai->friend_setLastCommandSource(CMD_FROM_AI);
