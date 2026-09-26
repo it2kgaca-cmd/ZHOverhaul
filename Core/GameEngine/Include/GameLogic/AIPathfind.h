@@ -816,6 +816,7 @@ protected:
 																PathfindCell *parentCell,
 																PathfindCell *goalCell, zoneStorageType parentZone,
 																zoneStorageType *examinedZones, Int &numExZones,
+																LocomotorSurfaceTypeMask locomotorSurface,
 																Bool crusher, Int &cellCount);
 	Bool checkForAdjust(Object *, const LocomotorSet& locomotorSet, Bool isHuman, Int cellX, Int cellY,
 		PathfindLayerEnum layer, Int iRadius, Bool center,Coord3D *dest, const Coord3D *groupDest) ;
