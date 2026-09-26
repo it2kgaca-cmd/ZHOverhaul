@@ -4523,7 +4523,7 @@ Bool AIUpdateInterface::canAutoAcquireWhileStealthed() const
 /**
  * Return the next object that our mood suggests we should attack.
  */
-Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuringIdle )
+Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuringIdle, Bool includeBuildings )
 {
 	Object *obj = getObject();
 
@@ -4648,7 +4648,9 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 		flags |= AI::IGNORE_INSIGNIFICANT_BUILDINGS;
 	}
 
-	if( d->m_autoAcquireEnemiesWhenIdle & AAS_Idle_Attack_Buildings )
+	// ZH Overhaul 0.1.0: an explicit attack-move may include hostile
+	// structures even when this unit would ignore buildings while merely idle.
+	if( includeBuildings || (d->m_autoAcquireEnemiesWhenIdle & AAS_Idle_Attack_Buildings) )
 	{
 		flags |= AI::ATTACK_BUILDINGS;
 	}
