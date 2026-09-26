@@ -1307,11 +1307,21 @@ Bool AIUpdateInterface::blockedBy(Object *other)
 	if (canCrush) return FALSE; // just run over them.
 
 	AIUpdateInterface* aiOther = other->getAI();
+	if (!aiOther) return FALSE; // Ignore it.
 
 	if (!aiOther->isDoingGroundMovement()) {
 		return FALSE; // Can't be blocked if the other is airborne.
 	}
-	if (!aiOther) return FALSE; // Ignore it.
+
+	// ZH Overhaul 0.1.0: friendly infantry should yield around armor rather
+	// than treating an allied vehicle as a hard path blocker. The reciprocal
+	// vehicle->infantry case remains in processCollision(), where the vehicle
+	// asks idle infantry to move aside and keeps its own route.
+	if (obj->getRelationship(other) == ALLIES &&
+			obj->isKindOf(KINDOF_INFANTRY) && other->isKindOf(KINDOF_VEHICLE))
+	{
+		return FALSE;
+	}
 
 	if (getCurLocomotor() && getCurLocomotor()->isMovingBackwards()) {
 		return false; // don't collide.
