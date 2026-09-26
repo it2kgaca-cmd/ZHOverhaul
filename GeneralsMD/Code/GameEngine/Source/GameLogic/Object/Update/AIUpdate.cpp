@@ -1253,7 +1253,7 @@ Bool AIUpdateInterface::hasHigherPathPriority(AIUpdateInterface *otherAI) const
  * crossing or head-on blocker. */
 Bool AIUpdateInterface::isSameDirectionConvoyFollower(Object *other) const
 {
-	Object *obj = getObject();
+	const Object *obj = getObject();
 	if (obj == nullptr || other == nullptr)
 		return FALSE;
 
