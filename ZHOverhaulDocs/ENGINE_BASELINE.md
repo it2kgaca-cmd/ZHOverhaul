@@ -272,3 +272,36 @@ These counters are per queued request and do not add per-cell or per-heap-operat
 - Observe tracked turning, destination spread, choke behavior, tank fire-on-the-move, turret pre-aim and hostile-building acquisition.
 - Test Burton / other secondary-surface movers and rubble-capable locomotors where available.
 - Capture Tracy messages if a large hitch occurs so the new `route=hier/shared/all/tunnel` context can identify the monster-search path.
+
+
+## 0.1.0-alpha.1 - Same-direction vehicle convoy flow
+
+The first Twilight Flame alpha test showed that destination spreading and tracked turning were visible improvements, but massed tanks still suffered severe throughput collapse at ramps and other narrowing terrain.
+
+### Cause
+Retail local collision handling treats a moving vehicle directly behind another moving vehicle like a generic blocker:
+- same-formation blocked speed can be multiplied by 0.55;
+- every consecutive blocked frame can then multiply the persistent `m_bumpSpeedLimit` by another 0.95;
+- a long column therefore develops an artificial accordion where each following tank can become slower than the tank ahead.
+
+The existing `Pathfinder::moveAllies()` helper does not solve moving traffic because it deliberately skips allies that are already moving.
+
+### Change
+- Classify an allied ground vehicle as convoy traffic only when:
+  - both units are vehicles and currently moving;
+  - their headings are within 45 degrees;
+  - the other vehicle is ahead of the current vehicle.
+- For that rear/follower vehicle, cap speed to the leading vehicle's velocity projected along the follower's heading.
+- Do not apply the same-formation 0.55 speed penalty to this convoy case.
+- Do not compound the persistent 0.95 bump-speed decay while the only active blocker is valid convoy traffic.
+- If any non-convoy blocker is also present in the same collision frame, normal conservative blocker behavior wins.
+- Vehicle-vs-vehicle collision remains real; this does not make tanks overlap or ghost through one another.
+
+### Test focus
+Repeat the large Tank General movement test on Twilight Flame, especially the ravine ramps:
+- a moving column should queue behind the lead vehicles without progressively slowing toward zero;
+- stopped leaders should still stop the queue;
+- when the front begins moving again, followers should resume promptly under their normal INI acceleration;
+- crossing, opposing, static, and mixed-obstacle collisions should retain the old conservative behavior.
+
+This is intentionally the smallest choke-flow slice. Stable zipper merging and predictive side-flow/local avoidance remain follow-up 0.1 work if the actual ramp entrance still oscillates after the accordion effect is removed.

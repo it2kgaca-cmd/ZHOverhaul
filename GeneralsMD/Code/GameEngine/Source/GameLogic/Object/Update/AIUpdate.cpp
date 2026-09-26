@@ -272,6 +272,8 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_movementComplete = FALSE;
 	m_isMoving = FALSE;
 	m_isBlocked = FALSE;
+	m_convoyBlocked = FALSE;
+	m_nonConvoyBlocked = FALSE;
 	m_isBlockedAndStuck = FALSE;
 	m_upgradedLocomotors = FALSE;
 	m_canPathThroughUnits = FALSE;
@@ -1246,11 +1248,74 @@ Bool AIUpdateInterface::hasHigherPathPriority(AIUpdateInterface *otherAI) const
 }
 
 //-------------------------------------------------------------------------------------------------
+/* Returns TRUE when "other" is an allied moving vehicle ahead of us and both vehicles are
+ * already travelling in roughly the same direction.  This is queue/convoy traffic, not a
+ * crossing or head-on blocker. */
+Bool AIUpdateInterface::isSameDirectionConvoyFollower(Object *other) const
+{
+	Object *obj = getObject();
+	if (obj == nullptr || other == nullptr)
+		return FALSE;
+
+	if (obj->getRelationship(other) != ALLIES)
+		return FALSE;
+
+	if (!obj->isKindOf(KINDOF_VEHICLE) || !other->isKindOf(KINDOF_VEHICLE))
+		return FALSE;
+
+	AIUpdateInterface *aiOther = other->getAI();
+	if (aiOther == nullptr || !isMoving() || !aiOther->isMoving())
+		return FALSE;
+
+	if (!isDoingGroundMovement() || !aiOther->isDoingGroundMovement())
+		return FALSE;
+
+	Coord3D ourDir = *obj->getUnitDirectionVector2D();
+	Coord3D otherDir = *other->getUnitDirectionVector2D();
+	const Real headingDot = ourDir.x * otherDir.x + ourDir.y * otherDir.y;
+	const Real MIN_CONVOY_HEADING_DOT = 0.70710678f; // within 45 degrees
+	if (headingDot < MIN_CONVOY_HEADING_DOT)
+		return FALSE;
+
+	Coord2D vectorToOther;
+	vectorToOther.x = other->getPosition()->x - obj->getPosition()->x;
+	vectorToOther.y = other->getPosition()->y - obj->getPosition()->y;
+
+	// Only the rear vehicle gets convoy-following treatment.  The vehicle in front
+	// keeps priority, which gives a choke a stable forward queue instead of swapping.
+	const Real ahead = vectorToOther.x * ourDir.x + vectorToOther.y * ourDir.y;
+	return ahead > 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
 /* Returns max speed we can have and not run into unit that is blocking us.
 */
-Real AIUpdateInterface::calculateMaxBlockedSpeed(Object *other) const
+Real AIUpdateInterface::calculateMaxBlockedSpeed(Object *other, Bool convoyFollower) const
 {
 	Coord3D ourDir = *getObject()->getUnitDirectionVector2D();
+	PhysicsBehavior *otherPhysics = other->getPhysics();
+	if (!otherPhysics) {
+		return m_curMaxBlockedSpeed;
+	}
+
+	Coord3D otherVel = *otherPhysics->getVelocity();
+	otherVel.z = 0;
+
+	if (convoyFollower)
+	{
+		// ZH Overhaul 0.1.0: a same-direction queue should inherit the speed of the
+		// vehicle ahead.  The retail formation multiplier and generic bump decay make
+		// each successive tank slower than the previous one, creating an accordion at
+		// ramps and bridges.  Physical collision and normal acceleration/braking still
+		// preserve spacing; this only removes the artificial compounded slowdown.
+		Real leaderForwardSpeed = otherVel.x * ourDir.x + otherVel.y * ourDir.y;
+		if (leaderForwardSpeed < 0.0f)
+			leaderForwardSpeed = 0.0f;
+		if (leaderForwardSpeed > m_curMaxBlockedSpeed)
+			return m_curMaxBlockedSpeed;
+		return leaderForwardSpeed;
+	}
+
 	Coord3D otherDir = *other->getUnitDirectionVector2D();
 	// Dot product is our directions projected onto each other.
 	Coord2D vectorToOther;
@@ -1261,12 +1326,6 @@ Real AIUpdateInterface::calculateMaxBlockedSpeed(Object *other) const
 	if (dotProduct<0) return 0; // They are running into us.
 
 	Real speedFactor = dotProduct;
-	PhysicsBehavior *otherPhysics = other->getPhysics();
-	if (!otherPhysics) {
-		return m_curMaxBlockedSpeed;
-	}
-	Coord3D otherVel = *otherPhysics->getVelocity();
-	otherVel.z = 0;
 	// Calculate how fast other is moving away from us...
 	Real awaySpeed = otherVel.length() * speedFactor;
 
@@ -1460,6 +1519,7 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 		Bool blocked = blockedBy(other);
 		if (blocked)
 		{
+			const Bool convoyFollower = isSameDirectionConvoyFollower(other);
 			if (getObject()->isKindOf(KINDOF_INFANTRY))
 			{
 				// Panic bounces around.
@@ -1469,12 +1529,16 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 				}
 			}
 			m_isBlocked = TRUE; // we are blocked.
+			if (convoyFollower)
+				m_convoyBlocked = TRUE;
+			else
+				m_nonConvoyBlocked = TRUE;
  			if (otherMoving && aiOther->isWaitingForPath())
 			{
 				return FALSE; // let them get their path;
 			}
 
-			Real maxSpeed = calculateMaxBlockedSpeed(other);
+			Real maxSpeed = calculateMaxBlockedSpeed(other, convoyFollower);
 			if (maxSpeed < m_curMaxBlockedSpeed)
 			{
 				m_curMaxBlockedSpeed = maxSpeed;
@@ -2046,6 +2110,8 @@ void AIUpdateInterface::friend_startingMove()
 	m_movementComplete = FALSE; // we aren't finished moving.
 	m_isMoving = TRUE;
 	m_blockedFrames = 0;
+	m_convoyBlocked = FALSE;
+	m_nonConvoyBlocked = FALSE;
 	m_isBlockedAndStuck = FALSE;
 }
 
@@ -2155,6 +2221,11 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 	m_isBlocked = FALSE;
 
 	Bool blocked = m_blockedFrames > 0;
+	const Bool convoyBlocked = blocked && m_convoyBlocked && !m_nonConvoyBlocked;
+	// Collision callbacks refill these for the next frame.  A real non-convoy
+	// blocker always wins over convoy-following treatment when both are present.
+	m_convoyBlocked = FALSE;
+	m_nonConvoyBlocked = FALSE;
 	Bool requiresConstantCalling = TRUE;	// assume the worst.
 
 	if (m_curLocomotor)
@@ -2227,11 +2298,21 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 						if (blocked && speed>m_curMaxBlockedSpeed)
 						{
 							speed = m_curMaxBlockedSpeed;
-							if (m_bumpSpeedLimit>speed) {
-								m_bumpSpeedLimit = speed;
+							if (convoyBlocked)
+							{
+								// Do not compound a 5% slowdown through every tank in a moving
+								// queue.  Once the leader opens space, INI acceleration governs
+								// how quickly the follower closes it again.
+								m_bumpSpeedLimit = FAST_AS_POSSIBLE;
 							}
-							m_bumpSpeedLimit *= 0.95f;
-							speed = m_bumpSpeedLimit;
+							else
+							{
+								if (m_bumpSpeedLimit>speed) {
+									m_bumpSpeedLimit = speed;
+								}
+								m_bumpSpeedLimit *= 0.95f;
+								speed = m_bumpSpeedLimit;
+							}
 						}
 						else
 						{

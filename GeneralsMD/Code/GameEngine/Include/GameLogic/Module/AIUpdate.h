@@ -616,7 +616,8 @@ protected:
 
 	Bool blockedBy(Object *other); ///< Returns true if we are blocked by "other"
 	Bool needToRotate(); ///< Returns true if we are not pointing in the right direction for movement.
-	Real calculateMaxBlockedSpeed(Object *other) const;
+	Bool isSameDirectionConvoyFollower(Object *other) const;
+	Real calculateMaxBlockedSpeed(Object *other, Bool convoyFollower) const;
 
 	virtual UpdateSleepTime doLocomotor();	// virtual so subclasses can override
 	void chooseGoodLocomotorFromCurrentSet();
@@ -789,6 +790,8 @@ private:
 	Bool				m_movementComplete;					///< True if we finished an AIInternalMoveToState.
 	Bool				m_isMoving;									///< True if we are in an AIInternalMoveToState.
 	Bool				m_isBlocked;
+	Bool				m_convoyBlocked;					///< Last collision frame included a same-direction allied vehicle ahead.
+	Bool				m_nonConvoyBlocked;				///< Last collision frame included a blocker that was not convoy-following traffic.
 	Bool				m_isBlockedAndStuck;				///< True if we are stuck & need to recompute path.
 	Bool				m_upgradedLocomotors;
 	Bool				m_canPathThroughUnits;			///< Can path through units.
