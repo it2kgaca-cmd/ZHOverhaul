@@ -1595,7 +1595,7 @@ Bool AIUpdateInterface::computeBlobTrafficGoal(const Coord3D& pathGoal, Coord3D 
 		queryRange = PATHFIND_CELL_SIZE_F * 4.0f;
 
 	SimpleObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(
-		obj, queryRange, FROM_BOUNDINGSPHERE_2D, nullptr, ITER_FASTEST);
+		obj, queryRange, FROM_BOUNDINGSPHERE_2D, nullptr, ITER_SORTED_NEAR_TO_FAR);
 
 	Real lateralSteer = 0.0f;
 	Real cohortLateralSum = 0.0f;

@@ -498,7 +498,7 @@ The local blob solver is no longer executed as a full sorted neighborhood query 
 
 - Crowd solves are staggered across three frames by ObjectID (about 10 Hz at 30 logic FPS).
 - The last valid local steering goal is reused between solves while normal locomotion continues every frame.
-- Neighborhood iteration uses `ITER_FASTEST` rather than allocating and sorting the full nearby set before consuming the capped influences.
+- The expensive crowd solve is reduced to one third of its previous frequency while preserving nearest-first neighbor ordering. A future profiling pass can replace the current sorted iterator with a fixed nearest-N partition query without changing movement semantics.
 
 The next profiling capture should measure aggregate crowd-solver cost before further optimization; no per-neighbor Tracy zones should be added.
 
