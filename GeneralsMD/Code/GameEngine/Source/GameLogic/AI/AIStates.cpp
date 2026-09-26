@@ -3684,7 +3684,9 @@ StateReturnType AIAttackMoveToState::update()
 
 		Object *preAimTarget = nullptr;
 		WhichTurretType currentTurret = ai->getWhichTurretForCurWeapon();
-		if (currentTurret != TURRET_INVALID && ai->getTurretTurnRate(currentTurret) != 0.0f)
+		const Bool canPreAimCurrentWeapon =
+			currentTurret != TURRET_INVALID && ai->getTurretTurnRate(currentTurret) != 0.0f;
+		if (canPreAimCurrentWeapon)
 		{
 			Object *turretTarget = ai->getTurretTargetObject(currentTurret);
 			if (turretTarget && !turretTarget->isEffectivelyDead() &&
@@ -3699,7 +3701,7 @@ StateReturnType AIAttackMoveToState::update()
 		// visible engagement area rather than only current weapon range so the
 		// turret can begin traversing before the hull arrives.
 		Object *scannedTarget = ai->getNextMoodTarget(
-			!forceRetargetThisFrame, false, true, false);
+			!forceRetargetThisFrame, false, true, !canPreAimCurrentWeapon);
 		Object *nextObjectToAttack = scannedTarget ? scannedTarget : preAimTarget;
 
 		if (nextObjectToAttack != nullptr)
@@ -3720,9 +3722,11 @@ StateReturnType AIAttackMoveToState::update()
 				// Pre-aim only while outside range. The outer move state keeps
 				// advancing, and the retained turret target is checked every
 				// frame so firing can begin as soon as range becomes legal.
-				if (weapon && independentTurret &&
-					!weapon->isWithinAttackRange(owner, nextObjectToAttack))
+				if (weapon && !weapon->isWithinAttackRange(owner, nextObjectToAttack))
 				{
+					// Turreted vehicles keep this as a pre-aim target. Fixed-gun
+					// and infantry weapons retain retail's in-range acquisition
+					// semantics and do not begin a new chase from the wider scan.
 					nextObjectToAttack = nullptr;
 				}
 			}
