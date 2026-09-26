@@ -614,12 +614,20 @@ protected:
 	// getAttitude is protected because other places should call getMoodMatrixValue to get all the facts they need to consider.
 	AttitudeType getAttitude() const;				///< get the current behavior modifier state.
 
+	enum LocalTrafficClass
+	{
+		LOCAL_TRAFFIC_NONE = 0,
+		LOCAL_TRAFFIC_SAME_FLOW,
+		LOCAL_TRAFFIC_CROSS_FLOW
+	};
+
 	Bool blockedBy(Object *other); ///< Returns true if we are blocked by "other"
 	Bool needToRotate(); ///< Returns true if we are not pointing in the right direction for movement.
-	Bool isSharedVehicleFlowTraffic(Object *other) const;
-	Bool isSameDirectionConvoyFollower(Object *other) const;
-	Bool tryConvoyFlowAround(ObjectID blockerID, const Coord3D& pathGoal, Coord3D *outGoal);
-	Real calculateMaxBlockedSpeed(Object *other, Bool convoyFollower) const;
+	LocalTrafficClass classifyLocalTraffic(Object *other) const;
+	Bool computeBlobTrafficGoal(const Coord3D& pathGoal, Coord3D *outGoal);
+	void receiveTrafficPush(Object *pusher);
+	Bool applyIdleTrafficDisplacement();
+	Real calculateMaxBlockedSpeed(Object *other) const;
 
 	virtual UpdateSleepTime doLocomotor();	// virtual so subclasses can override
 	void chooseGoodLocomotorFromCurrentSet();
@@ -792,12 +800,11 @@ private:
 	Bool				m_movementComplete;					///< True if we finished an AIInternalMoveToState.
 	Bool				m_isMoving;									///< True if we are in an AIInternalMoveToState.
 	Bool				m_isBlocked;
-	Bool				m_convoyBlocked;					///< Last collision frame included a same-direction allied vehicle ahead.
-	Bool				m_nonConvoyBlocked;				///< Last collision frame included a blocker that was not convoy-following traffic.
-	ObjectID		m_convoyBlockerID;				///< Nearest same-direction vehicle ahead from the last collision frame.
-	ObjectID		m_flowAroundBlockerID;			///< Blocker currently being passed by local flow steering.
-	Real				m_flowAroundSide;				///< Persisted side choice (-1/+1) while passing a blocker.
-	UnsignedInt	m_flowAroundUntil;				///< Safety timeout for a local flow commitment.
+	Bool				m_trafficDisplaced;				///< Idle unit has been locally pushed aside by friendly traffic.
+	Coord3D			m_trafficAnchor;				///< Idle unit's position before traffic displaced it.
+	Coord3D			m_trafficPushTarget;			///< Current local displacement target.
+	UnsignedInt	m_trafficPushUntil;			///< Keep moving toward the displacement target until this frame.
+	UnsignedInt	m_trafficReturnAfter;			///< Do not immediately step back into the moving column.
 	Bool				m_isBlockedAndStuck;				///< True if we are stuck & need to recompute path.
 	Bool				m_upgradedLocomotors;
 	Bool				m_canPathThroughUnits;			///< Can path through units.

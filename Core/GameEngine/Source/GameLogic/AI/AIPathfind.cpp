@@ -5693,6 +5693,30 @@ Bool Pathfinder::validMovementPosition( Bool isCrusher, LocomotorSurfaceTypeMask
 	return true;
 }
 
+static Bool isSoftFriendlyPathTraffic(const Object *obj, Object *unit)
+{
+	if (obj == nullptr || unit == nullptr || obj == unit)
+		return false;
+
+	if (obj->isEffectivelyDead() || unit->isEffectivelyDead())
+		return false;
+
+	if (obj->getRelationship(unit) != ALLIES)
+		return false;
+
+	const Bool ourCrowdBody = obj->isKindOf(KINDOF_VEHICLE) || obj->isKindOf(KINDOF_INFANTRY);
+	const Bool theirCrowdBody = unit->isKindOf(KINDOF_VEHICLE) || unit->isKindOf(KINDOF_INFANTRY);
+	if (!ourCrowdBody || !theirCrowdBody)
+		return false;
+
+	const AIUpdateInterface *ourAI = obj->getAIUpdateInterface();
+	AIUpdateInterface *theirAI = unit->getAIUpdateInterface();
+	if (ourAI == nullptr || theirAI == nullptr)
+		return false;
+
+	return ourAI->isDoingGroundMovement() && theirAI->isDoingGroundMovement();
+}
+
 /**
  * Checks to see if obj can occupy the pathfind cell at x,y.
  * Returns false if there is another unit's goal already there.
@@ -5766,9 +5790,12 @@ Bool Pathfinder::checkDestination(const Object *obj, Int cellX, Int cellY, Pathf
 				continue;
 			}
 
-			// order matters: we want to know if I consider it to be an ally, not vice versa
+			// Mobile allied bodies are soft traffic.  Destination spreading / local
+			// steering resolves the crowd; their goal cell is not a strategic wall.
 			if (obj->getRelationship(unit) == ALLIES) {
-				return false; 	// Don't usurp your allies goals.  jba.
+				if (isSoftFriendlyPathTraffic(obj, unit))
+					continue;
+				return false;
 			}
 			if (cell->getFlags()==PathfindCell::UNIT_PRESENT_FIXED) {
 				Bool canCrush = obj->canCrushOrSquish(unit, TEST_CRUSH_OR_SQUISH);
@@ -5819,7 +5846,9 @@ Bool Pathfinder::checkForMovement(const Object *obj, TCheckMovementInfo &info)
 
 			PathfindCell::CellFlags flags = cell->getFlags();
 			if ((flags == PathfindCell::UNIT_GOAL) || (flags == PathfindCell::UNIT_GOAL_OTHER_MOVING)) {
-				info.allyGoal = true;
+				Object *goalUnit = TheGameLogic->findObjectByID(cell->getGoalUnit());
+				if (!isSoftFriendlyPathTraffic(obj, goalUnit))
+					info.allyGoal = true;
 			} else if (flags == PathfindCell::NO_UNITS) {
 				continue;  // Nobody is here, so it's ok.
 			}
@@ -5856,6 +5885,11 @@ Bool Pathfinder::checkForMovement(const Object *obj, TCheckMovementInfo &info)
 				}
 			}
 			if (!check || !unit) {
+				continue;
+			}
+
+			if (isSoftFriendlyPathTraffic(obj, unit)) {
+				info.allyMoving = true;
 				continue;
 			}
 

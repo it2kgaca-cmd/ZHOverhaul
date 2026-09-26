@@ -272,12 +272,11 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_movementComplete = FALSE;
 	m_isMoving = FALSE;
 	m_isBlocked = FALSE;
-	m_convoyBlocked = FALSE;
-	m_nonConvoyBlocked = FALSE;
-	m_convoyBlockerID = INVALID_ID;
-	m_flowAroundBlockerID = INVALID_ID;
-	m_flowAroundSide = 0.0f;
-	m_flowAroundUntil = 0;
+	m_trafficDisplaced = FALSE;
+	m_trafficAnchor.zero();
+	m_trafficPushTarget.zero();
+	m_trafficPushUntil = 0;
+	m_trafficReturnAfter = 0;
 	m_isBlockedAndStuck = FALSE;
 	m_upgradedLocomotors = FALSE;
 	m_canPathThroughUnits = FALSE;
@@ -1252,99 +1251,270 @@ Bool AIUpdateInterface::hasHigherPathPriority(AIUpdateInterface *otherAI) const
 }
 
 //-------------------------------------------------------------------------------------------------
-/* Returns TRUE when two allied moving ground vehicles belong to the same movement flow.
- * Same AIGroup membership is authoritative: hull facing is allowed to diverge while the
- * group squeezes through a choke.  Unrelated groups keep a conservative heading test. */
-Bool AIUpdateInterface::isSharedVehicleFlowTraffic(Object *other) const
+/*
+ * Friendly mobile units are local traffic, not strategic obstacles.
+ *
+ * The retail engine has one binary idea of collision: blocked or not blocked.  That is useful
+ * for walls, cliffs, buildings and enemy bodies, but disastrous for a dense friendly army because
+ * "blocked" eventually scrubs velocity, increments stuck timers and forces a strategic repath.
+ *
+ * This classifier keeps allied ground infantry/vehicles out of that recovery machinery and lets
+ * the local blob solver steer around, squeeze through, or temporarily overlap them instead.
+ */
+AIUpdateInterface::LocalTrafficClass AIUpdateInterface::classifyLocalTraffic(Object *other) const
 {
 	const Object *obj = getObject();
-	if (obj == nullptr || other == nullptr)
-		return FALSE;
+	if (obj == nullptr || other == nullptr || obj == other)
+		return LOCAL_TRAFFIC_NONE;
 
-	if (obj->getRelationship(other) != ALLIES ||
-			!obj->isKindOf(KINDOF_VEHICLE) || !other->isKindOf(KINDOF_VEHICLE))
-	{
-		return FALSE;
-	}
+	if (obj->isEffectivelyDead() || other->isEffectivelyDead())
+		return LOCAL_TRAFFIC_NONE;
 
-	AIUpdateInterface *aiOther = other->getAI();
-	if (aiOther == nullptr || !isMoving() || !aiOther->isMoving())
-		return FALSE;
+	if (obj->getRelationship(other) != ALLIES)
+		return LOCAL_TRAFFIC_NONE;
 
-	if (!isDoingGroundMovement() || !aiOther->isDoingGroundMovement())
-		return FALSE;
+	const Bool ourCrowdBody = obj->isKindOf(KINDOF_VEHICLE) || obj->isKindOf(KINDOF_INFANTRY);
+	const Bool theirCrowdBody = other->isKindOf(KINDOF_VEHICLE) || other->isKindOf(KINDOF_INFANTRY);
+	if (!ourCrowdBody || !theirCrowdBody)
+		return LOCAL_TRAFFIC_NONE;
 
-	// Object::getGroup() is historically non-const, though this is read-only.
+	const AIUpdateInterface *ourAI = obj->getAI();
+	AIUpdateInterface *theirAI = other->getAI();
+	if (ourAI == nullptr || theirAI == nullptr)
+		return LOCAL_TRAFFIC_NONE;
+
+	if (!ourAI->isDoingGroundMovement() || !theirAI->isDoingGroundMovement())
+		return LOCAL_TRAFFIC_NONE;
+
+	// Same player-selection / AI group is the strongest indication of one blob.
 	AIGroup *ourGroup = const_cast<Object *>(obj)->getGroup();
 	AIGroup *theirGroup = other->getGroup();
 	if (ourGroup != nullptr && ourGroup == theirGroup)
+		return LOCAL_TRAFFIC_SAME_FLOW;
+
+	// Groups may be rebuilt by commands, so also compare actual movement intent.
+	if (isMoving() && theirAI->isMoving())
+	{
+		Coord2D ourIntent;
+		ourIntent.x = m_requestedDestination.x - obj->getPosition()->x;
+		ourIntent.y = m_requestedDestination.y - obj->getPosition()->y;
+		Coord2D theirIntent;
+		theirIntent.x = theirAI->m_requestedDestination.x - other->getPosition()->x;
+		theirIntent.y = theirAI->m_requestedDestination.y - other->getPosition()->y;
+
+		Real ourLen = ourIntent.length();
+		Real theirLen = theirIntent.length();
+		if (ourLen > PATHFIND_CELL_SIZE_F && theirLen > PATHFIND_CELL_SIZE_F)
+		{
+			ourIntent.x /= ourLen;
+			ourIntent.y /= ourLen;
+			theirIntent.x /= theirLen;
+			theirIntent.y /= theirLen;
+			if (ourIntent.x * theirIntent.x + ourIntent.y * theirIntent.y >= 0.5f)
+				return LOCAL_TRAFFIC_SAME_FLOW;
+		}
+	}
+
+	return LOCAL_TRAFFIC_CROSS_FLOW;
+}
+
+//-------------------------------------------------------------------------------------------------
+/*
+ * Give an idle friendly unit a short, local displacement instead of making the advancing unit stop.
+ * This never changes the displaced unit's state-machine command or path.  Once traffic clears it
+ * waits briefly, then drifts back toward the position it occupied before the push.
+ */
+void AIUpdateInterface::receiveTrafficPush(Object *pusher)
+{
+	Object *obj = getObject();
+	if (obj == nullptr || pusher == nullptr)
+		return;
+
+	if (!isIdle() || obj->isKindOf(KINDOF_IMMOBILE) || !isDoingGroundMovement())
+		return;
+
+	if (obj->testStatus(OBJECT_STATUS_IS_USING_ABILITY) || isBusy())
+		return;
+
+	if (classifyLocalTraffic(pusher) == LOCAL_TRAFFIC_NONE)
+		return;
+
+	// Infantry should never shove a tank out of the way.  Vehicles may push infantry
+	// or other vehicles; infantry may only push other infantry.
+	if (obj->isKindOf(KINDOF_VEHICLE) && !pusher->isKindOf(KINDOF_VEHICLE))
+		return;
+
+	const Coord3D pos = *obj->getPosition();
+	if (!m_trafficDisplaced)
+	{
+		m_trafficAnchor = pos;
+		m_trafficDisplaced = TRUE;
+	}
+
+	Coord2D away;
+	away.x = pos.x - pusher->getPosition()->x;
+	away.y = pos.y - pusher->getPosition()->y;
+	Real awayLen = away.length();
+	if (awayLen < 0.01f)
+	{
+		const Coord3D *pusherDir = pusher->getUnitDirectionVector2D();
+		away.x = pusherDir->x;
+		away.y = pusherDir->y;
+		awayLen = away.length();
+	}
+	if (awayLen < 0.01f)
+		return;
+	away.x /= awayLen;
+	away.y /= awayLen;
+
+	Real pushDist = obj->getGeometryInfo().getBoundingCircleRadius() * 0.75f;
+	if (pushDist < PATHFIND_CELL_SIZE_F * 0.75f)
+		pushDist = PATHFIND_CELL_SIZE_F * 0.75f;
+
+	Coord3D candidate = pos;
+	candidate.x += away.x * pushDist;
+	candidate.y += away.y * pushDist;
+	candidate.z = TheTerrainLogic->getLayerHeight(candidate.x, candidate.y, obj->getLayer());
+
+	Bool valid = TheAI->pathfinder()->validMovementPosition(
+		obj->getCrusherLevel() > 0, obj->getLayer(), m_locomotorSet, &candidate);
+	if (valid)
+	{
+		valid = TheAI->pathfinder()->isLinePassable(
+			obj, m_locomotorSet.getValidSurfaces(), obj->getLayer(), pos, candidate, FALSE, TRUE);
+	}
+
+	// If directly away is terrain-invalid, try either side of the pusher instead.
+	if (!valid)
+	{
+		const Coord3D *pusherDir = pusher->getUnitDirectionVector2D();
+		Coord2D side;
+		side.x = -pusherDir->y;
+		side.y = pusherDir->x;
+		for (Int attempt = 0; attempt < 2 && !valid; ++attempt)
+		{
+			Real sign = attempt == 0 ? 1.0f : -1.0f;
+			candidate = pos;
+			candidate.x += side.x * pushDist * sign;
+			candidate.y += side.y * pushDist * sign;
+			candidate.z = TheTerrainLogic->getLayerHeight(candidate.x, candidate.y, obj->getLayer());
+			valid = TheAI->pathfinder()->validMovementPosition(
+				obj->getCrusherLevel() > 0, obj->getLayer(), m_locomotorSet, &candidate);
+			if (valid)
+			{
+				valid = TheAI->pathfinder()->isLinePassable(
+					obj, m_locomotorSet.getValidSurfaces(), obj->getLayer(), pos, candidate, FALSE, TRUE);
+			}
+		}
+	}
+
+	if (!valid)
+		return;
+
+	m_trafficPushTarget = candidate;
+	m_trafficPushUntil = TheGameLogic->getFrame() + LOGICFRAMES_PER_SECOND / 2;
+	m_trafficReturnAfter = TheGameLogic->getFrame() + LOGICFRAMES_PER_SECOND;
+	wakeUpNow();
+}
+
+//-------------------------------------------------------------------------------------------------
+/* Drive an idle unit's tiny traffic displacement without entering AI_MOVE_OUT_OF_THE_WAY. */
+Bool AIUpdateInterface::applyIdleTrafficDisplacement()
+{
+	if (!m_trafficDisplaced || m_curLocomotor == nullptr)
+		return FALSE;
+
+	if (!isIdle())
+	{
+		m_trafficDisplaced = FALSE;
+		return FALSE;
+	}
+
+	Object *obj = getObject();
+	const UnsignedInt now = TheGameLogic->getFrame();
+	Coord3D target;
+	Bool returning = FALSE;
+
+	if (now <= m_trafficPushUntil)
+	{
+		target = m_trafficPushTarget;
+	}
+	else if (now < m_trafficReturnAfter)
+	{
+		// Hold the displaced spot briefly so we don't step straight back into the column.
+		obj->clearModelConditionState(MODELCONDITION_MOVING);
 		return TRUE;
+	}
+	else
+	{
+		target = m_trafficAnchor;
+		returning = TRUE;
+		if (!TheAI->pathfinder()->validMovementPosition(
+				obj->getCrusherLevel() > 0, obj->getLayer(), m_locomotorSet, &target))
+		{
+			m_trafficDisplaced = FALSE;
+			return FALSE;
+		}
+	}
 
-	Coord3D ourDir = *obj->getUnitDirectionVector2D();
-	Coord3D otherDir = *other->getUnitDirectionVector2D();
-	const Real headingDot = ourDir.x * otherDir.x + ourDir.y * otherDir.y;
-	return headingDot >= 0.70710678f;
+	Coord3D delta;
+	delta.x = target.x - obj->getPosition()->x;
+	delta.y = target.y - obj->getPosition()->y;
+	delta.z = 0.0f;
+	Real dist = delta.length();
+
+	Real doneDist = obj->getGeometryInfo().getBoundingCircleRadius() * 0.15f;
+	if (doneDist < 1.0f)
+		doneDist = 1.0f;
+
+	if (dist <= doneDist)
+	{
+		obj->clearModelConditionState(MODELCONDITION_MOVING);
+		if (returning)
+			m_trafficDisplaced = FALSE;
+		return TRUE;
+	}
+
+	Bool locallyBlocked = FALSE;
+	Real speed = m_curLocomotor->getMaxSpeedForCondition(obj->getBodyModule()->getDamageState()) * 0.65f;
+	m_curLocomotor->locoUpdate_moveTowardsPosition(obj, target, dist, speed, &locallyBlocked);
+	obj->setModelConditionState(MODELCONDITION_MOVING);
+	return TRUE;
 }
 
 //-------------------------------------------------------------------------------------------------
-/* Returns TRUE when "other" is ahead along our movement intent.  Movement intent, not
- * temporary hull facing, defines forward while local avoidance is steering around traffic. */
-Bool AIUpdateInterface::isSameDirectionConvoyFollower(Object *other) const
+/*
+ * Compute a StarCraft-style local crowd goal while preserving the strategic route.
+ *
+ * This is deliberately a steering layer, not a second pathfinder:
+ *   - forward path intent is always retained;
+ *   - same-flow allies create lateral separation and local cohesion;
+ *   - crossing allies / mobile enemies create predictive-ish side bias;
+ *   - allied infantry never deflects a vehicle;
+ *   - terrain is sampled before accepting the local goal;
+ *   - if lateral room disappears, steering collapses toward straight-forward compression
+ *     rather than reporting "blocked".
+ */
+Bool AIUpdateInterface::computeBlobTrafficGoal(const Coord3D& pathGoal, Coord3D *outGoal)
 {
-	if (!isSharedVehicleFlowTraffic(other))
+	if (outGoal == nullptr)
 		return FALSE;
 
-	const Object *obj = getObject();
-	Coord2D forward;
-	forward.x = m_requestedDestination.x - obj->getPosition()->x;
-	forward.y = m_requestedDestination.y - obj->getPosition()->y;
-	Real forwardLen = forward.length();
-	if (forwardLen < PATHFIND_CELL_SIZE_F)
-	{
-		const Coord3D *unitDir = obj->getUnitDirectionVector2D();
-		forward.x = unitDir->x;
-		forward.y = unitDir->y;
-		forwardLen = forward.length();
-	}
-	if (forwardLen < 0.01f)
+	Object *obj = getObject();
+	if (obj == nullptr || !isDoingGroundMovement())
 		return FALSE;
 
-	forward.x /= forwardLen;
-	forward.y /= forwardLen;
-
-	Coord2D vectorToOther;
-	vectorToOther.x = other->getPosition()->x - obj->getPosition()->x;
-	vectorToOther.y = other->getPosition()->y - obj->getPosition()->y;
-	return vectorToOther.x * forward.x + vectorToOther.y * forward.y > 0.0f;
-}
-
-//-------------------------------------------------------------------------------------------------
-/* Try to keep a same-direction vehicle flowing around the vehicle ahead without changing its
- * strategic path.  This is intentionally local steering: the existing path remains authoritative,
- * and the temporary goal is used only when terrain beside the blocker can fit this unit. */
-Bool AIUpdateInterface::tryConvoyFlowAround(ObjectID blockerID, const Coord3D& pathGoal, Coord3D *outGoal)
-{
-	if (outGoal == nullptr || blockerID == INVALID_ID)
+	const Bool ourVehicle = obj->isKindOf(KINDOF_VEHICLE);
+	const Bool ourInfantry = obj->isKindOf(KINDOF_INFANTRY);
+	if (!ourVehicle && !ourInfantry)
 		return FALSE;
 
-	const Object *obj = getObject();
-	Object *blocker = TheGameLogic->findObjectByID(blockerID);
-	if (obj == nullptr || blocker == nullptr)
-		return FALSE;
-
-	if (obj->getRelationship(blocker) != ALLIES ||
-			!obj->isKindOf(KINDOF_VEHICLE) || !blocker->isKindOf(KINDOF_VEHICLE))
-	{
-		return FALSE;
-	}
-
-	Coord3D pos = *obj->getPosition();
-
+	const Coord3D pos = *obj->getPosition();
 	Coord2D intent;
 	intent.x = m_requestedDestination.x - pos.x;
 	intent.y = m_requestedDestination.y - pos.y;
 	Real intentLen = intent.length();
-	if (intentLen >= PATHFIND_CELL_SIZE_F)
+	if (intentLen > 0.01f)
 	{
 		intent.x /= intentLen;
 		intent.y /= intentLen;
@@ -1353,70 +1523,202 @@ Bool AIUpdateInterface::tryConvoyFlowAround(ObjectID blockerID, const Coord3D& p
 	Coord2D forward;
 	forward.x = pathGoal.x - pos.x;
 	forward.y = pathGoal.y - pos.y;
-	Real forwardLen = forward.length();
+	Real pathForwardLen = forward.length();
+	Bool correctedBackwardGoal = FALSE;
 
-	// A lateral pass can put us far enough off the old exact path that path
-	// reacquisition briefly points behind us.  Do not let that turn a forward
-	// player order into a retreat.
-	if (intentLen >= PATHFIND_CELL_SIZE_F)
+	if (pathForwardLen > 0.01f)
 	{
-		if (forwardLen < 0.01f ||
-				(forward.x * intent.x + forward.y * intent.y) <= 0.0f)
-		{
-			forward = intent;
-			forwardLen = 1.0f;
-		}
+		forward.x /= pathForwardLen;
+		forward.y /= pathForwardLen;
 	}
-	if (forwardLen < 0.01f)
+
+	// Local crowd motion may move us off the exact path.  Never reacquire a point behind
+	// us when the original player/AI movement intent still clearly points forward.
+	if (intentLen > PATHFIND_CELL_SIZE_F &&
+			(pathForwardLen < 0.01f || forward.x * intent.x + forward.y * intent.y <= 0.0f))
 	{
-		const Coord3D *unitDir = obj->getUnitDirectionVector2D();
-		forward.x = unitDir->x;
-		forward.y = unitDir->y;
-		forwardLen = forward.length();
+		forward = intent;
+		pathForwardLen = PATHFIND_CELL_SIZE_F * 2.0f;
+		correctedBackwardGoal = TRUE;
 	}
-	if (forwardLen < 0.01f)
+
+	if (pathForwardLen < 0.01f)
 		return FALSE;
 
-	forward.x /= forwardLen;
-	forward.y /= forwardLen;
+	Coord2D left;
+	left.x = -forward.y;
+	left.y = forward.x;
 
-	Coord2D side;
-	side.x = -forward.y;
-	side.y = forward.x;
-
-	const Coord3D blockerPos = *blocker->getPosition();
 	const Real ourRadius = obj->getGeometryInfo().getBoundingCircleRadius();
-	const Real blockerRadius = blocker->getGeometryInfo().getBoundingCircleRadius();
-	const Real combinedRadius = ourRadius + blockerRadius;
-	const Real lateralClearance = combinedRadius + PATHFIND_CELL_SIZE_F * 0.5f;
-	const Real forwardClearance = combinedRadius + PATHFIND_CELL_SIZE_F;
+	Real queryRange = ourRadius * 4.0f;
+	if (queryRange < PATHFIND_CELL_SIZE_F * 4.0f)
+		queryRange = PATHFIND_CELL_SIZE_F * 4.0f;
 
-	// Commit to one side while passing this blocker.  Re-selecting left/right
-	// every collision frame creates weaving and can turn path reacquisition back
-	// into the pack.
-	if (m_flowAroundSide == 0.0f)
+	SimpleObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(
+		obj, queryRange, FROM_BOUNDINGSPHERE_2D, nullptr, ITER_SORTED_NEAR_TO_FAR);
+
+	Real lateralSteer = 0.0f;
+	Real cohortLateralSum = 0.0f;
+	Int cohortCount = 0;
+	Int influenceCount = 0;
+	Int considered = 0;
+
+	if (iter != nullptr)
 	{
-		const Real currentLateral =
-			(pos.x - blockerPos.x) * side.x + (pos.y - blockerPos.y) * side.y;
-		if (fabs(currentLateral) > PATHFIND_CELL_SIZE_F * 0.25f)
-			m_flowAroundSide = currentLateral >= 0.0f ? 1.0f : -1.0f;
-		else
-			m_flowAroundSide = ((obj->getID() ^ blocker->getID()) & 1) ? 1.0f : -1.0f;
+		for (Object *other = iter->first(); other != nullptr && considered < 18; other = iter->next())
+		{
+			if (other == obj || other->isEffectivelyDead())
+				continue;
+
+			AIUpdateInterface *otherAI = other->getAI();
+			if (otherAI == nullptr || !otherAI->isDoingGroundMovement())
+				continue;
+
+			const Bool otherVehicle = other->isKindOf(KINDOF_VEHICLE);
+			const Bool otherInfantry = other->isKindOf(KINDOF_INFANTRY);
+			if (!otherVehicle && !otherInfantry)
+				continue;
+
+			++considered;
+
+			Coord2D toOther;
+			toOther.x = other->getPosition()->x - pos.x;
+			toOther.y = other->getPosition()->y - pos.y;
+			Real dist = toOther.length();
+			if (dist < 0.01f)
+				dist = 0.01f;
+
+			const Real otherRadius = other->getGeometryInfo().getBoundingCircleRadius();
+			const Real combinedRadius = ourRadius + otherRadius;
+			const Real ahead = toOther.x * forward.x + toOther.y * forward.y;
+			const Real lateral = toOther.x * left.x + toOther.y * left.y;
+
+			if (obj->getRelationship(other) == ALLIES)
+			{
+				LocalTrafficClass traffic = classifyLocalTraffic(other);
+				if (traffic == LOCAL_TRAFFIC_NONE)
+					continue;
+
+				// Vehicles do not collide with or steer around allied infantry.  If the
+				// infantry is idle, ask it to take a tiny local step instead.
+				if (ourVehicle && otherInfantry)
+				{
+					if (otherAI->isIdle())
+						otherAI->receiveTrafficPush(obj);
+					continue;
+				}
+
+				// Infantry yields very strongly to allied armor, but failure to yield can
+				// never stop the vehicle because the collision itself is soft.
+				Real influenceRange = combinedRadius * (traffic == LOCAL_TRAFFIC_SAME_FLOW ? 2.75f : 2.25f);
+				if (ourInfantry && otherVehicle)
+					influenceRange = combinedRadius * 3.25f;
+
+				if (traffic == LOCAL_TRAFFIC_SAME_FLOW)
+				{
+					cohortLateralSum += lateral;
+					++cohortCount;
+
+					if (ourVehicle && otherVehicle && !otherAI->isMoving())
+						otherAI->receiveTrafficPush(obj);
+				}
+
+				if (dist < influenceRange && ahead > -combinedRadius)
+				{
+					Real sideSign;
+					if (fabs(lateral) > combinedRadius * 0.15f)
+						sideSign = lateral > 0.0f ? -1.0f : 1.0f;
+					else
+						sideSign = obj->getID() < other->getID() ? -1.0f : 1.0f;
+
+					Real proximity = 1.0f - dist / influenceRange;
+					if (proximity < 0.0f)
+						proximity = 0.0f;
+
+					Real strength = combinedRadius * proximity;
+					if (traffic == LOCAL_TRAFFIC_SAME_FLOW)
+						strength *= 0.95f;
+					else
+						strength *= 1.20f;
+
+					if (ourInfantry && otherVehicle)
+						strength *= 1.75f;
+
+					// Controlled soft penetration: mild overlap is tolerated; strong separation
+					// only appears when bodies substantially intersect.
+					Real comfortable = combinedRadius * 0.82f;
+					if (dist < comfortable)
+						strength += (comfortable - dist) * 1.5f;
+
+					lateralSteer += sideSign * strength;
+					++influenceCount;
+				}
+			}
+			else
+			{
+				// Mobile enemy traffic still remains a hard collision if contact occurs,
+				// but bias around it before contact so two armies do not deliberately
+				// drive their centers through each other.
+				Real influenceRange = combinedRadius * 2.0f;
+				if (dist < influenceRange && ahead > -combinedRadius * 0.5f)
+				{
+					Real sideSign;
+					if (fabs(lateral) > combinedRadius * 0.15f)
+						sideSign = lateral > 0.0f ? -1.0f : 1.0f;
+					else
+						sideSign = obj->getID() < other->getID() ? -1.0f : 1.0f;
+					Real proximity = 1.0f - dist / influenceRange;
+					lateralSteer += sideSign * combinedRadius * proximity;
+					++influenceCount;
+				}
+			}
+		}
+
+		deleteInstance(iter);
 	}
 
-	for (Int attempt = 0; attempt < 2; ++attempt)
+	// Local cohesion keeps a group blob-shaped without tying anyone to a rigid slot.
+	// Only lateral cohesion is used: the solver must never pull a member backward.
+	if (cohortCount > 0)
 	{
-		const Real sign = attempt == 0 ? m_flowAroundSide : -m_flowAroundSide;
-		Coord3D candidate = blockerPos;
-		candidate.x += forward.x * forwardClearance + side.x * lateralClearance * sign;
-		candidate.y += forward.y * forwardClearance + side.y * lateralClearance * sign;
-		candidate.z = pathGoal.z;
+		Real averageLateral = cohortLateralSum / cohortCount;
+		Real cohesion = averageLateral * 0.12f;
+		Real maxCohesion = ourRadius * 0.6f;
+		if (cohesion > maxCohesion) cohesion = maxCohesion;
+		if (cohesion < -maxCohesion) cohesion = -maxCohesion;
+		lateralSteer += cohesion;
+	}
 
-		// Never select a local bypass that does not make forward progress.
-		const Real forwardProgress =
-			(candidate.x - pos.x) * forward.x + (candidate.y - pos.y) * forward.y;
-		if (forwardProgress <= 0.0f)
-			continue;
+	if (influenceCount == 0 && !correctedBackwardGoal)
+		return FALSE;
+
+	Real maxLateral = ourRadius * 2.5f + PATHFIND_CELL_SIZE_F;
+	if (lateralSteer > maxLateral) lateralSteer = maxLateral;
+	if (lateralSteer < -maxLateral) lateralSteer = -maxLateral;
+
+	Real lookAhead = ourRadius * 2.25f;
+	if (lookAhead < PATHFIND_CELL_SIZE_F * 1.5f)
+		lookAhead = PATHFIND_CELL_SIZE_F * 1.5f;
+	if (!correctedBackwardGoal && pathForwardLen < lookAhead)
+		lookAhead = pathForwardLen;
+	if (lookAhead < 1.0f)
+		return FALSE;
+
+	// Try the full steering request, then progressively compress toward straight-forward
+	// movement.  This is the choke behavior: lack of lateral terrain narrows the blob
+	// instead of stopping the army.
+	Real lateralCandidates[4];
+	lateralCandidates[0] = lateralSteer;
+	lateralCandidates[1] = lateralSteer * 0.5f;
+	lateralCandidates[2] = lateralSteer * -0.35f;
+	lateralCandidates[3] = 0.0f;
+
+	for (Int attempt = 0; attempt < 4; ++attempt)
+	{
+		Coord3D candidate = pos;
+		candidate.x += forward.x * lookAhead + left.x * lateralCandidates[attempt];
+		candidate.y += forward.y * lookAhead + left.y * lateralCandidates[attempt];
+		candidate.z = TheTerrainLogic->getLayerHeight(candidate.x, candidate.y, obj->getLayer());
 
 		if (!TheAI->pathfinder()->validMovementPosition(
 				obj->getCrusherLevel() > 0, obj->getLayer(), m_locomotorSet, &candidate))
@@ -1424,16 +1726,12 @@ Bool AIUpdateInterface::tryConvoyFlowAround(ObjectID blockerID, const Coord3D& p
 			continue;
 		}
 
-		// Ignore transient moving-unit occupancy for this short probe.  Dynamic units
-		// are still real collisions and will be handled on the next frame; this check
-		// is only asking whether terrain/static geometry permits flowing to this side.
-		if (!TheAI->pathfinder()->isLinePassable(obj, m_locomotorSet.getValidSurfaces(),
-				obj->getLayer(), pos, candidate, FALSE, TRUE))
+		if (!TheAI->pathfinder()->isLinePassable(
+				obj, m_locomotorSet.getValidSurfaces(), obj->getLayer(), pos, candidate, FALSE, TRUE))
 		{
 			continue;
 		}
 
-		m_flowAroundSide = sign;
 		*outGoal = candidate;
 		return TRUE;
 	}
@@ -1442,61 +1740,44 @@ Bool AIUpdateInterface::tryConvoyFlowAround(ObjectID blockerID, const Coord3D& p
 }
 
 //-------------------------------------------------------------------------------------------------
-/* Returns max speed we can have and not run into unit that is blocking us.
-*/
-Real AIUpdateInterface::calculateMaxBlockedSpeed(Object *other, Bool convoyFollower) const
+/* Returns max speed we can have and not run into a genuine hard blocker. */
+Real AIUpdateInterface::calculateMaxBlockedSpeed(Object *other) const
 {
 	Coord3D ourDir = *getObject()->getUnitDirectionVector2D();
-	PhysicsBehavior *otherPhysics = other->getPhysics();
-	if (!otherPhysics) {
-		return m_curMaxBlockedSpeed;
-	}
-
-	Coord3D otherVel = *otherPhysics->getVelocity();
-	otherVel.z = 0;
-
-	if (convoyFollower)
-	{
-		// ZH Overhaul 0.1.0: a same-direction queue should inherit the speed of the
-		// vehicle ahead.  The retail formation multiplier and generic bump decay make
-		// each successive tank slower than the previous one, creating an accordion at
-		// ramps and bridges.  Physical collision and normal acceleration/braking still
-		// preserve spacing; this only removes the artificial compounded slowdown.
-		Real leaderForwardSpeed = otherVel.x * ourDir.x + otherVel.y * ourDir.y;
-		if (leaderForwardSpeed < 0.0f)
-			leaderForwardSpeed = 0.0f;
-		if (leaderForwardSpeed > m_curMaxBlockedSpeed)
-			return m_curMaxBlockedSpeed;
-		return leaderForwardSpeed;
-	}
-
 	Coord3D otherDir = *other->getUnitDirectionVector2D();
-	// Dot product is our directions projected onto each other.
+
 	Coord2D vectorToOther;
 	vectorToOther.x = other->getPosition()->x - getObject()->getPosition()->x;
 	vectorToOther.y = other->getPosition()->y - getObject()->getPosition()->y;
 	vectorToOther.normalize();
-	Real dotProduct = vectorToOther.x*otherDir.x	+ vectorToOther.y*otherDir.y;
-	if (dotProduct<0) return 0; // They are running into us.
 
-	Real speedFactor = dotProduct;
-	// Calculate how fast other is moving away from us...
-	Real awaySpeed = otherVel.length() * speedFactor;
+	Real dotProduct = vectorToOther.x * otherDir.x + vectorToOther.y * otherDir.y;
+	if (dotProduct < 0.0f)
+		return 0.0f;
 
-	// Now calculate the amount we are moving relative to towards them...
-	dotProduct = vectorToOther.x*ourDir.x	+ vectorToOther.y*ourDir.y;
-	if (dotProduct<=0) {
-		// Unexpected - we are moving away.  Shouldn't be blocked...
+	PhysicsBehavior *otherPhysics = other->getPhysics();
+	if (!otherPhysics)
 		return m_curMaxBlockedSpeed;
-	}
+
+	Coord3D otherVel = *otherPhysics->getVelocity();
+	otherVel.z = 0.0f;
+	Real awaySpeed = otherVel.length() * dotProduct;
+
+	dotProduct = vectorToOther.x * ourDir.x + vectorToOther.y * ourDir.y;
+	if (dotProduct <= 0.0f)
+		return m_curMaxBlockedSpeed;
+
 	Real maxSpeed = awaySpeed / dotProduct;
-	if (other->getFormationID()!=NO_FORMATION_ID && getObject()->getFormationID()==other->getFormationID()) {
-		maxSpeed *= 0.55f; // don't let formations crowd each other.
+	if (other->getFormationID() != NO_FORMATION_ID &&
+			getObject()->getFormationID() == other->getFormationID())
+	{
+		maxSpeed *= 0.55f;
 	}
-	if (maxSpeed>m_curMaxBlockedSpeed) return m_curMaxBlockedSpeed;
+
+	if (maxSpeed > m_curMaxBlockedSpeed)
+		return m_curMaxBlockedSpeed;
 	return maxSpeed;
 }
-
 
 //-------------------------------------------------------------------------------------------------
 Bool AIUpdateInterface::blockedBy(Object *other)
@@ -1522,18 +1803,11 @@ Bool AIUpdateInterface::blockedBy(Object *other)
 	AIUpdateInterface* aiOther = other->getAI();
 	if (!aiOther) return FALSE; // Ignore it.
 
+	if (classifyLocalTraffic(other) != LOCAL_TRAFFIC_NONE)
+		return FALSE;
+
 	if (!aiOther->isDoingGroundMovement()) {
 		return FALSE; // Can't be blocked if the other is airborne.
-	}
-
-	// ZH Overhaul 0.1.0: friendly infantry should yield around armor rather
-	// than treating an allied vehicle as a hard path blocker. The reciprocal
-	// vehicle->infantry case remains in processCollision(), where the vehicle
-	// asks idle infantry to move aside and keeps its own route.
-	if (obj->getRelationship(other) == ALLIES &&
-			obj->isKindOf(KINDOF_INFANTRY) && other->isKindOf(KINDOF_VEHICLE))
-	{
-		return FALSE;
 	}
 
 	if (getCurLocomotor() && getCurLocomotor()->isMovingBackwards()) {
@@ -1668,18 +1942,24 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 	Bool otherMoving = ( aiOther && aiOther->isMoving() );
 	if (!isDoingGroundMovement()) return FALSE;
 	if (!aiOther->isDoingGroundMovement()) return FALSE;
+
+	LocalTrafficClass traffic = classifyLocalTraffic(other);
+	if (traffic != LOCAL_TRAFFIC_NONE)
+	{
+		// Friendly infantry/vehicle contact is fully non-blocking.  Idle soft traffic
+		// may be locally displaced, but nobody enters blocked/stuck/repath recovery.
+		if (!selfMoving && otherMoving)
+			receiveTrafficPush(other);
+		else if (selfMoving && !otherMoving)
+			aiOther->receiveTrafficPush(getObject());
+		return FALSE;
+	}
+
 	if (selfMoving)
 	{
 		Bool blocked = blockedBy(other);
 		if (blocked)
 		{
-			const Bool sharedFlowTraffic = isSharedVehicleFlowTraffic(other);
-			const Bool convoyFollower = sharedFlowTraffic && isSameDirectionConvoyFollower(other);
-
-			// Side-by-side contact inside one moving pack is not a reason to replace
-			// the forward order with the retail move-out-of-the-way state.
-			if (sharedFlowTraffic && !convoyFollower)
-				return FALSE;
 			if (getObject()->isKindOf(KINDOF_INFANTRY))
 			{
 				// Panic bounces around.
@@ -1688,45 +1968,17 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 					return TRUE; // just bounce off of other humans.
 				}
 			}
-			m_isBlocked = TRUE; // we are blocked.
-			if (convoyFollower)
-			{
-				m_convoyBlocked = TRUE;
-				Object *priorBlocker = TheGameLogic->findObjectByID(m_convoyBlockerID);
-				if (priorBlocker == nullptr)
-				{
-					m_convoyBlockerID = other->getID();
-				}
-				else
-				{
-					const Coord3D *ourPos = getObject()->getPosition();
-					const Coord3D *otherPos = other->getPosition();
-					const Coord3D *priorPos = priorBlocker->getPosition();
-					const Real otherDistSqr = sqr(otherPos->x - ourPos->x) + sqr(otherPos->y - ourPos->y);
-					const Real priorDistSqr = sqr(priorPos->x - ourPos->x) + sqr(priorPos->y - ourPos->y);
-					if (otherDistSqr < priorDistSqr)
-						m_convoyBlockerID = other->getID();
-				}
-			}
-			else
-			{
-				m_nonConvoyBlocked = TRUE;
-			}
+			m_isBlocked = TRUE; // genuine hard blocker.
  			if (otherMoving && aiOther->isWaitingForPath())
 			{
 				return FALSE; // let them get their path;
 			}
 
-			Real maxSpeed = calculateMaxBlockedSpeed(other, convoyFollower);
+			Real maxSpeed = calculateMaxBlockedSpeed(other);
 			if (maxSpeed < m_curMaxBlockedSpeed)
 			{
 				m_curMaxBlockedSpeed = maxSpeed;
 			}
-
-			// Shared traffic is handled by local flow steering in doLocomotor().
-			// Never hand a moving pack back to retail deadlock/move-away handling.
-			if (sharedFlowTraffic)
-				return FALSE;
 
 			if (!aiOther->isMovingAwayFrom(getObject())) {
 
@@ -2294,12 +2546,9 @@ void AIUpdateInterface::friend_startingMove()
 	m_movementComplete = FALSE; // we aren't finished moving.
 	m_isMoving = TRUE;
 	m_blockedFrames = 0;
-	m_convoyBlocked = FALSE;
-	m_nonConvoyBlocked = FALSE;
-	m_convoyBlockerID = INVALID_ID;
-	m_flowAroundBlockerID = INVALID_ID;
-	m_flowAroundSide = 0.0f;
-	m_flowAroundUntil = 0;
+	m_trafficDisplaced = FALSE;
+	m_trafficPushUntil = 0;
+	m_trafficReturnAfter = 0;
 	m_isBlockedAndStuck = FALSE;
 }
 
@@ -2311,12 +2560,6 @@ void AIUpdateInterface::friend_endingMove()
 {
 	m_movementComplete = TRUE;
 	m_isMoving = FALSE;
-	m_convoyBlocked = FALSE;
-	m_nonConvoyBlocked = FALSE;
-	m_convoyBlockerID = INVALID_ID;
-	m_flowAroundBlockerID = INVALID_ID;
-	m_flowAroundSide = 0.0f;
-	m_flowAroundUntil = 0;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2403,6 +2646,9 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 
 	chooseGoodLocomotorFromCurrentSet();
 
+	if (applyIdleTrafficDisplacement())
+		return UPDATE_SLEEP_NONE;
+
 	if (m_isBlocked)
 	{
 		++m_blockedFrames;
@@ -2414,25 +2660,9 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 
 	m_isBlocked = FALSE;
 
+	// Only genuine hard obstacles can now feed this flag.  Friendly mobile traffic
+	// is resolved by computeBlobTrafficGoal() and never reaches blocked/stuck recovery.
 	Bool blocked = m_blockedFrames > 0;
-	const Bool convoyBlocked = blocked && m_convoyBlocked && !m_nonConvoyBlocked;
-	const ObjectID convoyBlockerID = m_convoyBlockerID;
-
-	if (convoyBlocked && convoyBlockerID != INVALID_ID)
-	{
-		if (m_flowAroundBlockerID != convoyBlockerID)
-		{
-			m_flowAroundBlockerID = convoyBlockerID;
-			m_flowAroundSide = 0.0f;
-		}
-		m_flowAroundUntil = TheGameLogic->getFrame() + 3 * LOGICFRAMES_PER_SECOND;
-	}
-
-	// Collision callbacks refill these for the next frame.  A real non-convoy
-	// blocker always wins over convoy-following treatment when both are present.
-	m_convoyBlocked = FALSE;
-	m_nonConvoyBlocked = FALSE;
-	m_convoyBlockerID = INVALID_ID;
 	Bool requiresConstantCalling = TRUE;	// assume the worst.
 
 	if (m_curLocomotor)
@@ -2502,73 +2732,19 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 						if( speed == FAST_AS_POSSIBLE || speed > myMaxSpeed )
 							speed = myMaxSpeed;
 
-						Bool convoyFlowAround = FALSE;
-						if (m_flowAroundBlockerID != INVALID_ID)
+						Coord3D trafficGoal;
+						if (computeBlobTrafficGoal(goalPos, &trafficGoal))
+							goalPos = trafficGoal;
+
+						if (blocked && speed>m_curMaxBlockedSpeed)
 						{
-							Object *flowBlocker = TheGameLogic->findObjectByID(m_flowAroundBlockerID);
-							Bool keepFlow = flowBlocker != nullptr &&
-								TheGameLogic->getFrame() <= m_flowAroundUntil &&
-								isSharedVehicleFlowTraffic(flowBlocker);
-
-							if (keepFlow)
-							{
-								Coord2D intent;
-								intent.x = m_requestedDestination.x - getObject()->getPosition()->x;
-								intent.y = m_requestedDestination.y - getObject()->getPosition()->y;
-								Real intentLen = intent.length();
-								if (intentLen > 0.01f)
-								{
-									intent.x /= intentLen;
-									intent.y /= intentLen;
-									Coord2D toBlocker;
-									toBlocker.x = flowBlocker->getPosition()->x - getObject()->getPosition()->x;
-									toBlocker.y = flowBlocker->getPosition()->y - getObject()->getPosition()->y;
-									const Real passedBy = toBlocker.x * intent.x + toBlocker.y * intent.y;
-									const Real clearDist = getObject()->getGeometryInfo().getBoundingCircleRadius() +
-										flowBlocker->getGeometryInfo().getBoundingCircleRadius();
-									if (passedBy < -clearDist)
-										keepFlow = FALSE;
-								}
-							}
-
-							if (keepFlow)
-							{
-								Coord3D flowGoal;
-								if (tryConvoyFlowAround(m_flowAroundBlockerID, goalPos, &flowGoal))
-								{
-									goalPos = flowGoal;
-									blocked = FALSE;
-									convoyFlowAround = TRUE;
-									m_bumpSpeedLimit = FAST_AS_POSSIBLE;
-								}
-							}
-
-							if (!keepFlow)
-							{
-								m_flowAroundBlockerID = INVALID_ID;
-								m_flowAroundSide = 0.0f;
-								m_flowAroundUntil = 0;
-							}
-						}
-
-						if (!convoyFlowAround && blocked && speed>m_curMaxBlockedSpeed)
-						{
+							// Retail stop/decay remains only for genuine hard blockers.
 							speed = m_curMaxBlockedSpeed;
-							if (convoyBlocked)
-							{
-								// Do not compound a 5% slowdown through every tank in a moving
-								// queue.  Once the leader opens space, INI acceleration governs
-								// how quickly the follower closes it again.
-								m_bumpSpeedLimit = FAST_AS_POSSIBLE;
+							if (m_bumpSpeedLimit>speed) {
+								m_bumpSpeedLimit = speed;
 							}
-							else
-							{
-								if (m_bumpSpeedLimit>speed) {
-									m_bumpSpeedLimit = speed;
-								}
-								m_bumpSpeedLimit *= 0.95f;
-								speed = m_bumpSpeedLimit;
-							}
+							m_bumpSpeedLimit *= 0.95f;
+							speed = m_bumpSpeedLimit;
 						}
 						else
 						{
@@ -3569,9 +3745,9 @@ void AIUpdateInterface::privateMoveAwayFromUnit( Object *unit, CommandSourceType
 	if (!unit)
 		return;
 
-	// Moving vehicles in one flow must not throw away the player's route to run
-	// a multi-second "escape this unit" path.  Local steering owns this case.
-	if (isSharedVehicleFlowTraffic(unit))
+	// Friendly crowd traffic never replaces the current command/path with the
+	// retail multi-second "escape this unit" route.
+	if (classifyLocalTraffic(unit) != LOCAL_TRAFFIC_NONE)
 		return;
 
 	ObjectID id = unit->getID();

@@ -356,3 +356,105 @@ The alpha.2 test exposed a legacy-state regression: vehicles could initially squ
 A congested group may temporarily overlap or squeeze more aggressively than retail, but it should retain positive forward intent. Local avoidance can bend vehicles sideways; it must not reinterpret friendly congestion as permission to retreat or circle back.
 
 This remains collision-reactive flow. True predictive blob movement—group look-ahead, width/lane estimation, cohesion/separation and pre-choke compression—remains the next architecture step.
+
+
+## 0.1.0-alpha.4 - Soft traffic and blob movement rewrite
+
+Alpha.1-alpha.3 demonstrated that the remaining choke failure was architectural rather than a tuning problem. Retail SAGE treats contact with another unit as a binary blocked condition. That condition can scrub locomotor velocity, accumulate blocked/stuck time, trigger repathing and enter the legacy move-out-of-the-way recovery system. Those policies are appropriate for hard terrain/structure failures, not dense friendly armies.
+
+### New movement model
+
+Ground infantry and vehicles now distinguish **soft friendly traffic** from genuine hard obstacles.
+
+Soft traffic includes allied ground infantry/vehicles, including allied-player units. It is handled by a local steering layer and does not:
+- set the mover's blocked flag;
+- increment blocked/stuck timers;
+- invoke follower-speed throttling;
+- enter the locomotor blocked/velocity-scrub branch;
+- trigger blocked repathing;
+- enter `AI_MOVE_OUT_OF_THE_WAY`;
+- call `getMoveAwayFromPath()`;
+- use the retail collision-ignore recovery timer.
+
+Walls, cliffs, structures, impassable terrain and non-soft hostile collisions remain hard obstacles and keep the existing stop/repath recovery behavior.
+
+### Blob steering
+
+Pathfinding remains strategic: it supplies the route and forward direction. A new local blob solver adjusts only the immediate movement goal.
+
+The solver:
+- preserves positive forward route intent;
+- refuses backward exact-path reacquisition when the original movement order is still forward;
+- uses loose lateral cohesion rather than rigid formation slots;
+- adds short-range separation from same-flow allies;
+- allows controlled soft overlap before separation becomes strong;
+- biases around crossing allied groups and nearby mobile enemies;
+- samples terrain before accepting a lateral steering goal;
+- progressively collapses lateral steering toward straight-forward movement when a choke narrows, causing the group to compress instead of stop.
+
+If the terrain only supports one lane, units may overlap more than retail while maintaining forward pressure. The priority is continuous army flow rather than perfect collision-cylinder separation.
+
+### Friendly infantry and armor
+
+Allied infantry and allied vehicles are fully soft to one another:
+- vehicles do not block, brake or steer around allied infantry;
+- infantry receives strong local steering away from allied armor;
+- inability of the infantry to yield never impedes the vehicle.
+
+### Friendly pushing
+
+An advancing vehicle may locally displace an idle allied infantryman or vehicle rather than stop behind it. This displacement:
+- does not replace the idle unit's state-machine command;
+- does not calculate a new strategic path;
+- chooses a nearby terrain-valid point;
+- keeps the idle unit aside briefly;
+- then returns it toward its original anchor position after traffic clears.
+
+Infantry cannot push vehicles.
+
+### Pathfinder occupancy
+
+Allied mobile ground infantry/vehicles are no longer treated as strategic occupied cells or reserved goal cells for another allied mobile ground unit. They remain represented physically, but local crowd steering—not A* blockage—resolves their interaction.
+
+### Architecture
+
+The movement stack is now:
+
+```
+strategic A* / shared macro corridor
+        -> path forward intent
+        -> local blob / avoidance / pushing solver
+        -> terrain-constrained local goal
+        -> existing tread/wheel locomotor physics
+```
+
+instead of:
+
+```
+friendly contact
+        -> blocked
+        -> velocity scrub
+        -> stuck timer
+        -> repath / move-away
+```
+
+The previous alpha.1-alpha.3 convoy fields and per-blocker flow-around state have been removed rather than layered underneath the new system.
+
+### Test focus
+
+Use mixed Tank General armies on Twilight Flame:
+- BattleMasters, Gattling Tanks and Emperor/Overlord-class units through both ravine ramps;
+- mixed armor + infantry;
+- stationary friendly/allied units placed in the approach;
+- two allied groups crossing one another;
+- repeated wide-blob -> choke -> open-ground movement.
+
+Key success criteria:
+1. friendly traffic does not produce stop/restart/repath waves;
+2. infantry cannot blockade armor;
+3. idle friendlies are displaced locally instead of causing a strategic traffic failure;
+4. groups compress through narrow terrain and expand afterward without rigid-slot recovery;
+5. no unit reverses merely to reacquire an old path segment;
+6. hard terrain and structures still stop/repath normally.
+
+Large-unit terrain clearance remains a separate audit from soft traffic. The retail path-radius cap is intentionally unchanged in this patch so any Overlord-specific map-clearance issue can be measured independently from the crowd rewrite.
