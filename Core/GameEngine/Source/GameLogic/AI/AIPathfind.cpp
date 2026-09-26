@@ -5591,7 +5591,10 @@ Locomotor* Pathfinder::chooseBestLocomotorForPosition(PathfindLayerEnum layer, L
 			return LOCOMOTORSURFACE_CLIFF | LOCOMOTORSURFACE_AIR;
 
 		case PathfindCell::CELL_RUBBLE:
-			return LOCOMOTORSURFACE_RUBBLE | LOCOMOTORSURFACE_AIR;
+			// Destroyed-building rubble is rough ground, not a strategic wall.
+			// Explicit RUBBLE locomotors remain supported, while ordinary GROUND
+			// locomotors (notably vehicles) may also traverse the footprint.
+			return LOCOMOTORSURFACE_GROUND | LOCOMOTORSURFACE_RUBBLE | LOCOMOTORSURFACE_AIR;
 
 		case PathfindCell::CELL_OBSTACLE:
 		case PathfindCell::CELL_BRIDGE_IMPASSABLE:

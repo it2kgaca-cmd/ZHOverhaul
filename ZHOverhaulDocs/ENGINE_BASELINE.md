@@ -458,3 +458,65 @@ Key success criteria:
 6. hard terrain and structures still stop/repath normally.
 
 Large-unit terrain clearance remains a separate audit from soft traffic. The retail path-radius cap is intentionally unchanged in this patch so any Overlord-specific map-clearance issue can be measured independently from the crowd rewrite.
+
+
+## 0.1.0-alpha.5 - Destination envelopes, per-origin routing and rubble
+
+The alpha.4 soft-traffic rewrite made transit dramatically more responsive, exposing three higher-level problems that retail traffic jams had previously hidden: exact-point arrival collapse, shared-group routing from the wrong origin, and rubble remaining inaccessible to ordinary ground vehicles.
+
+### Destination envelope / soft arrival
+
+Ordinary move and attack-move orders no longer interpret the player's click as a coordinate every member must occupy exactly.
+
+- `AIGroup::computeIndividualDestination()` now sizes the final blob from the group's actual collision footprints instead of using retail's fixed six-radii cap.
+- The current relative blob shape is translated into that footprint-scaled envelope, compressed when the selection is geographically scattered and modestly expanded when it is unusually tight.
+- Members near the exact centroid receive deterministic radial bias so multiple units cannot inherit the literal clicked coordinate.
+- Every final member destination is a soft parking anchor with a footprint-sized completion tolerance.
+- `AIInternalMoveToState` honors that tolerance, allowing a unit to finish once it is reasonably parked instead of swiveling indefinitely for pixel-perfect occupancy.
+- Retail click-to-gather / `groupTightenToPosition` collapse is disabled for ordinary player movement.
+
+This is deliberately a soft final layout: transit remains fluid and units are not tied to rigid formation slots.
+
+### Per-origin strategic routing
+
+Retail's `friend_computeGroundPath()` / `friend_moveVehicleToPos()` path sharing is retired for ordinary non-formation move orders.
+
+That system builds one route from a representative group location and then feeds derived waypoints to the entire selection. On maps such as Twilight Flame, a unit starting in a different base/plateau can therefore chase a waypoint on the far side of a cliff rather than discovering the ramp from its own origin.
+
+Ordinary movement now:
+1. assigns each unit its own final parking anchor;
+2. requests an exact path from that unit's actual position;
+3. relies on the existing shared macro-route cache to reuse coarse corridors among units whose start/goal blocks genuinely match.
+
+This acts as implicit spatial subgroup routing without cloning one exact path across geographically separated units.
+
+Explicit formation movement keeps the legacy formation-path behavior.
+
+### Crowd solver cost
+
+The local blob solver is no longer executed as a full sorted neighborhood query every simulation frame.
+
+- Crowd solves are staggered across three frames by ObjectID (about 10 Hz at 30 logic FPS).
+- The last valid local steering goal is reused between solves while normal locomotion continues every frame.
+- Neighborhood iteration uses `ITER_FASTEST` rather than allocating and sorting the full nearby set before consuming the capped influences.
+
+The next profiling capture should measure aggregate crowd-solver cost before further optimization; no per-neighbor Tracy zones should be added.
+
+### Rubble
+
+Destroyed building footprints become `CELL_RUBBLE`. Retail maps that exclusively to `LOCOMOTORSURFACE_RUBBLE`, leaving ordinary GROUND-only vehicle locomotors unable to cross destroyed buildings.
+
+`CELL_RUBBLE` now exposes:
+- `LOCOMOTORSURFACE_GROUND`
+- `LOCOMOTORSURFACE_RUBBLE`
+- `LOCOMOTORSURFACE_AIR`
+
+This keeps rubble as a distinct cell type while allowing ordinary ground vehicles and infantry to route through it.
+
+### Regression tests
+
+1. Twilight Flame: select armor from multiple bases/plateaus and order the whole selection across the map. Each origin should independently discover the correct ramp rather than driving toward another subgroup's corridor.
+2. Large BattleMaster/Gattling/Overlord blob: move to open ground and verify the final formation remains spread and stops, rather than collapsing onto the click and swiveling indefinitely.
+3. Repeat with attack-move.
+4. China Mission 2: destroy buildings and route tanks directly across the resulting rubble footprint.
+5. Repeat the previous choke-flow tests to ensure staggered crowd solving does not materially reduce responsiveness.

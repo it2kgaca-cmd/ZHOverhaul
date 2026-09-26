@@ -277,6 +277,12 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_trafficPushTarget.zero();
 	m_trafficPushUntil = 0;
 	m_trafficReturnAfter = 0;
+	m_nextTrafficSolveFrame = 0;
+	m_cachedTrafficGoalValid = FALSE;
+	m_cachedTrafficGoal.zero();
+	m_groupArrivalActive = FALSE;
+	m_groupArrivalAnchor.zero();
+	m_groupArrivalTolerance = 0.0f;
 	m_isBlockedAndStuck = FALSE;
 	m_upgradedLocomotors = FALSE;
 	m_canPathThroughUnits = FALSE;
@@ -1504,6 +1510,30 @@ Bool AIUpdateInterface::computeBlobTrafficGoal(const Coord3D& pathGoal, Coord3D 
 	if (obj == nullptr || !isDoingGroundMovement())
 		return FALSE;
 
+	const UnsignedInt now = TheGameLogic->getFrame();
+	if (m_nextTrafficSolveFrame == 0)
+		m_nextTrafficSolveFrame = now + (obj->getID() % 3);
+
+	if (now < m_nextTrafficSolveFrame)
+	{
+		if (m_cachedTrafficGoalValid)
+		{
+			Real dx = m_cachedTrafficGoal.x - obj->getPosition()->x;
+			Real dy = m_cachedTrafficGoal.y - obj->getPosition()->y;
+			if (dx*dx + dy*dy > sqr(PATHFIND_CELL_SIZE_F * 0.35f))
+			{
+				*outGoal = m_cachedTrafficGoal;
+				return TRUE;
+			}
+		}
+		return FALSE;
+	}
+
+	// Crowd steering at 10 Hz is enough for smooth 30 Hz locomotion and prevents
+	// every unit in a large blob from allocating/scanning a neighborhood each frame.
+	m_nextTrafficSolveFrame = now + 3;
+	m_cachedTrafficGoalValid = FALSE;
+
 	const Bool ourVehicle = obj->isKindOf(KINDOF_VEHICLE);
 	const Bool ourInfantry = obj->isKindOf(KINDOF_INFANTRY);
 	if (!ourVehicle && !ourInfantry)
@@ -1555,7 +1585,7 @@ Bool AIUpdateInterface::computeBlobTrafficGoal(const Coord3D& pathGoal, Coord3D 
 		queryRange = PATHFIND_CELL_SIZE_F * 4.0f;
 
 	SimpleObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(
-		obj, queryRange, FROM_BOUNDINGSPHERE_2D, nullptr, ITER_SORTED_NEAR_TO_FAR);
+		obj, queryRange, FROM_BOUNDINGSPHERE_2D, nullptr, ITER_FASTEST);
 
 	Real lateralSteer = 0.0f;
 	Real cohortLateralSum = 0.0f;
@@ -1732,6 +1762,8 @@ Bool AIUpdateInterface::computeBlobTrafficGoal(const Coord3D& pathGoal, Coord3D 
 			continue;
 		}
 
+		m_cachedTrafficGoal = candidate;
+		m_cachedTrafficGoalValid = TRUE;
 		*outGoal = candidate;
 		return TRUE;
 	}
@@ -2573,6 +2605,23 @@ void AIUpdateInterface::friend_setPath(Path *path)
 }
 
 //-------------------------------------------------------------------------------------------------
+void AIUpdateInterface::friend_setGroupArrival(const Coord3D& anchor, Real tolerance)
+{
+	m_groupArrivalActive = TRUE;
+	m_groupArrivalAnchor = anchor;
+	m_groupArrivalTolerance = tolerance;
+	if (m_groupArrivalTolerance < 0.0f)
+		m_groupArrivalTolerance = 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+void AIUpdateInterface::friend_clearGroupArrival()
+{
+	m_groupArrivalActive = FALSE;
+	m_groupArrivalTolerance = 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
 /**
  * This is used by the guard tunnel network state to set a target object.
  */
@@ -3173,6 +3222,12 @@ void AIUpdateInterface::aiDoCommand(const AICommandParms* parms)
 	}
 #endif
 
+	// A new command supersedes any prior group parking contract and invalidates
+	// the cached local steering target. Group move/attack-move reapply a fresh
+	// soft arrival anchor after this command is dispatched.
+	friend_clearGroupArrival();
+	m_cachedTrafficGoalValid = FALSE;
+	m_nextTrafficSolveFrame = 0;
 
 	switch (parms->m_cmd)
 	{

@@ -492,6 +492,14 @@ public:
 	void friend_setPath(Path *newPath);
 	Path* friend_getPath() { return m_path; }
 
+	// Group move arrival: each unit receives a soft parking anchor and may
+	// finish within a footprint-sized tolerance instead of chasing one exact pixel.
+	void friend_setGroupArrival(const Coord3D& anchor, Real tolerance);
+	void friend_clearGroupArrival();
+	Bool friend_hasGroupArrival() const { return m_groupArrivalActive; }
+	Real friend_getGroupArrivalTolerance() const { return m_groupArrivalTolerance; }
+	const Coord3D& friend_getGroupArrivalAnchor() const { return m_groupArrivalAnchor; }
+
 	void friend_setGoalObject(Object *obj);
 
 	virtual Bool processCollision(PhysicsBehavior *physics, Object *other); ///< Returns true if the physics collide should apply the force.  Normally not.  jba.
@@ -805,6 +813,12 @@ private:
 	Coord3D			m_trafficPushTarget;			///< Current local displacement target.
 	UnsignedInt	m_trafficPushUntil;			///< Keep moving toward the displacement target until this frame.
 	UnsignedInt	m_trafficReturnAfter;			///< Do not immediately step back into the moving column.
+	UnsignedInt	m_nextTrafficSolveFrame;		///< Stagger expensive neighbor scans across frames.
+	Bool				m_cachedTrafficGoalValid;	///< Cached local steering goal between crowd solves.
+	Coord3D			m_cachedTrafficGoal;
+	Bool				m_groupArrivalActive;			///< This movement belongs to a group destination envelope.
+	Coord3D			m_groupArrivalAnchor;			///< Soft final parking point inside the envelope.
+	Real				m_groupArrivalTolerance;		///< Radius within which the movement order may finish.
 	Bool				m_isBlockedAndStuck;				///< True if we are stuck & need to recompute path.
 	Bool				m_upgradedLocomotors;
 	Bool				m_canPathThroughUnits;			///< Can path through units.

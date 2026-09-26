@@ -512,42 +512,108 @@ Bool AIGroup::isEmpty() const
  * this object such that it keeps its relative position with the group.
  */
 void AIGroup::computeIndividualDestination( Coord3D *dest, const Coord3D *groupDest,
-																					 Object *obj, const Coord3D *center, Bool isFormation )
+											 Object *obj, const Coord3D *center, Bool isFormation )
 {
 	Coord2D v;
 
-	// compute vector from "group center" to self
+	// Keep the army's relative blob shape, but scale it into a destination
+	// envelope sized from the actual footprint of the moving group.  Retail's
+	// fixed six-radii cap becomes catastrophically dense for large armies.
 	const Coord3D *pos = obj->getPosition();
-	if (isFormation) {
+	if (isFormation)
+	{
 		obj->getFormationOffset(&v);
-	}	else {
+	}
+	else
+	{
 		v.x = pos->x - center->x;
 		v.y = pos->y - center->y;
 	}
-	Real length = v.length();
-	if (length > 6*obj->getGeometryInfo().getBoundingCircleRadius()) {
-		length = 6*obj->getGeometryInfo().getBoundingCircleRadius();
-	}
-	v.normalize();
-	v.x *= length;
-	v.y *= length;
-	PathfindLayerEnum layer = TheTerrainLogic->getLayerForDestination(groupDest);
 
-	// move to same offset at destination
-	/// @todo use fast int->real type cast here later
+	Real footprintSum = 0.0f;
+	Real currentBlobRadius = 0.0f;
+	Real maxMemberRadius = 0.0f;
+	Int crowdCount = 0;
+	for (std::list<Object *>::iterator it = m_memberList.begin(); it != m_memberList.end(); ++it)
+	{
+		Object *member = *it;
+		if (member == nullptr || member->isDisabledByType(DISABLED_HELD) || member->isKindOf(KINDOF_IMMOBILE))
+			continue;
+		AIUpdateInterface *memberAI = member->getAIUpdateInterface();
+		if (memberAI == nullptr || !memberAI->isDoingGroundMovement())
+			continue;
+		if (!member->isKindOf(KINDOF_VEHICLE) && !member->isKindOf(KINDOF_INFANTRY))
+			continue;
+
+		Real r = member->getGeometryInfo().getBoundingCircleRadius();
+		footprintSum += r*r;
+		if (r > maxMemberRadius)
+			maxMemberRadius = r;
+
+		Real dx = member->getPosition()->x - center->x;
+		Real dy = member->getPosition()->y - center->y;
+		Real d = sqrtf(dx*dx + dy*dy);
+		if (d > currentBlobRadius)
+			currentBlobRadius = d;
+		++crowdCount;
+	}
+
+	Real arrivalRadius = 1.35f * sqrtf(footprintSum);
+	if (arrivalRadius < maxMemberRadius * 2.5f)
+		arrivalRadius = maxMemberRadius * 2.5f;
+
+	Real length = v.length();
+	if (!isFormation && crowdCount > 1)
+	{
+		// Translate the existing organic blob into a sensibly packed final envelope.
+		// Very scattered selections compress; compact selections may expand modestly.
+		Real targetShapeRadius = arrivalRadius * 0.88f;
+		if (currentBlobRadius > 0.01f)
+		{
+			Real scale = targetShapeRadius / currentBlobRadius;
+			if (scale > 1.6f)
+				scale = 1.6f;
+			length *= scale;
+		}
+
+		if (length > arrivalRadius)
+			length = arrivalRadius;
+
+		// A unit exactly at the group centroid otherwise receives the literal click.
+		// Give centroid units deterministic radial bias so the center cannot collapse.
+		Real minBias = obj->getGeometryInfo().getBoundingCircleRadius() * 1.5f;
+		if (minBias < PATHFIND_CELL_SIZE_F * 0.45f)
+			minBias = PATHFIND_CELL_SIZE_F * 0.45f;
+		if (length < minBias)
+		{
+			Real angle = ((obj->getID() % 1024) / 1024.0f) * (2.0f * PI);
+			v.x = Cos(angle);
+			v.y = Sin(angle);
+			length = minBias;
+		}
+	}
+
+	if (length > 0.01f)
+	{
+		v.normalize();
+		v.x *= length;
+		v.y *= length;
+	}
+
+	PathfindLayerEnum layer = TheTerrainLogic->getLayerForDestination(groupDest);
 	dest->x = groupDest->x + v.x;
 	dest->y = groupDest->y + v.y;
-	dest->z = TheTerrainLogic->getLayerHeight( dest->x, dest->y, layer );
+	dest->z = TheTerrainLogic->getLayerHeight(dest->x, dest->y, layer);
+
 	AIUpdateInterface *ai = obj->getAIUpdateInterface();
-	if (ai && ai->isDoingGroundMovement()) {
-		if (isFormation) {
+	if (ai && ai->isDoingGroundMovement())
+	{
+		if (isFormation)
 			TheAI->pathfinder()->adjustDestination(obj, ai->getLocomotorSet(), dest, nullptr);
-		}	else {
+		else
 			TheAI->pathfinder()->adjustDestination(obj, ai->getLocomotorSet(), dest, groupDest);
-		}
 		TheAI->pathfinder()->updateGoal(obj, dest, LAYER_GROUND);
 	}
-
 }
 
 static const Int PATH_DIAMETER_IN_CELLS = 6;
@@ -1611,23 +1677,22 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 
 
 	if (!addWaypoint && !isFormation) {
-		friend_computeGroundPath(pos, cmdSource);
-		didInfantry = friend_moveInfantryToPos(pos, cmdSource);
-		didVehicles = friend_moveVehicleToPos(pos, cmdSource);
+		// 0.1.0-alpha.5: retire the retail "one shared path for the whole army"
+		// behavior for ordinary moves.  Each unit now requests an exact path from
+		// its own position; nearby units still share coarse macro-route corridors.
+		// This prevents a geographically scattered selection from chasing a route
+		// that starts on the wrong side of a cliff/ravine.
+		didInfantry = false;
+		didVehicles = false;
 	}
 	if (m_dirty)
 		recompute();
 
 	std::list<Object *>::iterator i;
-	if( !isFormation && cmdSource == CMD_FROM_PLAYER && TheGlobalData->m_groupMoveClickToGatherFactor > 0.0f )
-	{
-		ScaleRect2D( &min, &max, TheGlobalData->m_groupMoveClickToGatherFactor );
-
-		if( Coord3DInsideRect2D( pos, &min, &max ) )
-		{
-			tightenGroup = TRUE;
-		}
-	}
+	// Retail's click-to-gather path deliberately collapses a selection onto the
+	// clicked point.  The new destination envelope replaces it, so ordinary
+	// player movement never enters groupTightenToPosition here.
+	tightenGroup = FALSE;
 
   Real extraMargin = 0.0f;
 
@@ -1749,9 +1814,9 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 				theUnit->getFormationOffset(&v);
 				goalPos.x -= v.x;
 				goalPos.y -= v.y;
-			}	else {
-				center = *theUnit->getPosition();
 			}
+			// Non-formation movement keeps the true group centroid so translating
+			// the blob to its arrival envelope preserves its spatial shape.
 			firstUnit = false;
 		}
 		computeIndividualDestination( &dest, &goalPos, theUnit, &center, isFormation );
@@ -1783,6 +1848,10 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 		if( !addWaypoint )
 		{
 			ai->aiMoveToPosition( &dest, cmdSource );
+			Real arrivalTolerance = theUnit->getGeometryInfo().getBoundingCircleRadius() * 0.70f;
+			if (arrivalTolerance < PATHFIND_CELL_SIZE_F * 0.40f)
+				arrivalTolerance = PATHFIND_CELL_SIZE_F * 0.40f;
+			ai->friend_setGroupArrival(dest, arrivalTolerance);
 		}
 		else
 		{
@@ -2356,6 +2425,11 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 				ai->aiAttackMoveToPosition(&dest, maxShotsToFire, cmdSource);
 			else
 				ai->aiMoveToPosition(&dest, cmdSource);
+
+			Real arrivalTolerance = member->getGeometryInfo().getBoundingCircleRadius() * 0.70f;
+			if (arrivalTolerance < PATHFIND_CELL_SIZE_F * 0.40f)
+				arrivalTolerance = PATHFIND_CELL_SIZE_F * 0.40f;
+			ai->friend_setGroupArrival(dest, arrivalTolerance);
 		}
 	}
 }

@@ -1906,8 +1906,15 @@ StateReturnType AIInternalMoveToState::update()
 	// Check if we have reached our destination
 	//
 	Real onPathDistToGoal = ai->getLocomotorDistanceToGoal();
+	// A group arrival is a soft parking contract, not an exact coordinate.  The
+	// destination-envelope tolerance lets a unit settle without endlessly swiveling
+	// around a crowded final point.
+	Real closeEnoughDist = ai->getCurLocomotor() ? ai->getCurLocomotor()->getCloseEnoughDist() : 0.0f;
+	if (ai->friend_hasGroupArrival() && ai->friend_getGroupArrivalTolerance() > closeEnoughDist)
+		closeEnoughDist = ai->friend_getGroupArrivalTolerance();
+
 	//DEBUG_LOG(("onPathDistToGoal = %f %s",onPathDistToGoal, obj->getTemplate()->getName().str()));
-	if (ai->getCurLocomotor() && (onPathDistToGoal < ai->getCurLocomotor()->getCloseEnoughDist()))
+	if (ai->getCurLocomotor() && (onPathDistToGoal < closeEnoughDist))
 	{
 		if (ai->isDoingGroundMovement()) {
 			// sanity check
@@ -1919,7 +1926,10 @@ StateReturnType AIInternalMoveToState::update()
 			delta.x = obj->getPosition()->x - goalPos.x;
 			delta.y = obj->getPosition()->y - goalPos.y;
 			delta.z = 0;
-			if (delta.length() > 4*PATHFIND_CELL_SIZE_F) {
+			Real finishSanityDist = 4*PATHFIND_CELL_SIZE_F;
+			if (ai->friend_hasGroupArrival() && closeEnoughDist * 2.0f > finishSanityDist)
+				finishSanityDist = closeEnoughDist * 2.0f;
+			if (delta.length() > finishSanityDist) {
 				//DEBUG_LOG(("AIInternalMoveToState Trying to finish early.  Continuing..."));
 				onPathDistToGoal = ai->getLocomotorDistanceToGoal();
 				return STATE_CONTINUE;
