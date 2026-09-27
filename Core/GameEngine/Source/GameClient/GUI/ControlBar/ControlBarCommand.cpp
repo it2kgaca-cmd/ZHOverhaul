@@ -873,21 +873,6 @@ void ControlBar::updateContextCommand()
 				break;
 		}
 
-		// Repeat-enabled unit buttons remain right-clickable when their only blocker is
-		// money, queue capacity, parking, or the unit cap.  Left-click still runs the
-		// normal canMakeUnit checks, so this only keeps recipe editing accessible.
-		if( repeatActive && availability == COMMAND_RESTRICTED && repeatThing )
-		{
-			CanMakeType repeatMakeType = TheBuildAssistant->canMakeUnit( obj, repeatThing );
-			if( repeatMakeType == CANMAKE_NO_MONEY ||
-					repeatMakeType == CANMAKE_QUEUE_FULL ||
-					repeatMakeType == CANMAKE_PARKING_PLACES_FULL ||
-					repeatMakeType == CANMAKE_MAXED_OUT_FOR_PLAYER )
-			{
-				win->winEnable( TRUE );
-			}
-		}
-
 		//Determine by the production type of this button, whether or not the created object
 		//will have a veterancy rank
 		if( command->getCommandType() != GUI_COMMAND_EXIT_CONTAINER )
