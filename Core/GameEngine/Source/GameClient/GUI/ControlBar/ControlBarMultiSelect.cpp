@@ -122,9 +122,18 @@ void ControlBar::addCommonCommands( Drawable *draw, Bool firstDrawable )
 			// get command
 			command = commandSet->getCommandButton(i);
 
+			// Structures can expose a small, deliberately safe set of commands in a
+			// same-type mass selection. Destructive/single-owner commands such as Sell
+			// remain excluded until they receive explicit group semantics.
+			const Bool structureGroupCommand = command && obj->isKindOf(KINDOF_STRUCTURE) &&
+				(command->getCommandType() == GUI_COMMAND_UNIT_BUILD ||
+				 command->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE ||
+				 command->getCommandType() == GUI_COMMAND_TOGGLE_OVERCHARGE);
+
 			// add if present and can be used in a multi select
 			if( command && (BitIsSet( command->getOptions(), OK_FOR_MULTI_SELECT ) == TRUE ||
-							 command->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT) )
+							 command->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT ||
+							 structureGroupCommand) )
 			{
 
 				// put it in the common command set
