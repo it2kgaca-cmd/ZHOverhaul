@@ -547,10 +547,12 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 
 			}
 
-			// get a new production id to assign to this
-			ProductionID productionID = pu->requestUniqueUnitID();
-
-			// create a message to build this thing
+			// Single factories retain the retail client-generated production ID.
+			// Multi-factory commands defer ID generation to authoritative game logic so
+			// live play and replay consume exactly the same per-factory ID sequence.
+			ProductionID productionID = PRODUCTIONID_INVALID;
+			if (m_currContext != CB_CONTEXT_MULTI_SELECT)
+				productionID = pu->requestUniqueUnitID();
 
 			GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_QUEUE_UNIT_CREATE );
 			msg->appendIntegerArgument( whatToBuild->getTemplateID() );
