@@ -119,6 +119,40 @@ static Drawable *findAvailableSelectedBuilderFor( const ThingTemplate *whatToBui
 	return nullptr;
 }
 
+static Drawable *findAvailableSelectedProducerFor( const ThingTemplate *whatToBuild )
+{
+	if (whatToBuild == nullptr)
+		return nullptr;
+
+	const DrawableList *selectedDrawables = TheInGameUI->getAllSelectedDrawables();
+	if (selectedDrawables == nullptr)
+		return nullptr;
+
+	Drawable *fallback = nullptr;
+	for (DrawableListCIt it = selectedDrawables->begin(); it != selectedDrawables->end(); ++it)
+	{
+		Drawable *draw = *it;
+		Object *candidate = draw ? draw->getObject() : nullptr;
+		if (candidate == nullptr || !candidate->isLocallyControlled())
+			continue;
+
+		ProductionUpdateInterface *pu = candidate->getProductionUpdateInterface();
+		if (pu == nullptr || !TheBuildAssistant->isPossibleToMakeUnit(candidate, whatToBuild))
+			continue;
+
+		if (fallback == nullptr)
+			fallback = draw;
+
+		if (TheBuildAssistant->canMakeUnit(candidate, whatToBuild) == CANMAKE_OK)
+			return draw;
+	}
+
+	// Return an eligible producer even when none can build this instant; the normal
+	// canMakeUnit feedback path will then explain money/queue/cap state correctly.
+	return fallback;
+}
+
+
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 
@@ -217,6 +251,14 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 	{
 		smartBuildDrawable = findAvailableSelectedBuilderFor(commandButton->getThingTemplate());
 		obj = smartBuildDrawable ? smartBuildDrawable->getObject() : nullptr;
+	}
+
+	Drawable *smartProducerDrawable = nullptr;
+	if (m_currContext == CB_CONTEXT_MULTI_SELECT &&
+			commandButton->getCommandType() == GUI_COMMAND_UNIT_BUILD)
+	{
+		smartProducerDrawable = findAvailableSelectedProducerFor(commandButton->getThingTemplate());
+		obj = smartProducerDrawable ? smartProducerDrawable->getObject() : nullptr;
 	}
 
 	// Right-clicking a unit build command edits a standing production recipe instead
