@@ -493,12 +493,14 @@ public:
 	void friend_setPath(Path *newPath);
 	Path* friend_getPath() { return m_path; }
 
-	// Group move arrival: each unit receives a soft parking anchor and may
-	// finish within a footprint-sized tolerance instead of chasing one exact pixel.
+	// Terminal arrival: a move may finish anywhere inside a shared soft envelope.
+	// Factories and ordinary group movement use the same parking semantics.
 	void friend_setGroupArrival(const Coord3D& anchor, Real tolerance);
 	void friend_clearGroupArrival();
 	Bool friend_hasGroupArrival() const { return m_groupArrivalActive; }
 	Real friend_getGroupArrivalTolerance() const { return m_groupArrivalTolerance; }
+	Real friend_getEffectiveGroupArrivalTolerance() const;
+	Bool friend_isInsideGroupArrivalEnvelope(const Coord3D& pos, Real extraTolerance = 0.0f) const;
 	const Coord3D& friend_getGroupArrivalAnchor() const { return m_groupArrivalAnchor; }
 
 	void friend_setGoalObject(Object *obj);

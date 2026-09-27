@@ -1909,14 +1909,24 @@ StateReturnType AIInternalMoveToState::update()
 	// projection can otherwise keep returning a tiny side goal after the unit is
 	// already parked, producing the classic solo/group "swivel forever" behavior.
 	Real closeEnoughDist = ai->getCurLocomotor() ? ai->getCurLocomotor()->getCloseEnoughDist() : 0.0f;
-	if (ai->friend_hasGroupArrival() && ai->friend_getGroupArrivalTolerance() > closeEnoughDist)
-		closeEnoughDist = ai->friend_getGroupArrivalTolerance();
 
 	if (ai->friend_hasGroupArrival())
 	{
 		const Coord3D& arrival = ai->friend_getGroupArrivalAnchor();
 		const Real arrivalDx = obj->getPosition()->x - arrival.x;
 		const Real arrivalDy = obj->getPosition()->y - arrival.y;
+		const Real baseArrivalTolerance = ai->friend_getGroupArrivalTolerance();
+
+		// Do not neighborhood-scan the whole trip.  Only once we are near the
+		// terminal area do factory rally cohorts expand the soft envelope.
+		Real arrivalTolerance = baseArrivalTolerance;
+		Real probeDistance = baseArrivalTolerance + PATHFIND_CELL_SIZE_F * 8.0f;
+		if (arrivalDx*arrivalDx + arrivalDy*arrivalDy <= sqr(probeDistance))
+			arrivalTolerance = ai->friend_getEffectiveGroupArrivalTolerance();
+
+		if (arrivalTolerance > closeEnoughDist)
+			closeEnoughDist = arrivalTolerance;
+
 		if (arrivalDx*arrivalDx + arrivalDy*arrivalDy <= sqr(closeEnoughDist))
 		{
 			if (getAdjustsDestination())

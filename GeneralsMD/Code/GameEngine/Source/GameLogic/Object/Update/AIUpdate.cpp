@@ -1435,7 +1435,19 @@ void AIUpdateInterface::receiveTrafficPush(Object *pusher)
 
 	m_trafficPushTarget = candidate;
 	m_trafficPushUntil = TheGameLogic->getFrame() + LOGICFRAMES_PER_SECOND / 2;
-	m_trafficReturnAfter = TheGameLogic->getFrame() + LOGICFRAMES_PER_SECOND;
+
+	// Once a unit has reached a terminal group/rally envelope, a valid local
+	// displacement becomes its new parking spot.  Do not make it march back to
+	// the exact point it occupied before another friendly arrived.
+	if (friend_hasGroupArrival() &&
+			friend_isInsideGroupArrivalEnvelope(candidate, obj->getGeometryInfo().getBoundingCircleRadius() * 0.25f))
+	{
+		m_trafficReturnAfter = 0;
+	}
+	else
+	{
+		m_trafficReturnAfter = TheGameLogic->getFrame() + LOGICFRAMES_PER_SECOND;
+	}
 	wakeUpNow();
 }
 
@@ -1460,6 +1472,15 @@ Bool AIUpdateInterface::applyIdleTrafficDisplacement()
 	if (now <= m_trafficPushUntil)
 	{
 		target = m_trafficPushTarget;
+	}
+	else if (m_trafficReturnAfter == 0)
+	{
+		// Terminal parking accepts the displacement.  This is the crucial difference
+		// between transient lane traffic and a blob that has already arrived.
+		m_trafficAnchor = *obj->getPosition();
+		m_trafficDisplaced = FALSE;
+		obj->clearModelConditionState(MODELCONDITION_MOVING);
+		return TRUE;
 	}
 	else if (now < m_trafficReturnAfter)
 	{
@@ -2015,9 +2036,40 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 		// Friendly infantry/vehicle contact is fully non-blocking.  Idle soft traffic
 		// may be locally displaced, but nobody enters blocked/stuck/repath recovery.
 		if (!selfMoving && otherMoving)
+		{
 			receiveTrafficPush(other);
+		}
 		else if (selfMoving && !otherMoving)
+		{
 			aiOther->receiveTrafficPush(getObject());
+		}
+		else if (!selfMoving && !otherMoving)
+		{
+			// Two already-idle units can still end up substantially overlapped at a
+			// shared destination.  Deterministically move one body so a rally blob
+			// actually packs instead of leaving both actors swivel-locked together.
+			const Object *selfObj = getObject();
+			const Real combinedRadius = selfObj->getGeometryInfo().getBoundingCircleRadius() +
+				other->getGeometryInfo().getBoundingCircleRadius();
+			const Real dx = selfObj->getPosition()->x - other->getPosition()->x;
+			const Real dy = selfObj->getPosition()->y - other->getPosition()->y;
+			if (dx*dx + dy*dy < sqr(combinedRadius * 0.82f))
+			{
+				const Bool selfInfantry = selfObj->isKindOf(KINDOF_INFANTRY);
+				const Bool otherInfantry = other->isKindOf(KINDOF_INFANTRY);
+				const Bool selfVehicle = selfObj->isKindOf(KINDOF_VEHICLE);
+				const Bool otherVehicle = other->isKindOf(KINDOF_VEHICLE);
+
+				if (selfInfantry && otherVehicle)
+					receiveTrafficPush(other);
+				else if (selfVehicle && otherInfantry)
+					aiOther->receiveTrafficPush(selfObj);
+				else if (selfObj->getID() > other->getID())
+					receiveTrafficPush(other);
+				else
+					aiOther->receiveTrafficPush(selfObj);
+			}
+		}
 		return FALSE;
 	}
 
@@ -2646,6 +2698,91 @@ void AIUpdateInterface::friend_setGroupArrival(const Coord3D& anchor, Real toler
 	m_groupArrivalTolerance = tolerance;
 	if (m_groupArrivalTolerance < 0.0f)
 		m_groupArrivalTolerance = 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real AIUpdateInterface::friend_getEffectiveGroupArrivalTolerance() const
+{
+	if (!m_groupArrivalActive)
+		return 0.0f;
+
+	Real effective = m_groupArrivalTolerance;
+	Object *obj = getObject();
+	if (obj == nullptr || ThePartitionManager == nullptr)
+		return effective;
+
+	// Factory rally points start with a single-unit envelope and expand as more
+	// units sharing that same anchor arrive.  Selected groups usually already
+	// provide a full blob radius, so this simply confirms that radius.
+	Real queryRange = effective * 3.0f + PATHFIND_CELL_SIZE_F * 12.0f;
+	if (queryRange < PATHFIND_CELL_SIZE_F * 16.0f)
+		queryRange = PATHFIND_CELL_SIZE_F * 16.0f;
+	if (queryRange > PATHFIND_CELL_SIZE_F * 80.0f)
+		queryRange = PATHFIND_CELL_SIZE_F * 80.0f;
+
+	SimpleObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(
+		&m_groupArrivalAnchor, queryRange, FROM_BOUNDINGSPHERE_2D, nullptr, ITER_FASTEST);
+
+	Real footprintSum = 0.0f;
+	Real maxRadius = 0.0f;
+	Int cohortCount = 0;
+	Int considered = 0;
+	const Real anchorMatch = PATHFIND_CELL_SIZE_F * 2.0f;
+
+	if (iter)
+	{
+		for (Object *other = iter->first(); other != nullptr && considered < 96; other = iter->next())
+		{
+			if (other->isEffectivelyDead() || obj->getRelationship(other) != ALLIES)
+				continue;
+			if (!other->isKindOf(KINDOF_INFANTRY) && !other->isKindOf(KINDOF_VEHICLE))
+				continue;
+
+			AIUpdateInterface *otherAI = other->getAIUpdateInterface();
+			if (otherAI == nullptr || !otherAI->friend_hasGroupArrival())
+				continue;
+
+			const Coord3D& otherAnchor = otherAI->friend_getGroupArrivalAnchor();
+			const Real ax = otherAnchor.x - m_groupArrivalAnchor.x;
+			const Real ay = otherAnchor.y - m_groupArrivalAnchor.y;
+			if (ax*ax + ay*ay > sqr(anchorMatch))
+				continue;
+
+			++considered;
+			Real r = other->getGeometryInfo().getBoundingCircleRadius();
+			footprintSum += r*r;
+			if (r > maxRadius)
+				maxRadius = r;
+			++cohortCount;
+		}
+		deleteInstance(iter);
+	}
+
+	if (cohortCount > 1)
+	{
+		Real packedRadius = 1.60f * sqrtf(footprintSum);
+		if (packedRadius < maxRadius * 2.5f)
+			packedRadius = maxRadius * 2.5f;
+		if (packedRadius > effective)
+			effective = packedRadius;
+	}
+
+	return effective;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool AIUpdateInterface::friend_isInsideGroupArrivalEnvelope(const Coord3D& pos, Real extraTolerance) const
+{
+	if (!m_groupArrivalActive)
+		return FALSE;
+
+	Real tolerance = friend_getEffectiveGroupArrivalTolerance() + extraTolerance;
+	if (tolerance < 0.0f)
+		tolerance = 0.0f;
+
+	const Real dx = pos.x - m_groupArrivalAnchor.x;
+	const Real dy = pos.y - m_groupArrivalAnchor.y;
+	return dx*dx + dy*dy <= sqr(tolerance);
 }
 
 //-------------------------------------------------------------------------------------------------
