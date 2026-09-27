@@ -344,6 +344,7 @@ private:
 	bool onQueueUpgrade(GameMessage *msg, AIGroupPtr &currentlySelectedGroup);
 	bool onCancelUpgrade(GameMessage *msg, AIGroupPtr &currentlySelectedGroup);
 	bool onQueueUnitCreate(GameMessage *msg, AIGroupPtr &currentlySelectedGroup);
+	bool onToggleRepeatUnitCreate(GameMessage *msg, AIGroupPtr &currentlySelectedGroup);
 	bool onCancelUnitCreate(GameMessage *msg, AIGroupPtr &currentlySelectedGroup);
 	bool onDozerConstruct(GameMessage *msg, AIGroupPtr &currentlySelectedGroup);
 	bool onDozerCancelConstruct(GameMessage *msg, AIGroupPtr &currentlySelectedGroup);

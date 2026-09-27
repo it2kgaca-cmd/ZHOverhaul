@@ -677,6 +677,11 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			onCancelUnitCreate(msg, currentlySelectedGroup);
 			break;
 		}
+		case GameMessage::MSG_TOGGLE_REPEAT_UNIT_CREATE:
+		{
+			onToggleRepeatUnitCreate(msg, currentlySelectedGroup);
+			break;
+		}
 		case GameMessage::MSG_DOZER_CONSTRUCT:
 		case GameMessage::MSG_DOZER_CONSTRUCT_LINE:
 		{
@@ -1840,6 +1845,30 @@ bool GameLogic::onQueueUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupPtr &cur
 	return true;
 }
 
+bool GameLogic::onToggleRepeatUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupPtr &currentlySelectedGroup)
+{
+#if RETAIL_COMPATIBLE_AIGROUP
+	Object *producer = getSingleObjectFromSelection(currentlySelectedGroup);
+#else
+	Object *producer = getSingleObjectFromSelection(currentlySelectedGroup.Peek());
+#endif
+	Player *msgPlayer = getMessagePlayer(msg);
+	const ThingTemplate *whatToCreate = TheThingFactory->findByTemplateID( msg->getArgument( 0 )->integer );
+
+	if (producer == nullptr || whatToCreate == nullptr || producer->getControllingPlayer() != msgPlayer)
+		return false;
+
+	ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
+	if (pu == nullptr)
+		return false;
+
+	if (!TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate))
+		return false;
+
+	return pu->toggleRepeatUnit(whatToCreate);
+}
+
+//-------------------------------------------------------------------------------------------------
 bool GameLogic::onCancelUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupPtr &currentlySelectedGroup)
 {
 	Player *msgPlayer = getMessagePlayer(msg);
