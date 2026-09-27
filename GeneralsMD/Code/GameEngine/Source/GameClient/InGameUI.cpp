@@ -82,6 +82,8 @@
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/ScriptEngine.h"
 #include "GameLogic/Module/ContainModule.h"
+#include "GameLogic/Module/AIUpdate.h"
+#include "GameLogic/Module/DozerAIUpdate.h"
 #include "GameLogic/Module/ProductionUpdate.h"
 #include "GameLogic/Module/SpecialPowerModule.h"
 #include "GameLogic/Module/StealthUpdate.h"
@@ -1620,6 +1622,46 @@ void InGameUI::evaluateSoloNexus( Drawable *newlyAddedDrawable )
 }
 
 
+static Object *findClosestSelectedBuilderForPlacementPreview(const ThingTemplate *build, const Coord3D& worldPos)
+{
+	if (build == nullptr || TheInGameUI == nullptr)
+		return nullptr;
+
+	const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
+	if (selected == nullptr)
+		return nullptr;
+
+	Object *best = nullptr;
+	Real bestDistSqr = 1.0e30f;
+	for (DrawableListCIt it = selected->begin(); it != selected->end(); ++it)
+	{
+		Drawable *draw = *it;
+		Object *candidate = draw ? draw->getObject() : nullptr;
+		if (candidate == nullptr || !candidate->isLocallyControlled() ||
+				candidate->isContained() || !candidate->isKindOf(KINDOF_DOZER))
+			continue;
+
+		AIUpdateInterface *ai = candidate->getAIUpdateInterface();
+		DozerAIInterface *dozerAI = ai ? ai->getDozerAIInterface() : nullptr;
+		if (dozerAI == nullptr || dozerAI->isTaskPending(DOZER_TASK_BUILD))
+			continue;
+		if (!TheBuildAssistant->isPossibleToMakeUnit(candidate, build))
+			continue;
+
+		const Real dx = candidate->getPosition()->x - worldPos.x;
+		const Real dy = candidate->getPosition()->y - worldPos.y;
+		const Real distSqr = dx*dx + dy*dy;
+		if (best == nullptr || distSqr < bestDistSqr ||
+				(distSqr == bestDistSqr && candidate->getID() < best->getID()))
+		{
+			best = candidate;
+			bestDistSqr = distSqr;
+		}
+	}
+	return best;
+}
+
+//-------------------------------------------------------------------------------------------------
 void InGameUI::handleBuildPlacements()
 {
 
@@ -1684,48 +1726,55 @@ void InGameUI::handleBuildPlacements()
 		to do is set a simple angle and have it automatically change, ug! */
 		if( TheTacticalView->screenToTerrain( &loc, &world ) )
 		{
-			m_placeIcon[ 0 ]->setPosition( &world );
-			m_placeIcon[ 0 ]->setOrientation( angle );
+			Object *builderObject = TheGameLogic->findObjectByID(getPendingPlaceSourceObjectID());
+			if (builderObject == nullptr && getPendingPlaceSourceObjectID() == INVALID_ID)
+				builderObject = findClosestSelectedBuilderForPlacementPreview(m_pendingPlaceType, world);
 
-			//
-			// check to see if this is a legal location to build something at and tint or "un-tint"
-			// the cursor icons as appropriate.  This involves a pathfind which could be
-			// expensive so we don't want to do it on every frame (although that would be ideal)
-			// If we discover there are cases that this is just too slow we should increase the
-			// delay time between checks or we need to come up with a way of recording what is
-			// valid and what isn't or "fudge" the results to feel "ok"
-			//
+			const UnsignedInt placementOptions =
+				BuildAssistant::USE_QUICK_PATHFIND |
+				BuildAssistant::TERRAIN_RESTRICTIONS |
+				BuildAssistant::CLEAR_PATH |
+				BuildAssistant::NO_OBJECT_OVERLAP |
+				BuildAssistant::SHROUD_REVEALED |
+				BuildAssistant::IGNORE_STEALTHED;
+
+			Coord3D resolvedWorld = world;
+			Real resolvedAngle = angle;
+			Bool resolvedLegal = FALSE;
+			if (!TheBuildAssistant->isLineBuildTemplate(m_pendingPlaceType))
+			{
+				resolvedLegal = TheBuildAssistant->findNearestLegalPlacement(
+					&world, m_pendingPlaceType, angle, placementOptions,
+					builderObject, nullptr, &resolvedWorld, &resolvedAngle);
+			}
+
+			if (resolvedLegal)
+			{
+				world = resolvedWorld;
+				angle = resolvedAngle;
+			}
+
+			m_placeIcon[0]->setPosition(&world);
+			m_placeIcon[0]->setOrientation(angle);
+
 			if( TheGameClient->getFrame() & 0x1 )
 			{
 				TheTerrainVisual->removeAllBibs();
 
-				Object *builderObject = TheGameLogic->findObjectByID( getPendingPlaceSourceObjectID() );
-
-				LegalBuildCode lbc;
-				lbc = TheBuildAssistant->isLocationLegalToBuild( &world,
-																												 m_pendingPlaceType,
-																												 angle,
-																												 BuildAssistant::USE_QUICK_PATHFIND |
-																												 BuildAssistant::TERRAIN_RESTRICTIONS |
-																												 BuildAssistant::CLEAR_PATH |
-																												 BuildAssistant::NO_OBJECT_OVERLAP |
-																												 BuildAssistant::SHROUD_REVEALED |
-																												 BuildAssistant::IGNORE_STEALTHED,
-																												 builderObject,
-																												 nullptr );
+				LegalBuildCode lbc = resolvedLegal ? LBC_OK :
+					TheBuildAssistant->isLocationLegalToBuild(
+						&world, m_pendingPlaceType, angle, placementOptions,
+						builderObject, nullptr );
 
 				if( lbc != LBC_OK )
-					m_placeIcon[ 0 ]->colorTint( &IllegalBuildColor );
+					m_placeIcon[0]->colorTint(&IllegalBuildColor);
 				else
-					m_placeIcon[ 0 ]->colorTint( nullptr );
+					m_placeIcon[0]->colorTint(nullptr);
 
-				// Add the bibs around the structure.
 				if (lbc != LBC_OK)
-				{
-					TheTerrainVisual->addFactionBibDrawable(m_placeIcon[0], lbc != LBC_OK);
-				} else {
+					TheTerrainVisual->addFactionBibDrawable(m_placeIcon[0], TRUE);
+				else
 					TheTerrainVisual->removeFactionBibDrawable(m_placeIcon[0]);
-				}
 			}
 		}
 
