@@ -1283,7 +1283,7 @@ Bool AIUpdateInterface::hasHigherPathPriority(AIUpdateInterface *otherAI) const
  * This classifier keeps allied ground infantry/vehicles out of that recovery machinery and lets
  * the local blob solver steer around, squeeze through, or temporarily overlap them instead.
  */
-AIUpdateInterface::LocalTrafficClass AIUpdateInterface::classifyLocalTraffic(Object *other) const
+AIUpdateInterface::LocalTrafficClass AIUpdateInterface::classifyLocalTraffic(const Object *other) const
 {
 	const Object *obj = getObject();
 	if (obj == nullptr || other == nullptr || obj == other)
@@ -1301,7 +1301,7 @@ AIUpdateInterface::LocalTrafficClass AIUpdateInterface::classifyLocalTraffic(Obj
 		return LOCAL_TRAFFIC_NONE;
 
 	const AIUpdateInterface *ourAI = obj->getAI();
-	AIUpdateInterface *theirAI = other->getAI();
+	const AIUpdateInterface *theirAI = other->getAI();
 	if (ourAI == nullptr || theirAI == nullptr)
 		return LOCAL_TRAFFIC_NONE;
 
@@ -1310,7 +1310,7 @@ AIUpdateInterface::LocalTrafficClass AIUpdateInterface::classifyLocalTraffic(Obj
 
 	// Same player-selection / AI group is the strongest indication of one blob.
 	AIGroup *ourGroup = const_cast<Object *>(obj)->getGroup();
-	AIGroup *theirGroup = other->getGroup();
+	AIGroup *theirGroup = const_cast<Object *>(other)->getGroup();
 	if (ourGroup != nullptr && ourGroup == theirGroup)
 		return LOCAL_TRAFFIC_SAME_FLOW;
 
