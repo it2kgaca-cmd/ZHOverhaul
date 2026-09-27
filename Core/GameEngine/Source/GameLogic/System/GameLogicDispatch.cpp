@@ -30,6 +30,7 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
+#include "Common/ActionManager.h"
 #include "Common/CRCDebug.h"
 #include "Common/FramePacer.h"
 #include "Common/GameAudio.h"
@@ -269,6 +270,88 @@ static Object * getClosestBuilderFromSelection(const AIGroup *currentlySelectedG
 	}
 
 	return best;
+}
+
+
+struct ResumableConstructionCollector
+{
+	std::vector<ObjectID> siteIDs;
+};
+
+static void collectResumableConstructionSite(Object *obj, void *userData)
+{
+	ResumableConstructionCollector *collector = (ResumableConstructionCollector *)userData;
+	if (collector == nullptr || obj == nullptr)
+		return;
+	if (!obj->isKindOf(KINDOF_STRUCTURE) ||
+			!obj->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION) ||
+			obj->testStatus(OBJECT_STATUS_SOLD) ||
+			obj->isEffectivelyDead())
+		return;
+
+	collector->siteIDs.push_back(obj->getID());
+}
+
+static Bool assignSelectedBuildersToNearestConstruction(AIGroup *selection, Player *issuingPlayer)
+{
+	if (selection == nullptr || issuingPlayer == nullptr || selection->isEmpty())
+		return FALSE;
+
+	ResumableConstructionCollector collector;
+	issuingPlayer->iterateObjects(collectResumableConstructionSite, &collector);
+	if (collector.siteIDs.empty())
+		return FALSE;
+
+	std::sort(collector.siteIDs.begin(), collector.siteIDs.end());
+
+	VecObjectID builders = selection->getAllIDs();
+	std::sort(builders.begin(), builders.end());
+	std::vector<ObjectID> claimedSites;
+	Bool assignedAny = FALSE;
+
+	for (VecObjectID::const_iterator bit = builders.begin(); bit != builders.end(); ++bit)
+	{
+		Object *dozer = TheGameLogic->findObjectByID(*bit);
+		if (dozer == nullptr || dozer->getControllingPlayer() != issuingPlayer ||
+				!dozer->isKindOf(KINDOF_DOZER) || dozer->isContained() || dozer->isEffectivelyDead())
+			continue;
+
+		AIUpdateInterface *ai = dozer->getAIUpdateInterface();
+		DozerAIInterface *dozerAI = ai ? ai->getDozerAIInterface() : nullptr;
+		if (dozerAI == nullptr || dozerAI->getCurrentTask() != DOZER_TASK_INVALID ||
+				dozerAI->isAnyTaskPending())
+			continue;
+
+		Object *bestSite = nullptr;
+		Real bestDistSqr = 1.0e30f;
+		for (std::vector<ObjectID>::const_iterator sit = collector.siteIDs.begin();
+				sit != collector.siteIDs.end(); ++sit)
+		{
+			if (std::find(claimedSites.begin(), claimedSites.end(), *sit) != claimedSites.end())
+				continue;
+
+			Object *site = TheGameLogic->findObjectByID(*sit);
+			if (site == nullptr || !TheActionManager->canResumeConstructionOf(dozer, site, CMD_FROM_PLAYER))
+				continue;
+
+			const Real distSqr = ThePartitionManager->getDistanceSquared(dozer, site, FROM_CENTER_2D);
+			if (bestSite == nullptr || distSqr < bestDistSqr ||
+					(distSqr == bestDistSqr && site->getID() < bestSite->getID()))
+			{
+				bestSite = site;
+				bestDistSqr = distSqr;
+			}
+		}
+
+		if (bestSite)
+		{
+			claimedSites.push_back(bestSite->getID());
+			ai->aiResumeConstruction(bestSite, CMD_FROM_PLAYER);
+			assignedAny = TRUE;
+		}
+	}
+
+	return assignedAny;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -725,6 +808,16 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		case GameMessage::MSG_TOGGLE_REPEAT_UNIT_CREATE:
 		{
 			onToggleRepeatUnitCreate(msg, currentlySelectedGroup);
+			break;
+		}
+
+		case GameMessage::MSG_RESUME_NEAREST_CONSTRUCTION:
+		{
+#if RETAIL_COMPATIBLE_AIGROUP
+			assignSelectedBuildersToNearestConstruction(currentlySelectedGroup, msgPlayer);
+#else
+			assignSelectedBuildersToNearestConstruction(currentlySelectedGroup.Peek(), msgPlayer);
+#endif
 			break;
 		}
 		case GameMessage::MSG_DOZER_CONSTRUCT:
