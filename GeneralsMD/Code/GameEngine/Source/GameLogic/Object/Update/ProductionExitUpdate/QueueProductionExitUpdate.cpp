@@ -133,6 +133,7 @@ void QueueProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorType 
 		getNaturalRallyPoint(tmp);
 		// Grid it.
 		TheAI->pathfinder()->snapPosition(newObj, &tmp);
+		Coord3D arrivalAnchor = tmp;
 		std::vector<Coord3D> exitPath;
 		exitPath.push_back(tmp);
 
@@ -143,7 +144,10 @@ void QueueProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorType 
 			if (ai && ai->isDoingGroundMovement())
 			{
 				if (TheAI->pathfinder()->adjustDestination(newObj, ai->getLocomotorSet(), &tmp))
+				{
 					exitPath.push_back(tmp);
+					arrivalAnchor = m_rallyPoint;
+				}
 
 			}
 		} else {
@@ -152,6 +156,13 @@ void QueueProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorType 
 		}
 		if (ai) {
 			ai->aiFollowExitProductionPath( &exitPath, creationObject, CMD_FROM_AI );
+			if (ai->isDoingGroundMovement())
+			{
+				Real arrivalTolerance = newObj->getGeometryInfo().getBoundingCircleRadius() * 2.0f;
+				if (arrivalTolerance < PATHFIND_CELL_SIZE_F * 0.75f)
+					arrivalTolerance = PATHFIND_CELL_SIZE_F * 0.75f;
+				ai->friend_setGroupArrival(arrivalAnchor, arrivalTolerance);
+			}
 		}
 		m_currentDelay = md->m_exitDelayData;
 

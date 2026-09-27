@@ -96,6 +96,7 @@ void DefaultProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorTyp
 		TheAI->pathfinder()->addObjectToPathfindMap( newObj );
 		Coord3D tmp;
 		getNaturalRallyPoint(tmp);
+		Coord3D arrivalAnchor = tmp;
 		std::vector<Coord3D> exitPath;
 		exitPath.push_back(tmp);
 
@@ -106,12 +107,24 @@ void DefaultProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorTyp
 			if (ai && ai->isDoingGroundMovement())
 			{
 				if (TheAI->pathfinder()->adjustDestination(newObj, ai->getLocomotorSet(), &tmp))
+				{
 					exitPath.push_back(tmp);
+					// Keep the authored rally click as the shared blob center even if
+					// this individual receives a slightly adjusted approach point.
+					arrivalAnchor = m_rallyPoint;
+				}
 
 			}
 		}
 		if (ai) {
 			ai->aiFollowExitProductionPath( &exitPath, creationObject, CMD_FROM_AI );
+			if (ai->isDoingGroundMovement())
+			{
+				Real arrivalTolerance = newObj->getGeometryInfo().getBoundingCircleRadius() * 2.0f;
+				if (arrivalTolerance < PATHFIND_CELL_SIZE_F * 0.75f)
+					arrivalTolerance = PATHFIND_CELL_SIZE_F * 0.75f;
+				ai->friend_setGroupArrival(arrivalAnchor, arrivalTolerance);
+			}
 		}
 	}
 
