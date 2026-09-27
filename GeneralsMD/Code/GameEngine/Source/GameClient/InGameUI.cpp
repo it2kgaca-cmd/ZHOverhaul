@@ -1741,7 +1741,7 @@ void InGameUI::handleBuildPlacements()
 			Coord3D resolvedWorld = world;
 			Real resolvedAngle = angle;
 			Bool resolvedLegal = FALSE;
-			if (!TheBuildAssistant->isLineBuildTemplate(m_pendingPlaceType))
+			if (builderObject != nullptr && !TheBuildAssistant->isLineBuildTemplate(m_pendingPlaceType))
 			{
 				resolvedLegal = TheBuildAssistant->findNearestLegalPlacement(
 					&world, m_pendingPlaceType, angle, placementOptions,
@@ -1761,8 +1761,11 @@ void InGameUI::handleBuildPlacements()
 			{
 				TheTerrainVisual->removeAllBibs();
 
-				LegalBuildCode lbc = resolvedLegal ? LBC_OK :
-					TheBuildAssistant->isLocationLegalToBuild(
+				LegalBuildCode lbc = LBC_GENERIC_FAILURE;
+				if (resolvedLegal)
+					lbc = LBC_OK;
+				else if (builderObject != nullptr)
+					lbc = TheBuildAssistant->isLocationLegalToBuild(
 						&world, m_pendingPlaceType, angle, placementOptions,
 						builderObject, nullptr );
 
