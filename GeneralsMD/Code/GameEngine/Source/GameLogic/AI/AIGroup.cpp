@@ -1675,6 +1675,25 @@ void clampWaypointPosition( Coord3D &position, Int margin )
 /**
  * Move to given position(s)
  */
+static Bool preserveCommittedBuilderForMassPlayerCommand(Object *obj, Int selectedCount, CommandSourceType cmdSource)
+{
+	if (obj == nullptr || selectedCount <= 1 || cmdSource != CMD_FROM_PLAYER ||
+			!obj->isKindOf(KINDOF_DOZER))
+		return FALSE;
+
+	AIUpdateInterface *ai = obj->getAIUpdateInterface();
+	DozerAIInterface *dozerAI = ai ? ai->getDozerAIInterface() : nullptr;
+	if (dozerAI == nullptr)
+		return FALSE;
+
+	// A mass movement click is treated as an army-management order, not an
+	// implicit "abandon your scaffold" instruction.  A builder with an assigned
+	// construction job stays committed; selecting that builder alone still gives
+	// the player the normal explicit override semantics.
+	return dozerAI->getCurrentTask() == DOZER_TASK_BUILD ||
+		dozerAI->isTaskPending(DOZER_TASK_BUILD);
+}
+
 void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, CommandSourceType cmdSource )
 {
 
@@ -1789,6 +1808,10 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 			continue;
 		}
 		if( (*i)->getAI()==nullptr )
+		{
+			continue;
+		}
+		if (preserveCommittedBuilderForMassPlayerCommand(*i, getCount(), cmdSource))
 		{
 			continue;
 		}
@@ -2454,6 +2477,8 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 	{
 		Object *member = *i;
 		if (member->isDisabledByType(DISABLED_HELD) || member->isKindOf(KINDOF_IMMOBILE))
+			continue;
+		if (preserveCommittedBuilderForMassPlayerCommand(member, getCount(), cmdSource))
 			continue;
 
 		AIUpdateInterface *ai = member->getAIUpdateInterface();
