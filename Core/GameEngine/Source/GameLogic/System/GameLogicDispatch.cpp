@@ -1859,35 +1859,55 @@ bool GameLogic::onCancelUpgrade(MAYBE_UNUSED GameMessage *msg, AIGroupPtr &curre
 
 bool GameLogic::onQueueUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupPtr &currentlySelectedGroup)
 {
+	const ThingTemplate *whatToCreate = TheThingFactory->findByTemplateID(msg->getArgument(0)->integer);
+	if (whatToCreate == nullptr || !currentlySelectedGroup)
+		return false;
+
+	Player *msgPlayer = getMessagePlayer(msg);
 #if RETAIL_COMPATIBLE_AIGROUP
-	Object *producer = getSingleObjectFromSelection(currentlySelectedGroup);
+	const AIGroup *selection = currentlySelectedGroup;
 #else
-	Object *producer = getSingleObjectFromSelection(currentlySelectedGroup.Peek());
+	const AIGroup *selection = currentlySelectedGroup.Peek();
 #endif
-	const ThingTemplate *whatToCreate;
-	ProductionID productionID;
-
-	// get data from the message
-	whatToCreate = TheThingFactory->findByTemplateID( msg->getArgument( 0 )->integer );
-	productionID = (ProductionID)msg->getArgument( 1 )->integer;
-
-	// sanity
-	if ( producer == nullptr || whatToCreate == nullptr )
+	if (selection == nullptr || selection->isEmpty())
 		return false;
 
-	// get the production interface for the producer
-	ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
-	if( pu == nullptr )
+	VecObjectID selectedObjects = selection->getAllIDs();
+
+	// Preserve retail semantics for a single producer, including the exact
+	// production ID posted by the client.
+	if (selectedObjects.size() == 1)
 	{
-		DEBUG_CRASH( ("MSG_QUEUE_UNIT_CREATE: Producer '%s' doesn't have a unit production interface",
-													producer->getTemplate()->getName().str()) );
-		return false;
+		Object *producer = TheGameLogic->findObjectByID(selectedObjects[0]);
+		ProductionID productionID = (ProductionID)msg->getArgument(1)->integer;
+		if (producer == nullptr || producer->getControllingPlayer() != msgPlayer)
+			return false;
+
+		ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
+		if (pu == nullptr)
+			return false;
+		return pu->queueCreateUnit(whatToCreate, productionID);
 	}
 
-	// queue the build
-	pu->queueCreateUnit( whatToCreate, productionID );
+	// Same-type structure groups fan the order out. Sort IDs so the spending/order
+	// of limited funds is deterministic regardless of selection insertion order.
+	std::sort(selectedObjects.begin(), selectedObjects.end());
+	Bool queuedAny = FALSE;
+	for (VecObjectID::const_iterator it = selectedObjects.begin(); it != selectedObjects.end(); ++it)
+	{
+		Object *producer = TheGameLogic->findObjectByID(*it);
+		if (producer == nullptr || producer->getControllingPlayer() != msgPlayer)
+			continue;
 
-	return true;
+		ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
+		if (pu == nullptr || !TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate))
+			continue;
+
+		ProductionID productionID = pu->requestUniqueUnitID();
+		if (pu->queueCreateUnit(whatToCreate, productionID))
+			queuedAny = TRUE;
+	}
+	return queuedAny;
 }
 
 bool GameLogic::onToggleRepeatUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupPtr &currentlySelectedGroup)
