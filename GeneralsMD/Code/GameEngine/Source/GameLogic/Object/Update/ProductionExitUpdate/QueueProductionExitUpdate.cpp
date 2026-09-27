@@ -133,36 +133,26 @@ void QueueProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorType 
 		getNaturalRallyPoint(tmp);
 		// Grid it.
 		TheAI->pathfinder()->snapPosition(newObj, &tmp);
-		Coord3D arrivalAnchor = tmp;
 		std::vector<Coord3D> exitPath;
 		exitPath.push_back(tmp);
 
 		AIUpdateInterface  *ai = newObj->getAIUpdateInterface();
-		if (m_rallyPointExists)
+		if (ai && ai->isDoingGroundMovement())
 		{
-			tmp = m_rallyPoint;
-			if (ai && ai->isDoingGroundMovement())
-			{
-				if (TheAI->pathfinder()->adjustDestination(newObj, ai->getLocomotorSet(), &tmp))
-				{
-					exitPath.push_back(tmp);
-					arrivalAnchor = m_rallyPoint;
-				}
+			const Coord3D naturalExit = tmp;
+			Coord3D finalParking = m_rallyPointExists ? m_rallyPoint : naturalExit;
+			const Coord3D *parkingAnchor = m_rallyPointExists ? &m_rallyPoint : &naturalExit;
 
+			if (TheAI->pathfinder()->adjustDestination(newObj, ai->getLocomotorSet(), &finalParking, parkingAnchor))
+			{
+				const Real dx = finalParking.x - naturalExit.x;
+				const Real dy = finalParking.y - naturalExit.y;
+				if (m_rallyPointExists || dx*dx + dy*dy > sqr(PATHFIND_CELL_SIZE_F * 0.25f))
+					exitPath.push_back(finalParking);
 			}
-		} else {
-			// Double the destination to keep redguards from stacking.
-			exitPath.push_back(tmp);
 		}
 		if (ai) {
 			ai->aiFollowExitProductionPath( &exitPath, creationObject, CMD_FROM_AI );
-			if (ai->isDoingGroundMovement())
-			{
-				Real arrivalTolerance = newObj->getGeometryInfo().getBoundingCircleRadius() * 2.0f;
-				if (arrivalTolerance < PATHFIND_CELL_SIZE_F * 0.75f)
-					arrivalTolerance = PATHFIND_CELL_SIZE_F * 0.75f;
-				ai->friend_setGroupArrival(arrivalAnchor, arrivalTolerance);
-			}
 		}
 		m_currentDelay = md->m_exitDelayData;
 
