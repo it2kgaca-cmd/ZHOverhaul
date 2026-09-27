@@ -3674,33 +3674,97 @@ StateReturnType AIAttackMoveToState::update()
 	if (!m_attackMoveMachine->isInIdleState())
 	{
 		Object *attackTarget = m_attackMoveMachine->getGoalObject();
-		const Bool fireWhileMoving = canAttackMoveFireWhileMoving(owner, ai, attackTarget);
+		const UnsignedInt now = TheGameLogic->getFrame();
+		Bool abandonTarget = attackTarget == nullptr ||
+			attackTarget->isEffectivelyDead() || owner->getRelationship(attackTarget) != ENEMIES;
 
-		// Retail attack-move unconditionally killed the locomotor goal here,
-		// forcing even turreted tanks to stop before every engagement. A turreted
-		// ground vehicle with a target already in range can keep advancing while
-		// the existing attack sub-machine independently aims and fires.
-		if (!fireWhileMoving)
+		Real tacticalRange = TheAI->getAdjustedVisionRangeForObject(
+			owner, AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
+		if (tacticalRange < PATHFIND_CELL_SIZE_F * 12.0f)
+			tacticalRange = PATHFIND_CELL_SIZE_F * 12.0f;
+
+		if (!abandonTarget)
 		{
-			ai->setLocomotorGoalNone();
-			owner->clearModelConditionState(MODELCONDITION_MOVING);
+			// Attack-move is a moving order, not Hunt.  Once a victim drags us well
+			// outside the local engagement envelope, resume the original march.
+			Real leashRange = tacticalRange * 1.25f;
+			Weapon *engagedWeapon = owner->getCurrentWeapon();
+			if (engagedWeapon)
+			{
+				Real weaponLeash = engagedWeapon->getAttackRange(owner) * 1.35f;
+				if (weaponLeash > leashRange)
+					leashRange = weaponLeash;
+			}
+
+			const Real dx = attackTarget->getPosition()->x - owner->getPosition()->x;
+			const Real dy = attackTarget->getPosition()->y - owner->getPosition()->y;
+			if (dx*dx + dy*dy > sqr(leashRange))
+				abandonTarget = TRUE;
 		}
 
-		m_attackMoveMachine->updateStateMachine();
+		// Reconsider an engagement at a modest deterministic cadence.  Hysteresis
+		// prevents target ping-pong, but a nearby combat threat can pull attention
+		// off a passive structure immediately.
+		if (!abandonTarget && ((now + owner->getID()) % 6) == 0)
+		{
+			ai->setNextMoodCheckTime(now);
+			Object *urgentTarget = ai->getNextMoodTarget(
+				true, false, true, true, true);
+			if (urgentTarget && urgentTarget != attackTarget)
+			{
+				const Int currentScore = TheAI->getAttackMoveTargetScore(
+					owner, attackTarget, tacticalRange);
+				const Int urgentScore = TheAI->getAttackMoveTargetScore(
+					owner, urgentTarget, tacticalRange);
 
-		// if the machine is now idling, then we need to attempt to get a new target
-		if (m_attackMoveMachine->isInIdleState()) {
+				if (urgentScore >= currentScore + 45 &&
+						owner->chooseBestWeaponForTarget(urgentTarget, PREFER_MOST_DAMAGE, m_commandSrc))
+				{
+					owner->adjustModelConditionForWeaponStatus();
+					m_attackMoveMachine->setGoalObject(urgentTarget);
+					m_attackMoveMachine->setState(AI_ATTACK_OBJECT);
+					attackTarget = urgentTarget;
+				}
+			}
+		}
+
+		if (abandonTarget)
+		{
+			m_attackMoveMachine->setState(AI_IDLE);
 			forceRetargetThisFrame = true;
 			shouldRepathThisFrame = true;
 			ai->friend_setLastCommandSource(m_commandSrc);
-		} else {
-			if (fireWhileMoving)
+		}
+		else
+		{
+			const Bool fireWhileMoving = canAttackMoveFireWhileMoving(owner, ai, attackTarget);
+
+			// Retail attack-move unconditionally killed the locomotor goal here,
+			// forcing even turreted tanks to stop before every engagement. A turreted
+			// ground vehicle with a target already in range can keep advancing while
+			// the existing attack sub-machine independently aims and fires.
+			if (!fireWhileMoving)
 			{
-				// Keep the outer move state feeding path waypoints while the
-				// attack sub-machine owns only the turret/weapon.
-				AIMoveToState::update();
+				ai->setLocomotorGoalNone();
+				owner->clearModelConditionState(MODELCONDITION_MOVING);
 			}
-			return STATE_CONTINUE;
+
+			m_attackMoveMachine->updateStateMachine();
+
+			// if the machine is now idling, then we need to attempt to get a new target
+			if (m_attackMoveMachine->isInIdleState()) {
+				forceRetargetThisFrame = true;
+				shouldRepathThisFrame = true;
+				ai->friend_setLastCommandSource(m_commandSrc);
+			} else {
+				if (fireWhileMoving)
+				{
+					// Keep the outer move state feeding path waypoints while the
+					// attack sub-machine owns only the turret/weapon.
+					AIMoveToState::update();
+				}
+				return STATE_CONTINUE;
+			}
 		}
 	}
 
