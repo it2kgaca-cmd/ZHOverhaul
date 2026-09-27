@@ -1475,9 +1475,11 @@ Bool AIUpdateInterface::applyIdleTrafficDisplacement()
 	}
 	else if (m_trafficReturnAfter == 0)
 	{
-		// Terminal parking accepts the displacement.  This is the crucial difference
-		// between transient lane traffic and a blob that has already arrived.
+		// Terminal parking accepts the displacement. Move the pathfinder reservation
+		// with the physical body so the old slot does not remain as a phantom owner
+		// and the newly accepted slot becomes unavailable to later arrivals.
 		m_trafficAnchor = *obj->getPosition();
+		TheAI->pathfinder()->updateGoal(obj, obj->getPosition(), obj->getLayer());
 		m_trafficDisplaced = FALSE;
 		obj->clearModelConditionState(MODELCONDITION_MOVING);
 		return TRUE;
