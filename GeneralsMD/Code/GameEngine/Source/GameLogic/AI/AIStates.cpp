@@ -1803,10 +1803,13 @@ StateReturnType AIInternalMoveToState::update()
 		m_waitingForPath = false;
 		m_pathGoalPosition = m_goalPosition;
 		if (this->getAdjustsDestination()) {
-				TheAI->pathfinder()->updateGoal(obj, thePath->getLastNode()->getPosition(), thePath->getLastNode()->getLayer());
-		} else {
-				TheAI->pathfinder()->removeGoal(obj);
+			TheAI->pathfinder()->updateGoal(obj, thePath->getLastNode()->getPosition(), thePath->getLastNode()->getLayer());
+		} else if (getID() != AI_FOLLOW_EXITPRODUCTION_PATH) {
+			TheAI->pathfinder()->removeGoal(obj);
 		}
+		// Exit-production paths may have a future rally/parking position reserved
+		// while the unit is still traversing the producer-clearance leg. Keep that
+		// reservation intact until the final leg takes over and updates it.
 		if (!ai->getRetryPath()) {
 			m_tryOneMoreRepath = false;
 		}
