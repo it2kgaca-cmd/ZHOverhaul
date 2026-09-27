@@ -304,9 +304,6 @@ Bool ProductionUpdate::toggleRepeatUnit( const ThingTemplate *unitType )
 	if (unitType == nullptr)
 		return FALSE;
 
-	if (!TheBuildAssistant->isPossibleToMakeUnit(getObject(), unitType))
-		return FALSE;
-
 	for (UnsignedInt i = 0; i < m_repeatProductionCount; ++i)
 	{
 		const ThingTemplate *entry = m_repeatProduction[i];
@@ -329,6 +326,11 @@ Bool ProductionUpdate::toggleRepeatUnit( const ThingTemplate *unitType )
 			return TRUE;
 		}
 	}
+
+	// Removing an existing repeat entry is always allowed.  Only additions need
+	// to pass the factory/prerequisite validation.
+	if (!TheBuildAssistant->isPossibleToMakeUnit(getObject(), unitType))
+		return FALSE;
 
 	if (m_repeatProductionCount >= MAX_REPEAT_PRODUCTION_ENTRIES)
 		return FALSE;
