@@ -54,6 +54,8 @@
 
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/Module/AIUpdate.h"
+#include "GameLogic/Module/DozerAIUpdate.h"
 #include "GameLogic/Module/ProductionUpdate.h"
 
 
@@ -85,6 +87,38 @@ static void selectObjectOfType( Object* obj, void* selectObjectsInfo )
 		}
 	}
 }
+//-------------------------------------------------------------------------------------------------
+static Drawable *findAvailableSelectedBuilderFor( const ThingTemplate *whatToBuild )
+{
+	if (whatToBuild == nullptr)
+		return nullptr;
+
+	const DrawableList *selectedDrawables = TheInGameUI->getAllSelectedDrawables();
+	if (selectedDrawables == nullptr)
+		return nullptr;
+
+	for (DrawableListCIt it = selectedDrawables->begin(); it != selectedDrawables->end(); ++it)
+	{
+		Drawable *draw = *it;
+		Object *candidate = draw ? draw->getObject() : nullptr;
+		if (candidate == nullptr || !candidate->isLocallyControlled() ||
+				candidate->isContained() || !candidate->isKindOf(KINDOF_DOZER))
+			continue;
+
+		AIUpdateInterface *ai = candidate->getAIUpdateInterface();
+		DozerAIInterface *dozerAI = ai ? ai->getDozerAIInterface() : nullptr;
+		if (dozerAI == nullptr || dozerAI->isTaskPending(DOZER_TASK_BUILD))
+			continue;
+
+		if (!TheBuildAssistant->isPossibleToMakeUnit(candidate, whatToBuild))
+			continue;
+
+		return draw;
+	}
+
+	return nullptr;
+}
+
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 
@@ -177,6 +211,14 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			commandButton->getCommandType() != GUI_COMMAND_SELECT_ALL_UNITS_OF_TYPE )
 		obj = m_currentSelectedDrawable->getObject();
 
+	Drawable *smartBuildDrawable = nullptr;
+	if (m_currContext == CB_CONTEXT_MULTI_SELECT &&
+			commandButton->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT)
+	{
+		smartBuildDrawable = findAvailableSelectedBuilderFor(commandButton->getThingTemplate());
+		obj = smartBuildDrawable ? smartBuildDrawable->getObject() : nullptr;
+	}
+
 	// Right-clicking a unit build command edits a standing production recipe instead
 	// of occupying the normal production queue.
 	if( gadgetMessage == GBM_SELECTED_RIGHT && commandButton->getCommandType() == GUI_COMMAND_UNIT_BUILD )
@@ -251,8 +293,8 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 		case GUI_COMMAND_DOZER_CONSTRUCT:
 		{
 
-			// sanity
-			if( m_currentSelectedDrawable == nullptr )
+			// Multi-worker construction resolves a representative builder above.
+			if( obj == nullptr )
 				break;
 
 			//Kris: September 27, 2002
@@ -282,8 +324,10 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 				break;
 			}
 
-			// tell the UI that we want to build something so we get a building at the cursor
-			TheInGameUI->placeBuildAvailable( commandButton->getThingTemplate(), m_currentSelectedDrawable );
+			// With multiple workers selected, defer the actual worker choice until the
+			// placement location is known. A null source drawable is the smart-pick marker.
+			Drawable *placementSource = (m_currContext == CB_CONTEXT_MULTI_SELECT) ? nullptr : m_currentSelectedDrawable;
+			TheInGameUI->placeBuildAvailable( commandButton->getThingTemplate(), placementSource );
 
 			break;
 
