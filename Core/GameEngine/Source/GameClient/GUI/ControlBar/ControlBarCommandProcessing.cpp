@@ -267,6 +267,28 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 	{
 		const ThingTemplate *whatToRepeat = commandButton->getThingTemplate();
 		ProductionUpdateInterface *pu = obj ? obj->getProductionUpdateInterface() : nullptr;
+
+		// A group may still need to REMOVE an armed recipe after its prerequisite
+		// disappears. In that case the normal "available producer" resolver has no
+		// candidate, so recover a selected producer that already owns the recipe.
+		if (whatToRepeat && pu == nullptr && m_currContext == CB_CONTEXT_MULTI_SELECT)
+		{
+			const DrawableList *selectedDrawables = TheInGameUI->getAllSelectedDrawables();
+			for (DrawableListCIt it = selectedDrawables->begin(); it != selectedDrawables->end(); ++it)
+			{
+				Drawable *draw = *it;
+				Object *candidate = draw ? draw->getObject() : nullptr;
+				ProductionUpdateInterface *candidatePU =
+					candidate ? candidate->getProductionUpdateInterface() : nullptr;
+				if (candidate && candidate->isLocallyControlled() && candidatePU &&
+						candidatePU->isUnitInRepeatQueue(whatToRepeat))
+				{
+					pu = candidatePU;
+					break;
+				}
+			}
+		}
+
 		if( whatToRepeat == nullptr || pu == nullptr )
 			return CBC_COMMAND_USED;
 
