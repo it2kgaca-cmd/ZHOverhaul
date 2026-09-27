@@ -2005,26 +2005,69 @@ bool GameLogic::onQueueUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupPtr &cur
 
 bool GameLogic::onToggleRepeatUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupPtr &currentlySelectedGroup)
 {
-#if RETAIL_COMPATIBLE_AIGROUP
-	Object *producer = getSingleObjectFromSelection(currentlySelectedGroup);
-#else
-	Object *producer = getSingleObjectFromSelection(currentlySelectedGroup.Peek());
-#endif
 	Player *msgPlayer = getMessagePlayer(msg);
-	const ThingTemplate *whatToCreate = TheThingFactory->findByTemplateID( msg->getArgument( 0 )->integer );
-
-	if (producer == nullptr || whatToCreate == nullptr || producer->getControllingPlayer() != msgPlayer)
+	const ThingTemplate *whatToCreate = TheThingFactory->findByTemplateID(msg->getArgument(0)->integer);
+	if (msgPlayer == nullptr || whatToCreate == nullptr || !currentlySelectedGroup)
 		return false;
 
-	ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
-	if (pu == nullptr)
+#if RETAIL_COMPATIBLE_AIGROUP
+	const AIGroup *selection = currentlySelectedGroup;
+#else
+	const AIGroup *selection = currentlySelectedGroup.Peek();
+#endif
+	if (selection == nullptr || selection->isEmpty())
 		return false;
 
-	// ProductionUpdate owns the toggle semantics.  Removing an existing standing
-	// recipe is always legal, while additions still validate that this factory
-	// can legitimately make the unit.  Affordability is intentionally NOT part
-	// of this command: the recipe waits until money becomes available.
-	return pu->toggleRepeatUnit(whatToCreate);
+	VecObjectID selectedObjects = selection->getAllIDs();
+	std::sort(selectedObjects.begin(), selectedObjects.end());
+
+	// Group toggle semantics: if any eligible selected factory does NOT have this
+	// repeat recipe, RMB means "arm it everywhere possible". If all eligible
+	// factories already have it, RMB means "remove it everywhere".
+	Bool foundEligible = FALSE;
+	Bool shouldAdd = FALSE;
+	for (VecObjectID::const_iterator it = selectedObjects.begin(); it != selectedObjects.end(); ++it)
+	{
+		Object *producer = TheGameLogic->findObjectByID(*it);
+		if (producer == nullptr || producer->getControllingPlayer() != msgPlayer)
+			continue;
+
+		ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
+		if (pu == nullptr || !TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate))
+			continue;
+
+		foundEligible = TRUE;
+		if (!pu->isUnitInRepeatQueue(whatToCreate))
+			shouldAdd = TRUE;
+	}
+
+	if (!foundEligible)
+		return false;
+
+	Bool changedAny = FALSE;
+	for (VecObjectID::const_iterator it = selectedObjects.begin(); it != selectedObjects.end(); ++it)
+	{
+		Object *producer = TheGameLogic->findObjectByID(*it);
+		if (producer == nullptr || producer->getControllingPlayer() != msgPlayer)
+			continue;
+
+		ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
+		if (pu == nullptr || !TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate))
+			continue;
+
+		const Bool hasRecipe = pu->isUnitInRepeatQueue(whatToCreate);
+		if (shouldAdd)
+		{
+			if (!hasRecipe && pu->getRepeatProductionCount() < MAX_REPEAT_PRODUCTION_ENTRIES)
+				changedAny |= pu->toggleRepeatUnit(whatToCreate);
+		}
+		else if (hasRecipe)
+		{
+			changedAny |= pu->toggleRepeatUnit(whatToCreate);
+		}
+	}
+
+	return changedAny;
 }
 
 //-------------------------------------------------------------------------------------------------
