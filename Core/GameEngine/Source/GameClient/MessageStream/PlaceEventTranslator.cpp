@@ -43,9 +43,54 @@
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
 
+#include "GameLogic/Module/AIUpdate.h"
+#include "GameLogic/Module/DozerAIUpdate.h"
 #include "GameLogic/Module/ProductionUpdate.h"
 
 
+
+//-------------------------------------------------------------------------------------------------
+static Object *findClosestSelectedBuilder( const ThingTemplate *build, const Coord3D& worldPos )
+{
+	if (build == nullptr)
+		return nullptr;
+
+	const DrawableList *selectedDrawables = TheInGameUI->getAllSelectedDrawables();
+	if (selectedDrawables == nullptr)
+		return nullptr;
+
+	Object *best = nullptr;
+	Real bestDistSqr = 1.0e30f;
+
+	for (DrawableListCIt it = selectedDrawables->begin(); it != selectedDrawables->end(); ++it)
+	{
+		Drawable *draw = *it;
+		Object *candidate = draw ? draw->getObject() : nullptr;
+		if (candidate == nullptr || !candidate->isLocallyControlled() ||
+				candidate->isContained() || !candidate->isKindOf(KINDOF_DOZER))
+			continue;
+
+		AIUpdateInterface *ai = candidate->getAIUpdateInterface();
+		DozerAIInterface *dozerAI = ai ? ai->getDozerAIInterface() : nullptr;
+		if (dozerAI == nullptr || dozerAI->isTaskPending(DOZER_TASK_BUILD))
+			continue;
+
+		if (!TheBuildAssistant->isPossibleToMakeUnit(candidate, build))
+			continue;
+
+		const Real dx = candidate->getPosition()->x - worldPos.x;
+		const Real dy = candidate->getPosition()->y - worldPos.y;
+		const Real distSqr = dx*dx + dy*dy;
+		if (best == nullptr || distSqr < bestDistSqr ||
+				(distSqr == bestDistSqr && candidate->getID() < best->getID()))
+		{
+			best = candidate;
+			bestDistSqr = distSqr;
+		}
+	}
+
+	return best;
+}
 
 //-------------------------------------------------------------------------------------------------
 PlaceEventTranslator::PlaceEventTranslator() : m_frameOfUpButton(-1)
@@ -90,15 +135,17 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 				// placing things causes a dozer to go over and build it ... get the dozer in question
 				// from the in game UI
 				//
-				Object *builderObject = TheGameLogic->findObjectByID( TheInGameUI->getPendingPlaceSourceObjectID() );
+				const ObjectID pendingBuilderID = TheInGameUI->getPendingPlaceSourceObjectID();
+				Object *builderObject = TheGameLogic->findObjectByID( pendingBuilderID );
+				if (builderObject == nullptr && pendingBuilderID == INVALID_ID)
+					builderObject = findClosestSelectedBuilder(build, world);
 
-				// if our source object is gone cancel this whole placement process
+				// Single-source placement still cancels if its original builder vanished.
+				// Smart multi-worker placement cancels only when no eligible worker remains.
 				if( builderObject == nullptr )
 				{
-
 					TheInGameUI->placeBuildAvailable( nullptr, nullptr );
 					break;
-
 				}
 
 				// set this location as the placement anchor
@@ -185,7 +232,16 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 				if( isLineBuild && !TheTacticalView->screenToTerrain( &anchorEnd, &worldEnd ) )
 					break;
 
-				Object *builderObj = TheGameLogic->findObjectByID( TheInGameUI->getPendingPlaceSourceObjectID() );
+				const ObjectID pendingBuilderID = TheInGameUI->getPendingPlaceSourceObjectID();
+				Object *builderObj = TheGameLogic->findObjectByID( pendingBuilderID );
+				if (builderObj == nullptr && pendingBuilderID == INVALID_ID)
+					builderObj = findClosestSelectedBuilder(build, worldStart);
+
+				if (builderObj == nullptr)
+				{
+					TheInGameUI->placeBuildAvailable( nullptr, nullptr );
+					break;
+				}
 
 				//Kris: September 27, 2002
 				//Make sure we have enough CASH to build it! It's possible that between the
@@ -282,7 +338,10 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 						placeMsg->appendLocationArgument( worldEnd );
 					}
 
-					pickAndPlayUnitVoiceResponse( TheInGameUI->getAllSelectedDrawables(), placeMsg->getType() );
+					DrawableList builderVoiceList;
+					if (builderObj && builderObj->getDrawable())
+						builderVoiceList.push_back(builderObj->getDrawable());
+					pickAndPlayUnitVoiceResponse( &builderVoiceList, placeMsg->getType() );
 
 					// get out of pending placement mode, this will also clear the arrow anchor status
 					TheInGameUI->placeBuildAvailable( nullptr, nullptr );
