@@ -1905,36 +1905,11 @@ StateReturnType AIInternalMoveToState::update()
 	//
 	// Check if we have reached our destination
 	//
-	// A destination-envelope anchor is authoritative at the terminal end. Path
-	// projection can otherwise keep returning a tiny side goal after the unit is
-	// already parked, producing the classic solo/group "swivel forever" behavior.
+	// Group-arrival metadata describes the terminal parking AREA; it is not a
+	// finish line. Each unit must still reach its own occupancy-resolved destination.
+	// Using the whole blob radius as closeEnough made units stop on the perimeter and
+	// made production exits complete while tanks were still inside their factories.
 	Real closeEnoughDist = ai->getCurLocomotor() ? ai->getCurLocomotor()->getCloseEnoughDist() : 0.0f;
-
-	if (ai->friend_hasGroupArrival())
-	{
-		const Coord3D& arrival = ai->friend_getGroupArrivalAnchor();
-		const Real arrivalDx = obj->getPosition()->x - arrival.x;
-		const Real arrivalDy = obj->getPosition()->y - arrival.y;
-		const Real baseArrivalTolerance = ai->friend_getGroupArrivalTolerance();
-
-		// Do not neighborhood-scan the whole trip.  Only once we are near the
-		// terminal area do factory rally cohorts expand the soft envelope.
-		Real arrivalTolerance = baseArrivalTolerance;
-		Real probeDistance = baseArrivalTolerance + PATHFIND_CELL_SIZE_F * 8.0f;
-		if (arrivalDx*arrivalDx + arrivalDy*arrivalDy <= sqr(probeDistance))
-			arrivalTolerance = ai->friend_getEffectiveGroupArrivalTolerance();
-
-		if (arrivalTolerance > closeEnoughDist)
-			closeEnoughDist = arrivalTolerance;
-
-		if (arrivalDx*arrivalDx + arrivalDy*arrivalDy <= sqr(closeEnoughDist))
-		{
-			if (getAdjustsDestination())
-				ai->setLocomotorGoalNone();
-			obj->clearModelConditionState(MODELCONDITION_MOVING);
-			return STATE_SUCCESS;
-		}
-	}
 
 	Real onPathDistToGoal = ai->getLocomotorDistanceToGoal();
 	//DEBUG_LOG(("onPathDistToGoal = %f %s",onPathDistToGoal, obj->getTemplate()->getName().str()));
@@ -3404,6 +3379,10 @@ StateReturnType AIFollowPathState::update()
 			}
 		}
 
+		// Production units may ghost through traffic while clearing the producer itself,
+		// but rally travel and terminal parking must use normal crowd interaction.
+		if (getID() == AI_FOLLOW_EXITPRODUCTION_PATH && m_index > 0)
+			ai->setCanPathThroughUnits(false);
 
 		//Assign this value to the AIUpdateInterface so object's can access this value while
 		//determine which waypoints to plot in the waypoint renderer.
