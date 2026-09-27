@@ -564,7 +564,8 @@ public:
 	///< States that are doing idle checks should call with calledDuringIdle set true so that they check their
 
 	Object *getNextMoodTarget( Bool calledByAI, Bool calledDuringIdle,
-		Bool includeBuildings = false, Bool restrictToAttackRange = true );
+		Bool includeBuildings = false, Bool restrictToAttackRange = true,
+		Bool useTacticalPriority = false );
 	UnsignedInt getNextMoodCheckTime() const { return m_nextMoodCheckTime; }
 
 	// This function will return a combination of MoodMatrixParameter flags.

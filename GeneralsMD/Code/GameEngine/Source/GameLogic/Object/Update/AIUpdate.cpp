@@ -5278,7 +5278,7 @@ Bool AIUpdateInterface::canAutoAcquireWhileStealthed() const
  * Return the next object that our mood suggests we should attack.
  */
 Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuringIdle,
-	Bool includeBuildings, Bool restrictToAttackRange )
+	Bool includeBuildings, Bool restrictToAttackRange, Bool useTacticalPriority )
 {
 	Object *obj = getObject();
 
@@ -5428,7 +5428,8 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 		flags |= AI::UNFOGGED;
 	}
 
-	Object *newVictim = TheAI->findClosestEnemy(obj, rangeToFindWithin, flags, getAttackInfo());
+	Object *newVictim = TheAI->findClosestEnemy(
+		obj, rangeToFindWithin, flags, getAttackInfo(), nullptr, useTacticalPriority);
 
 /*
 DEBUG_LOG(("GNMT frame %d: %s %08lx (con %s %08lx) uses range %f, flags %08lx, %s finds %s %08lx",

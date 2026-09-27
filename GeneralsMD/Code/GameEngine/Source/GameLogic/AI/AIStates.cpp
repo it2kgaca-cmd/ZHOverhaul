@@ -3745,7 +3745,7 @@ StateReturnType AIAttackMoveToState::update()
 		{
 			ai->setNextMoodCheckTime(now);
 			scannedTarget = ai->getNextMoodTarget(
-				true, false, true, !canPreAimCurrentWeapon);
+				true, false, true, !canPreAimCurrentWeapon, true);
 		}
 		Object *nextObjectToAttack = scannedTarget ? scannedTarget : preAimTarget;
 

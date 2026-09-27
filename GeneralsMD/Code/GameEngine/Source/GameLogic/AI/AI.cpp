@@ -597,8 +597,128 @@ static void priorityFunc(Object *obj, void *userData)
 /**
  * Return the closest enemy, according to the qualifiers.
  */
+Int AI::getAttackMoveTargetScore( const Object *me, const Object *target, Real acquisitionRange ) const
+{
+	if (me == nullptr || target == nullptr)
+		return 0;
+
+	CanAttackResult ourAttack = me->getAbleToAttackSpecificObject(
+		ATTACK_NEW_TARGET, target, CMD_FROM_AI);
+	if (ourAttack != ATTACKRESULT_POSSIBLE && ourAttack != ATTACKRESULT_POSSIBLE_AFTER_MOVING)
+		return 0;
+
+	Int score = 100;
+	if (ourAttack == ATTACKRESULT_POSSIBLE)
+		score += 35;
+	else
+		score += 10;
+
+	// Immediate threats outrank passive scenery/economy.  This is intentionally
+	// symmetric: if the candidate can hurt us now, attack-move should notice.
+	CanAttackResult threat = target->getAbleToAttackSpecificObject(
+		ATTACK_NEW_TARGET, me, CMD_FROM_AI);
+	const Bool armedThreat =
+		threat == ATTACKRESULT_POSSIBLE || threat == ATTACKRESULT_POSSIBLE_AFTER_MOVING;
+	if (threat == ATTACKRESULT_POSSIBLE)
+		score += 90;
+	else if (threat == ATTACKRESULT_POSSIBLE_AFTER_MOVING)
+		score += 55;
+
+	const Bool targetStructure = target->isKindOf(KINDOF_STRUCTURE);
+	const Bool targetInfantry = target->isKindOf(KINDOF_INFANTRY);
+	const Bool targetVehicle = target->isKindOf(KINDOF_VEHICLE);
+	const Bool targetAirborne = target->isAirborneTarget();
+
+	if (targetStructure)
+	{
+		// Armed defenses remain important; passive structures are fallback targets.
+		score -= 45;
+		if (armedThreat)
+			score += 30;
+	}
+	else if (!target->isKindOf(KINDOF_IMMOBILE))
+	{
+		score += 20;
+	}
+
+	Bool prefersAir = FALSE;
+	Bool prefersInfantry = FALSE;
+	Bool prefersArmor = FALSE;
+	Bool prefersStructures = FALSE;
+
+	for (Int i = 0; i < WEAPONSLOT_COUNT; ++i)
+	{
+		const Weapon *weapon = me->getWeaponInWeaponSlot((WeaponSlotType)i);
+		if (weapon == nullptr)
+			continue;
+
+		const Int antiMask = weapon->getAntiMask();
+		if (antiMask & (WEAPON_ANTI_AIRBORNE_VEHICLE | WEAPON_ANTI_AIRBORNE_INFANTRY))
+			prefersAir = TRUE;
+
+		switch (weapon->getDamageType())
+		{
+			case DAMAGE_SMALL_ARMS:
+			case DAMAGE_GATTLING:
+			case DAMAGE_SNIPER:
+			case DAMAGE_FLAME:
+			case DAMAGE_POISON:
+			case DAMAGE_MELEE:
+			case DAMAGE_MICROWAVE:
+			case DAMAGE_COMANCHE_VULCAN:
+				prefersInfantry = TRUE;
+				break;
+
+			case DAMAGE_ARMOR_PIERCING:
+			case DAMAGE_INFANTRY_MISSILE:
+			case DAMAGE_JET_MISSILES:
+			case DAMAGE_STEALTHJET_MISSILES:
+			case DAMAGE_LASER:
+				prefersArmor = TRUE;
+				break;
+
+			case DAMAGE_EXPLOSION:
+			case DAMAGE_AURORA_BOMB:
+				prefersArmor = TRUE;
+				break;
+
+			default:
+				break;
+		}
+
+		const Real weaponRange = weapon->getAttackRange(me);
+		const Real splashRadius = weapon->getPrimaryDamageRadius(me);
+		if (weaponRange >= 250.0f && splashRadius >= 10.0f)
+			prefersStructures = TRUE;
+	}
+
+	if (targetAirborne && prefersAir)
+		score += 50;
+	if (targetInfantry && prefersInfantry)
+		score += 35;
+	if (targetVehicle && !targetAirborne && prefersArmor)
+		score += 30;
+	if (targetStructure && prefersStructures)
+		score += 25;
+
+	if (acquisitionRange > 1.0f)
+	{
+		Real dist = sqrt(ThePartitionManager->getDistanceSquared(me, target, FROM_BOUNDINGSPHERE_2D));
+		Real fraction = dist / acquisitionRange;
+		if (fraction > 1.0f)
+			fraction = 1.0f;
+		score -= (Int)(fraction * 45.0f);
+	}
+
+	if (score < 1)
+		score = 1;
+	return score;
+}
+
+//-------------------------------------------------------------------------------------------------
 Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifiers,
-														 const AttackPriorityInfo *info, PartitionFilter *optionalFilter)
+														 const AttackPriorityInfo *info, PartitionFilter *optionalFilter,
+														 Bool tacticalPriority)
 {
 
 	if ((qualifiers & CAN_ATTACK) && !me->isAbleToAttack())
@@ -685,9 +805,14 @@ Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifie
 
 	filters[numFilters] = nullptr;
 
-	if (info == nullptr || info == TheScriptEngine->getDefaultAttackInfo())
+	const Bool genericTacticalPriority =
+		tacticalPriority && (info == nullptr || info == TheScriptEngine->getDefaultAttackInfo());
+
+	if (!genericTacticalPriority &&
+			(info == nullptr || info == TheScriptEngine->getDefaultAttackInfo()))
 	{
-		// No additional attack info, so just return the closest one.
+		// Ambient/retail acquisition remains nearest-target.  Tactical scoring is
+		// reserved for explicit attack-move orders.
 		Object* o = ThePartitionManager->getClosestObject( me, range, FROM_BOUNDINGSPHERE_2D, filters );
 		return o;
 	}
@@ -699,28 +824,43 @@ Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifie
 	MemoryPoolObjectHolder holder(iter);
 	for (Object *theEnemy = iter->first(); theEnemy; theEnemy = iter->next())
 	{
-		Int curPriority = info->getPriority(theEnemy->getTemplate());
-		if (curPriority == 0)
-			continue; // don't attack 0 priority targets.
+		Int curPriority;
+		Int modPriority;
 
-		/* check for garrisoned buildings/vehicles & see if a higher priority unit is inside. */
-		ContainModuleInterface* contain = theEnemy->getContain();
-		if (contain) {
-			TPriorityInfo priorityInfo;
-			priorityInfo.priority = curPriority;
-			priorityInfo.info = info;
-			contain->iterateContained( priorityFunc, &priorityInfo, false ) ;
-			if (priorityInfo.priority > curPriority) {
-				curPriority = priorityInfo.priority;
-			}
+		if (genericTacticalPriority)
+		{
+			curPriority = getAttackMoveTargetScore(me, theEnemy, range);
+			if (curPriority == 0)
+				continue;
+			// Generic tactical scoring already includes distance.
+			modPriority = curPriority;
 		}
+		else
+		{
+			curPriority = info->getPriority(theEnemy->getTemplate());
+			if (curPriority == 0)
+				continue; // don't attack 0 priority targets.
 
-		Real distSqr = ThePartitionManager->getDistanceSquared(me, theEnemy, FROM_BOUNDINGSPHERE_2D);
-		Real dist = sqrt(distSqr);
-		Int modifier = dist/getAiData()->m_attackPriorityDistanceModifier;
-		Int modPriority = curPriority-modifier;
-		if (modPriority < 1)
-			modPriority = 1;
+			/* check for garrisoned buildings/vehicles & see if a higher priority unit is inside. */
+			ContainModuleInterface* contain = theEnemy->getContain();
+			if (contain) {
+				TPriorityInfo priorityInfo;
+				priorityInfo.priority = curPriority;
+				priorityInfo.info = info;
+				contain->iterateContained( priorityFunc, &priorityInfo, false ) ;
+				if (priorityInfo.priority > curPriority) {
+					curPriority = priorityInfo.priority;
+				}
+			}
+
+			Real distSqr = ThePartitionManager->getDistanceSquared(me, theEnemy, FROM_BOUNDINGSPHERE_2D);
+			Real dist = sqrt(distSqr);
+			Real priorityDistanceModifier = getAiData()->m_attackPriorityDistanceModifier;
+			Int modifier = priorityDistanceModifier > 0.0f ? (Int)(dist / priorityDistanceModifier) : 0;
+			modPriority = curPriority-modifier;
+			if (modPriority < 1)
+				modPriority = 1;
+		}
 		if (modPriority > effectivePriority)
 		{
 			effectivePriority = modPriority;
