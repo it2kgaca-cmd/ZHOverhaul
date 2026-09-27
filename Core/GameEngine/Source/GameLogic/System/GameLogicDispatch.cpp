@@ -59,6 +59,7 @@
 //#include "GameLogic/PartitionManager.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/BodyModule.h"
+#include "GameLogic/Module/DozerAIUpdate.h"
 #include "GameLogic/Module/OpenContain.h"
 #include "GameLogic/Module/ProductionUpdate.h"
 #include "GameLogic/Module/SpecialPowerModule.h"
@@ -224,6 +225,50 @@ static Object * getSingleObjectFromSelection(const AIGroup *currentlySelectedGro
 		return TheGameLogic->findObjectByID(*it);
 	}
 	return nullptr;
+}
+
+// ------------------------------------------------------------------------------------------------
+// Smart construction selection: deterministic nearest eligible free worker.
+static Object * getClosestBuilderFromSelection(const AIGroup *currentlySelectedGroup,
+																const ThingTemplate *whatToBuild,
+																const Coord3D& buildLocation,
+																const Player *issuingPlayer)
+{
+	if (currentlySelectedGroup == nullptr || whatToBuild == nullptr)
+		return nullptr;
+
+	Object *best = nullptr;
+	Real bestDistSqr = 1.0e30f;
+	const VecObjectID& selectedObjects = currentlySelectedGroup->getAllIDs();
+
+	for (VecObjectID::const_iterator it = selectedObjects.begin(); it != selectedObjects.end(); ++it)
+	{
+		Object *candidate = TheGameLogic->findObjectByID(*it);
+		if (candidate == nullptr || candidate->isEffectivelyDead() ||
+				candidate->isContained() || !candidate->isKindOf(KINDOF_DOZER) ||
+				candidate->getControllingPlayer() != issuingPlayer)
+			continue;
+
+		AIUpdateInterface *ai = candidate->getAIUpdateInterface();
+		DozerAIInterface *dozerAI = ai ? ai->getDozerAIInterface() : nullptr;
+		if (dozerAI == nullptr || dozerAI->isTaskPending(DOZER_TASK_BUILD))
+			continue;
+
+		if (!TheBuildAssistant->isPossibleToMakeUnit(candidate, whatToBuild))
+			continue;
+
+		const Real dx = candidate->getPosition()->x - buildLocation.x;
+		const Real dy = candidate->getPosition()->y - buildLocation.y;
+		const Real distSqr = dx*dx + dy*dy;
+		if (best == nullptr || distSqr < bestDistSqr ||
+				(distSqr == bestDistSqr && candidate->getID() < best->getID()))
+		{
+			best = candidate;
+			bestDistSqr = distSqr;
+		}
+	}
+
+	return best;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1906,15 +1951,20 @@ bool GameLogic::onDozerConstruct(MAYBE_UNUSED GameMessage *msg, AIGroupPtr &curr
 	Coord3D loc;
 	Real angle;
 
-	// get player, what to place, and location
-#if RETAIL_COMPATIBLE_AIGROUP
-	Object *constructorObject = getSingleObjectFromSelection(currentlySelectedGroup);
-#else
-	Object *constructorObject = getSingleObjectFromSelection(currentlySelectedGroup.Peek());
-#endif
+	// Resolve what/where first, then smart-pick exactly one worker from the
+	// authoritative selected group. This keeps replays/network games deterministic
+	// and prevents a multi-worker construction order from either failing or fanning
+	// out to every selected worker.
 	place = TheThingFactory->findByTemplateID( msg->getArgument( 0 )->integer );
 	loc = msg->getArgument( 1 )->location;
 	angle = msg->getArgument( 2 )->real;
+	Player *msgPlayer = getMessagePlayer(msg);
+
+#if RETAIL_COMPATIBLE_AIGROUP
+	Object *constructorObject = getClosestBuilderFromSelection(currentlySelectedGroup, place, loc, msgPlayer);
+#else
+	Object *constructorObject = getClosestBuilderFromSelection(currentlySelectedGroup.Peek(), place, loc, msgPlayer);
+#endif
 
 	if( place == nullptr || constructorObject == nullptr )
 		return false;  //These are not crashes, as the object may have died before this message came in
