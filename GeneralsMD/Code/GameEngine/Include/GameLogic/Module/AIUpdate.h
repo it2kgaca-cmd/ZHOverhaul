@@ -635,7 +635,7 @@ protected:
 
 	Bool blockedBy(Object *other); ///< Returns true if we are blocked by "other"
 	Bool needToRotate(); ///< Returns true if we are not pointing in the right direction for movement.
-	LocalTrafficClass classifyLocalTraffic(Object *other) const;
+	LocalTrafficClass classifyLocalTraffic(const Object *other) const;
 	Bool computeBlobTrafficGoal(const Coord3D& pathGoal, Coord3D *outGoal);
 	void receiveTrafficPush(const Object *pusher);
 	Bool applyIdleTrafficDisplacement();
