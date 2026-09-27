@@ -243,6 +243,31 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 					break;
 				}
 
+				// Resolve the same local magnetic transform used by the live ghost.
+				// The authoritative placement therefore lands exactly where the green
+				// preview showed it, rather than falling back to the raw mouse anchor.
+				if (!isLineBuild)
+				{
+					const UnsignedInt magneticOptions =
+						BuildAssistant::USE_QUICK_PATHFIND |
+						BuildAssistant::TERRAIN_RESTRICTIONS |
+						BuildAssistant::CLEAR_PATH |
+						BuildAssistant::NO_OBJECT_OVERLAP |
+						BuildAssistant::SHROUD_REVEALED |
+						BuildAssistant::IGNORE_STEALTHED |
+						BuildAssistant::FAIL_STEALTHED_WITHOUT_FEEDBACK;
+
+					Coord3D resolvedWorld = worldStart;
+					Real resolvedAngle = angle;
+					if (TheBuildAssistant->findNearestLegalPlacement(
+							&worldStart, build, angle, magneticOptions, builderObj, nullptr,
+							&resolvedWorld, &resolvedAngle))
+					{
+						worldStart = resolvedWorld;
+						angle = resolvedAngle;
+					}
+				}
+
 				//Kris: September 27, 2002
 				//Make sure we have enough CASH to build it! It's possible that between the
 				//time we initiated it and the time we confirm it, a hacker has stolen some of
