@@ -1015,6 +1015,97 @@ LegalBuildCode BuildAssistant::isLocationLegalToBuild( const Coord3D *worldPos,
 
 }
 
+
+//-------------------------------------------------------------------------------------------------
+/** Resolve a cursor transform to the nearest locally legal building transform. */
+//-------------------------------------------------------------------------------------------------
+Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
+																 const ThingTemplate *build,
+																 Real desiredAngle,
+																 UnsignedInt options,
+																 const Object *builderObject,
+																 Player *player,
+																 Coord3D *resolvedPos,
+																 Real *resolvedAngle )
+{
+	if (desiredPos == nullptr || build == nullptr || resolvedPos == nullptr || resolvedAngle == nullptr)
+		return FALSE;
+
+	*resolvedPos = *desiredPos;
+	*resolvedAngle = desiredAngle;
+
+	LegalBuildCode initial = isLocationLegalToBuild(
+		desiredPos, build, desiredAngle, options, builderObject, player);
+	if (initial == LBC_OK)
+		return TRUE;
+
+	// Shroud is not a geometric placement problem. Do not let magnetic placement
+	// leak information or slide a hidden cursor around looking for revealed cells.
+	if (initial == LBC_SHROUD)
+		return FALSE;
+
+	Real captureRadius = build->getTemplateGeometryInfo().getMajorRadius() * 0.80f;
+	if (captureRadius < PATHFIND_CELL_SIZE_F * 3.0f)
+		captureRadius = PATHFIND_CELL_SIZE_F * 3.0f;
+
+	// Unit-circle samples, ordered deterministically. Four radial rings give the
+	// cursor a "sticky edge" feel: it remains on the nearest legal side of an
+	// obstruction until the raw mouse moves beyond the capture radius.
+	static const Real dirs[16][2] =
+	{
+		{ 1.000000f,  0.000000f}, { 0.923880f,  0.382683f},
+		{ 0.707107f,  0.707107f}, { 0.382683f,  0.923880f},
+		{ 0.000000f,  1.000000f}, {-0.382683f,  0.923880f},
+		{-0.707107f,  0.707107f}, {-0.923880f,  0.382683f},
+		{-1.000000f,  0.000000f}, {-0.923880f, -0.382683f},
+		{-0.707107f, -0.707107f}, {-0.382683f, -0.923880f},
+		{ 0.000000f, -1.000000f}, { 0.382683f, -0.923880f},
+		{ 0.707107f, -0.707107f}, { 0.923880f, -0.382683f}
+	};
+
+	for (Int ring = 1; ring <= 4; ++ring)
+	{
+		const Real radius = captureRadius * (INT_TO_REAL(ring) / 4.0f);
+		for (Int d = 0; d < 16; ++d)
+		{
+			Coord3D candidate = *desiredPos;
+			candidate.x += dirs[d][0] * radius;
+			candidate.y += dirs[d][1] * radius;
+			candidate.z = TheTerrainLogic->getGroundHeight(candidate.x, candidate.y);
+
+			if (isLocationLegalToBuild(
+					&candidate, build, desiredAngle, options, builderObject, player) == LBC_OK)
+			{
+				*resolvedPos = candidate;
+				*resolvedAngle = desiredAngle;
+				return TRUE;
+			}
+		}
+	}
+
+	// If position snapping cannot solve it, try nearby orientations at the raw
+	// cursor point. This lets rotation skip small invalid angle intervals while
+	// preserving the player's intended angle as closely as possible.
+	const Real angleStep = DEG_TO_RADF(5.0f);
+	for (Int step = 1; step <= 9; ++step)
+	{
+		const Real delta = angleStep * step;
+		const Real candidateAngles[2] = { desiredAngle + delta, desiredAngle - delta };
+		for (Int a = 0; a < 2; ++a)
+		{
+			if (isLocationLegalToBuild(
+					desiredPos, build, candidateAngles[a], options, builderObject, player) == LBC_OK)
+			{
+				*resolvedPos = *desiredPos;
+				*resolvedAngle = candidateAngles[a];
+				return TRUE;
+			}
+		}
+	}
+
+	return FALSE;
+}
+
 //-------------------------------------------------------------------------------------------------
 /** Adds bibs to structures near to worldPos */
 //-------------------------------------------------------------------------------------------------
