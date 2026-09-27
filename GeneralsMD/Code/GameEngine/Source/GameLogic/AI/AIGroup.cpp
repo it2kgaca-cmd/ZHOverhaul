@@ -48,6 +48,7 @@
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/ContainModule.h"
+#include "GameLogic/Module/DozerAIUpdate.h"
 #include "GameLogic/Module/OverchargeBehavior.h"
 #include "GameLogic/Module/ProductionUpdate.h"
 #include "GameLogic/Module/SpawnBehavior.h"
@@ -554,100 +555,80 @@ Real AIGroup::computeArrivalEnvelopeRadius() const
 void AIGroup::computeIndividualDestination( Coord3D *dest, const Coord3D *groupDest,
 											 Object *obj, const Coord3D *center, Bool isFormation )
 {
-	Coord2D v;
+	if (dest == nullptr || groupDest == nullptr || obj == nullptr)
+		return;
 
-	// Keep the army's relative blob shape, but scale it into a destination
-	// envelope sized from the actual footprint of the moving group.  Retail's
-	// fixed six-radii cap becomes catastrophically dense for large armies.
-	const Coord3D *pos = obj->getPosition();
+	AIUpdateInterface *ai = obj->getAIUpdateInterface();
+	const Bool groundMover = ai && ai->isDoingGroundMovement();
+
+	// Explicit scripted/formation movement keeps authored formation offsets.
+	// Ordinary organic movement deliberately does NOT inherit the selection's
+	// current map-wide shape.
+	Coord2D offset;
+	offset.x = 0.0f;
+	offset.y = 0.0f;
 	if (isFormation)
 	{
-		obj->getFormationOffset(&v);
+		obj->getFormationOffset(&offset);
 	}
-	else
+	else if (!groundMover && obj->isKindOf(KINDOF_AIRCRAFT))
 	{
-		v.x = pos->x - center->x;
-		v.y = pos->y - center->y;
-	}
+		// Aircraft have no terrain occupancy map to pack them for us. Build a fresh,
+		// compact flock around the clicked destination. Object-ID rank makes the
+		// assignment deterministic without preserving the old geographic formation.
+		Int airCount = 0;
+		Int airRank = 0;
+		Real footprintSum = 0.0f;
+		Real maxRadius = 0.0f;
 
-	Real footprintSum = 0.0f;
-	Real currentBlobRadius = 0.0f;
-	Real maxMemberRadius = 0.0f;
-	Int crowdCount = 0;
-	for (std::list<Object *>::iterator it = m_memberList.begin(); it != m_memberList.end(); ++it)
-	{
-		Object *member = *it;
-		if (member == nullptr || member->isDisabledByType(DISABLED_HELD) || member->isKindOf(KINDOF_IMMOBILE))
-			continue;
-		AIUpdateInterface *memberAI = member->getAIUpdateInterface();
-		if (memberAI == nullptr || !memberAI->isDoingGroundMovement())
-			continue;
-		if (!member->isKindOf(KINDOF_VEHICLE) && !member->isKindOf(KINDOF_INFANTRY))
-			continue;
-
-		Real r = member->getGeometryInfo().getBoundingCircleRadius();
-		footprintSum += r*r;
-		if (r > maxMemberRadius)
-			maxMemberRadius = r;
-
-		Real dx = member->getPosition()->x - center->x;
-		Real dy = member->getPosition()->y - center->y;
-		Real d = sqrtf(dx*dx + dy*dy);
-		if (d > currentBlobRadius)
-			currentBlobRadius = d;
-		++crowdCount;
-	}
-
-	Real arrivalRadius = 1.60f * sqrtf(footprintSum);
-	if (arrivalRadius < maxMemberRadius * 2.5f)
-		arrivalRadius = maxMemberRadius * 2.5f;
-
-	Real length = v.length();
-	if (!isFormation && crowdCount > 1)
-	{
-		// Translate the existing organic blob into a sensibly packed final envelope.
-		// Very scattered selections compress; compact selections may expand modestly.
-		Real targetShapeRadius = arrivalRadius;
-		if (currentBlobRadius > 0.01f)
+		for (std::list<Object *>::const_iterator it = m_memberList.begin(); it != m_memberList.end(); ++it)
 		{
-			Real scale = targetShapeRadius / currentBlobRadius;
-			if (scale > 1.6f)
-				scale = 1.6f;
-			length *= scale;
+			Object *member = *it;
+			if (member == nullptr || member->isDisabledByType(DISABLED_HELD) ||
+					member->isKindOf(KINDOF_IMMOBILE) || !member->isKindOf(KINDOF_AIRCRAFT))
+				continue;
+
+			AIUpdateInterface *memberAI = member->getAIUpdateInterface();
+			if (memberAI == nullptr || memberAI->isDoingGroundMovement())
+				continue;
+
+			const Real r = member->getGeometryInfo().getBoundingCircleRadius();
+			footprintSum += r*r;
+			if (r > maxRadius)
+				maxRadius = r;
+			if (member->getID() < obj->getID())
+				++airRank;
+			++airCount;
 		}
 
-		if (length > arrivalRadius)
-			length = arrivalRadius;
-
-		// A unit exactly at the group centroid otherwise receives the literal click.
-		// Give centroid units deterministic radial bias so the center cannot collapse.
-		Real minBias = obj->getGeometryInfo().getBoundingCircleRadius() * 1.8f;
-		if (minBias < PATHFIND_CELL_SIZE_F * 0.45f)
-			minBias = PATHFIND_CELL_SIZE_F * 0.45f;
-		if (length < minBias)
+		if (airCount > 1)
 		{
-			Real angle = ((obj->getID() % 1024) / 1024.0f) * (2.0f * PI);
-			v.x = Cos(angle);
-			v.y = Sin(angle);
-			length = minBias;
-		}
-	}
+			Real flockRadius = 1.85f * sqrtf(footprintSum);
+			if (flockRadius < maxRadius * 2.5f)
+				flockRadius = maxRadius * 2.5f;
 
-	if (length > 0.01f)
-	{
-		v.normalize();
-		v.x *= length;
-		v.y *= length;
+			// Golden-angle disk packing: a new destination flock, not a translated
+			// copy of where the helicopters happened to start.
+			const Real goldenAngle = 2.39996323f;
+			const Real normalizedRadius = sqrtf((airRank + 0.5f) / airCount);
+			const Real radius = flockRadius * normalizedRadius;
+			const Real angle = goldenAngle * airRank + (m_id % 31) * 0.071f;
+			offset.x = Cos(angle) * radius;
+			offset.y = Sin(angle) * radius;
+		}
 	}
 
 	PathfindLayerEnum layer = TheTerrainLogic->getLayerForDestination(groupDest);
-	dest->x = groupDest->x + v.x;
-	dest->y = groupDest->y + v.y;
+	dest->x = groupDest->x + offset.x;
+	dest->y = groupDest->y + offset.y;
 	dest->z = TheTerrainLogic->getLayerHeight(dest->x, dest->y, layer);
 
-	AIUpdateInterface *ai = obj->getAIUpdateInterface();
-	if (ai && ai->isDoingGroundMovement())
+	if (groundMover)
 	{
+		// For an organic ground blob every unit starts from the SAME clicked anchor.
+		// Pathfinder::adjustDestination performs an occupancy-aware spiral search and
+		// updateGoal reserves each accepted slot, so successive members naturally pack
+		// into a fresh compact blob instead of preserving their old selection offsets.
 		if (isFormation)
 			TheAI->pathfinder()->adjustDestination(obj, ai->getLocomotorSet(), dest, nullptr);
 		else
@@ -1710,6 +1691,8 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 	Bool tightenGroup = FALSE;
 
 	Bool isFormation = getMinMaxAndCenter( &min, &max, &center );
+	if (cmdSource == CMD_FROM_PLAYER && !addWaypoint)
+		isFormation = FALSE;
 	if (addWaypoint)
   {
     isFormation = false;
@@ -2460,7 +2443,9 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 
 	Coord2D min;
 	Coord2D max;
-	const Bool isFormation = getMinMaxAndCenter(&min, &max, &center);
+	Bool isFormation = getMinMaxAndCenter(&min, &max, &center);
+	if (cmdSource == CMD_FROM_PLAYER)
+		isFormation = FALSE;
 	const Bool useSharedArrivalEnvelope = !isFormation && getCount() > 1;
 	const Real sharedArrivalRadius = useSharedArrivalEnvelope ? computeArrivalEnvelopeRadius() : 0.0f;
 
@@ -3137,16 +3122,50 @@ void AIGroup::groupDoCommandButton( const CommandButton *commandButton, CommandS
 //-------------------------------------------------------------------------------------
 void AIGroup::groupDoCommandButtonAtPosition( const CommandButton *commandButton, const Coord3D *pos, CommandSourceType cmdSource )
 {
-	std::list<Object *>::iterator i;
-	Object *source;
-
-	for( i = m_memberList.begin(); i != m_memberList.end(); ++i )
+	// Construction is a smart-cast group capability: exactly one selected worker
+	// should take the job, chosen from the nearest eligible free builders.
+	if (commandButton && pos && commandButton->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT)
 	{
+		const ThingTemplate *whatToBuild = commandButton->getThingTemplate();
+		Object *bestBuilder = nullptr;
+		Real bestDistSqr = 1.0e30f;
 
-		// get object
-		source = *i;
+		for (std::list<Object *>::iterator it = m_memberList.begin(); it != m_memberList.end(); ++it)
+		{
+			Object *candidate = *it;
+			if (candidate == nullptr || candidate->isEffectivelyDead() ||
+					!candidate->isKindOf(KINDOF_DOZER) || candidate->isContained())
+				continue;
 
-		source->doCommandButtonAtPosition( commandButton, pos, cmdSource );
+			AIUpdateInterface *candidateAI = candidate->getAIUpdateInterface();
+			DozerAIInterface *dozerAI = candidateAI ? candidateAI->getDozerAIInterface() : nullptr;
+			if (dozerAI == nullptr || dozerAI->isTaskPending(DOZER_TASK_BUILD))
+				continue;
+
+			if (whatToBuild == nullptr || !TheBuildAssistant->isPossibleToMakeUnit(candidate, whatToBuild))
+				continue;
+
+			const Real dx = candidate->getPosition()->x - pos->x;
+			const Real dy = candidate->getPosition()->y - pos->y;
+			const Real distSqr = dx*dx + dy*dy;
+			if (bestBuilder == nullptr || distSqr < bestDistSqr ||
+					(distSqr == bestDistSqr && candidate->getID() < bestBuilder->getID()))
+			{
+				bestBuilder = candidate;
+				bestDistSqr = distSqr;
+			}
+		}
+
+		if (bestBuilder)
+			bestBuilder->doCommandButtonAtPosition(commandButton, pos, cmdSource);
+		return;
+	}
+
+	for( std::list<Object *>::iterator i = m_memberList.begin(); i != m_memberList.end(); ++i )
+	{
+		Object *source = *i;
+		if (source)
+			source->doCommandButtonAtPosition( commandButton, pos, cmdSource );
 	}
 }
 
