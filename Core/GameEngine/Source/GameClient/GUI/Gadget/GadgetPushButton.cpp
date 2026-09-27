@@ -245,7 +245,7 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 				buttonClick.setEventName("GUIClick");
 
 
-			if( BitIsSet( instData->getStatus(), WIN_STATUS_RIGHT_CLICK ) )
+			if( BitIsSet( window->winGetStatus(), WIN_STATUS_RIGHT_CLICK ) )
 			{
 				// Need to be specially marked to care about right mouse events
 				if( TheAudio )
@@ -291,7 +291,7 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 		case GWM_RIGHT_UP:
 		{
 
-			if( BitIsSet( instData->getStatus(), WIN_STATUS_RIGHT_CLICK ) )
+			if( BitIsSet( window->winGetStatus(), WIN_STATUS_RIGHT_CLICK ) )
 			{
 
 				//
