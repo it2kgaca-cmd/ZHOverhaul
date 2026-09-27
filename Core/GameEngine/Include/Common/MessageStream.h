@@ -218,6 +218,7 @@ public:
 		MSG_META_SELECT_NEXT_WORKER,                ///< select 'next' worker
 		MSG_META_SELECT_PREV_WORKER,                ///< select 'prev' worker
 		MSG_META_SELECT_NEXT_IDLE_WORKER,           ///< TheSuperHackers @feature L3-M 03/08/2025 select next idle worker
+		MSG_META_RESUME_NEAREST_CONSTRUCTION,				///< send selected free builders to nearest abandoned build sites
 		MSG_META_VIEW_COMMAND_CENTER,								///< center view on command center
 		MSG_META_VIEW_LAST_RADAR_EVENT,							///< center view on last radar event
 		MSG_META_SELECT_HERO,                       ///< selects player's hero character, if exists...
@@ -604,7 +605,8 @@ public:
 		MSG_LOGIC_CRC,															///< CRC from the logic passed around in a network game :)
 		MSG_SET_MINE_CLEARING_DETAIL,								///< CRC from the logic passed around in a network game :)
 		MSG_ENABLE_RETALIATION_MODE,								///< Turn retaliation mode on or off.
-		MSG_TOGGLE_REPEAT_UNIT_CREATE,						///< Toggle a unit in the selected factory's standing repeat recipe.
+		MSG_TOGGLE_REPEAT_UNIT_CREATE,
+		MSG_RESUME_NEAREST_CONSTRUCTION,						///< selected free dozers claim nearest resumable construction sites						///< Toggle a unit in the selected factory's standing repeat recipe.
 
 		MSG_BEGIN_DEBUG_NETWORK_MESSAGES = 1900,		///< network messages that exist only in debug/internal builds. all grouped separately.
 
