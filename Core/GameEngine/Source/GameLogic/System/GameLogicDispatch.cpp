@@ -2033,11 +2033,16 @@ bool GameLogic::onToggleRepeatUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupP
 			continue;
 
 		ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
-		if (pu == nullptr || !TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate))
+		if (pu == nullptr)
+			continue;
+
+		const Bool hasRecipe = pu->isUnitInRepeatQueue(whatToCreate);
+		const Bool canAdd = TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate);
+		if (!hasRecipe && !canAdd)
 			continue;
 
 		foundEligible = TRUE;
-		if (!pu->isUnitInRepeatQueue(whatToCreate))
+		if (!hasRecipe && canAdd)
 			shouldAdd = TRUE;
 	}
 
@@ -2052,17 +2057,20 @@ bool GameLogic::onToggleRepeatUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupP
 			continue;
 
 		ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
-		if (pu == nullptr || !TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate))
+		if (pu == nullptr)
 			continue;
 
 		const Bool hasRecipe = pu->isUnitInRepeatQueue(whatToCreate);
+		const Bool canAdd = TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate);
 		if (shouldAdd)
 		{
-			if (!hasRecipe && pu->getRepeatProductionCount() < MAX_REPEAT_PRODUCTION_ENTRIES)
+			if (!hasRecipe && canAdd &&
+					pu->getRepeatProductionCount() < MAX_REPEAT_PRODUCTION_ENTRIES)
 				changedAny |= pu->toggleRepeatUnit(whatToCreate);
 		}
 		else if (hasRecipe)
 		{
+			// toggleRepeatUnit removes first, before prerequisite validation.
 			changedAny |= pu->toggleRepeatUnit(whatToCreate);
 		}
 	}
