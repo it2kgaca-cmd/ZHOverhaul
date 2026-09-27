@@ -637,7 +637,7 @@ protected:
 	Bool needToRotate(); ///< Returns true if we are not pointing in the right direction for movement.
 	LocalTrafficClass classifyLocalTraffic(Object *other) const;
 	Bool computeBlobTrafficGoal(const Coord3D& pathGoal, Coord3D *outGoal);
-	void receiveTrafficPush(Object *pusher);
+	void receiveTrafficPush(const Object *pusher);
 	Bool applyIdleTrafficDisplacement();
 	Real calculateMaxBlockedSpeed(Object *other) const;
 
