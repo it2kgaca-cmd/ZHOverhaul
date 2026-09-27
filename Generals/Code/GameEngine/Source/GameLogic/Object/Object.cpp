@@ -2788,7 +2788,10 @@ Bool Object::isSelectable() const
 //-------------------------------------------------------------------------------------------------
 Bool Object::isMassSelectable() const
 {
-	return isSelectable() && !isKindOf(KINDOF_STRUCTURE);
+	// Structures may participate in explicit matching/mass selection (for example
+	// double-clicking several reactors or defenses). Drag selection still has its
+	// own structure gate, so ordinary army box-selects do not vacuum up the base.
+	return isSelectable();
 }
 
 //-------------------------------------------------------------------------------------------------
