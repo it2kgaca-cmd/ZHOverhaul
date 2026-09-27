@@ -981,6 +981,7 @@ public:
 	Real getSpeed();									///< return the speed of the group's slowest member
 	Bool getCenter( Coord3D *center );				///< compute centroid of group
 	Bool getMinMaxAndCenter( Coord2D *min, Coord2D *max, Coord3D *center );
+	Real computeArrivalEnvelopeRadius() const;
 	void computeIndividualDestination( Coord3D *dest, const Coord3D *groupDest,
 		Object *obj, const Coord3D *center, Bool isFormation ); ///< compute destination of individual object, based on group destination
 	Int getCount();										///< return the number of objects in the group

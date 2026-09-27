@@ -508,6 +508,46 @@ Bool AIGroup::isEmpty() const
 }
 
 /**
+ * Compute the soft terminal envelope for an organic ground blob.
+ * This is the area the group may occupy when it finishes a movement
+ * order, not a rigid formation slot radius.
+ */
+Real AIGroup::computeArrivalEnvelopeRadius() const
+{
+	Real footprintSum = 0.0f;
+	Real maxMemberRadius = 0.0f;
+	Int crowdCount = 0;
+
+	for (std::list<Object *>::const_iterator it = m_memberList.begin(); it != m_memberList.end(); ++it)
+	{
+		Object *member = *it;
+		if (member == nullptr || member->isDisabledByType(DISABLED_HELD) || member->isKindOf(KINDOF_IMMOBILE))
+			continue;
+
+		AIUpdateInterface *memberAI = member->getAIUpdateInterface();
+		if (memberAI == nullptr || !memberAI->isDoingGroundMovement())
+			continue;
+		if (!member->isKindOf(KINDOF_VEHICLE) && !member->isKindOf(KINDOF_INFANTRY))
+			continue;
+
+		Real r = member->getGeometryInfo().getBoundingCircleRadius();
+		footprintSum += r*r;
+		if (r > maxMemberRadius)
+			maxMemberRadius = r;
+		++crowdCount;
+	}
+
+	if (crowdCount == 0)
+		return 0.0f;
+
+	Real arrivalRadius = 1.60f * sqrtf(footprintSum);
+	if (arrivalRadius < maxMemberRadius * 2.5f)
+		arrivalRadius = maxMemberRadius * 2.5f;
+
+	return arrivalRadius;
+}
+
+/**
  * Given a destination location, compute the destination position for
  * this object such that it keeps its relative position with the group.
  */
@@ -1747,6 +1787,9 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 		return;
 	}
 
+	const Bool useSharedArrivalEnvelope = !addWaypoint && getCount() > 1;
+	const Real sharedArrivalRadius = useSharedArrivalEnvelope ? computeArrivalEnvelopeRadius() : 0.0f;
+
 	// Move.
 	MemoryPoolObjectHolder iterHolder;
 	SimpleObjectIterator *iter = newInstance(SimpleObjectIterator);
@@ -1852,10 +1895,17 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 		if( !addWaypoint )
 		{
 			ai->aiMoveToPosition( &dest, cmdSource );
-			Real arrivalTolerance = theUnit->getGeometryInfo().getBoundingCircleRadius() * 0.85f;
-			if (arrivalTolerance < PATHFIND_CELL_SIZE_F * 0.50f)
-				arrivalTolerance = PATHFIND_CELL_SIZE_F * 0.50f;
-			ai->friend_setGroupArrival(dest, arrivalTolerance);
+			if (useSharedArrivalEnvelope && sharedArrivalRadius > 0.0f)
+			{
+				ai->friend_setGroupArrival(*pos, sharedArrivalRadius);
+			}
+			else
+			{
+				Real arrivalTolerance = theUnit->getGeometryInfo().getBoundingCircleRadius() * 0.85f;
+				if (arrivalTolerance < PATHFIND_CELL_SIZE_F * 0.50f)
+					arrivalTolerance = PATHFIND_CELL_SIZE_F * 0.50f;
+				ai->friend_setGroupArrival(dest, arrivalTolerance);
+			}
 		}
 		else
 		{
@@ -2411,6 +2461,8 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 	Coord2D min;
 	Coord2D max;
 	const Bool isFormation = getMinMaxAndCenter(&min, &max, &center);
+	const Bool useSharedArrivalEnvelope = !isFormation && getCount() > 1;
+	const Real sharedArrivalRadius = useSharedArrivalEnvelope ? computeArrivalEnvelopeRadius() : 0.0f;
 
 	std::list<Object *>::iterator i;
 	for( i = m_memberList.begin(); i != m_memberList.end(); ++i )
@@ -2430,10 +2482,17 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 			else
 				ai->aiMoveToPosition(&dest, cmdSource);
 
-			Real arrivalTolerance = member->getGeometryInfo().getBoundingCircleRadius() * 0.85f;
-			if (arrivalTolerance < PATHFIND_CELL_SIZE_F * 0.50f)
-				arrivalTolerance = PATHFIND_CELL_SIZE_F * 0.50f;
-			ai->friend_setGroupArrival(dest, arrivalTolerance);
+			if (useSharedArrivalEnvelope && sharedArrivalRadius > 0.0f)
+			{
+				ai->friend_setGroupArrival(*pos, sharedArrivalRadius);
+			}
+			else
+			{
+				Real arrivalTolerance = member->getGeometryInfo().getBoundingCircleRadius() * 0.85f;
+				if (arrivalTolerance < PATHFIND_CELL_SIZE_F * 0.50f)
+					arrivalTolerance = PATHFIND_CELL_SIZE_F * 0.50f;
+				ai->friend_setGroupArrival(dest, arrivalTolerance);
+			}
 		}
 	}
 }
