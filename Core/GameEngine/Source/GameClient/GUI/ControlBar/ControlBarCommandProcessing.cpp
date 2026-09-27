@@ -270,7 +270,8 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 		if( whatToRepeat == nullptr || pu == nullptr )
 			return CBC_COMMAND_USED;
 
-		if( !pu->isUnitInRepeatQueue( whatToRepeat ) &&
+		if( m_currContext != CB_CONTEXT_MULTI_SELECT &&
+				!pu->isUnitInRepeatQueue( whatToRepeat ) &&
 				pu->getRepeatProductionCount() >= MAX_REPEAT_PRODUCTION_ENTRIES )
 		{
 			TheInGameUI->message( "GUI:ProductionQueueFull" );
