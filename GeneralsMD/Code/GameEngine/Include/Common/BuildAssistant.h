@@ -154,6 +154,17 @@ public:
 																								 const Object *builderObject,
 																								 Player *player);
 
+	/// Resolve the nearest legal placement transform around a desired cursor transform.
+	/// Returns false when no legal transform exists within the local magnetic capture radius.
+	virtual Bool findNearestLegalPlacement( const Coord3D *desiredPos,
+											 const ThingTemplate *build,
+											 Real desiredAngle,
+											 UnsignedInt options,
+											 const Object *builderObject,
+											 Player *player,
+											 Coord3D *resolvedPos,
+											 Real *resolvedAngle );
+
 	/// query if we can build at this location
 	virtual LegalBuildCode isLocationClearOfObjects( const Coord3D *worldPos,
 																								 const ThingTemplate *build,
