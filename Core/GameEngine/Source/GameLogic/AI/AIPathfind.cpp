@@ -5721,13 +5721,13 @@ Bool Pathfinder::checkDestination(const Object *obj, Int cellX, Int cellY, Pathf
 				continue;
 			}
 
-			// Mobile allied bodies are soft traffic.  Destination spreading / local
-			// steering resolves the crowd; their goal cell is not a strategic wall.
-			if (obj->getRelationship(unit) == ALLIES) {
-				if (isSoftFriendlyPathTraffic(obj, unit))
-					continue;
+			// Friendly bodies are soft while TRAVELLING, but terminal reservations
+			// are exclusive.  If another unit already owns this goal footprint, reject
+			// the candidate so adjustDestination() allocates a different parking slot.
+			// Treating allied goal cells as soft made whole groups reserve the same
+			// destination and only discover the overlap after physically arriving.
+			if (obj->getRelationship(unit) == ALLIES)
 				return false;
-			}
 			if (cell->getFlags()==PathfindCell::UNIT_PRESENT_FIXED) {
 				Bool canCrush = obj->canCrushOrSquish(unit, TEST_CRUSH_OR_SQUISH);
 				if (!canCrush) {
