@@ -824,6 +824,14 @@ void ControlBar::updateContextCommand()
 		if( command == nullptr )
 			continue;
 
+		const ThingTemplate *repeatThing = nullptr;
+		Bool repeatActive = FALSE;
+		if( command->getCommandType() == GUI_COMMAND_UNIT_BUILD && pu )
+		{
+			repeatThing = command->getThingTemplate();
+			repeatActive = pu->isUnitInRepeatQueue( repeatThing );
+		}
+
 
 // LORENZEN COMMENTED THIS OUT 8/11
     // Reason: ExitCameos can be greyed out when the container object gets subdued
@@ -865,6 +873,21 @@ void ControlBar::updateContextCommand()
 				break;
 		}
 
+		// Repeat-enabled unit buttons remain right-clickable when their only blocker is
+		// money, queue capacity, parking, or the unit cap.  Left-click still runs the
+		// normal canMakeUnit checks, so this only keeps recipe editing accessible.
+		if( repeatActive && availability == COMMAND_RESTRICTED && repeatThing )
+		{
+			CanMakeType repeatMakeType = TheBuildAssistant->canMakeUnit( obj, repeatThing );
+			if( repeatMakeType == CANMAKE_NO_MONEY ||
+					repeatMakeType == CANMAKE_QUEUE_FULL ||
+					repeatMakeType == CANMAKE_PARKING_PLACES_FULL ||
+					repeatMakeType == CANMAKE_MAXED_OUT_FOR_PLAYER )
+			{
+				win->winEnable( TRUE );
+			}
+		}
+
 		//Determine by the production type of this button, whether or not the created object
 		//will have a veterancy rank
 		if( command->getCommandType() != GUI_COMMAND_EXIT_CONTAINER )
@@ -897,8 +920,7 @@ void ControlBar::updateContextCommand()
 		// buttons look pressed, while the next recipe entry gets a scheme-colored border.
 		if( command->getCommandType() == GUI_COMMAND_UNIT_BUILD && pu )
 		{
-			const ThingTemplate *repeatThing = command->getThingTemplate();
-			if( pu->isUnitInRepeatQueue( repeatThing ) )
+			if( repeatActive )
 			{
 				WinInstanceData *instData = win->winGetInstanceData();
 				if( instData )
