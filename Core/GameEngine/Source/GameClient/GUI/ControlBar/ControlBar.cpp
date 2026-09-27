@@ -2486,6 +2486,12 @@ void ControlBar::setControlCommand( GameWindow *button, const CommandButton *com
 	else
 		GadgetButtonEnableCheckLike( button, FALSE, FALSE );
 
+	// Unit production buttons use right-click to toggle standing repeat production.
+	if( commandButton->getCommandType() == GUI_COMMAND_UNIT_BUILD )
+		button->winSetStatus( WIN_STATUS_RIGHT_CLICK );
+	else
+		button->winClearStatus( WIN_STATUS_RIGHT_CLICK );
+
 	//
 	// set the imagry ... note that for 99% of the command buttons it's sufficient to specify
 	// only the disabled, enabled, hilite, and hilite pushed images.  For push-like buttons

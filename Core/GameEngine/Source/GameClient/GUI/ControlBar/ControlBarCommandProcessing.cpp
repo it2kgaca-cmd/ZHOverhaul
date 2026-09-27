@@ -177,6 +177,27 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			commandButton->getCommandType() != GUI_COMMAND_SELECT_ALL_UNITS_OF_TYPE )
 		obj = m_currentSelectedDrawable->getObject();
 
+	// Right-clicking a unit build command edits a standing production recipe instead
+	// of occupying the normal production queue.
+	if( gadgetMessage == GBM_SELECTED_RIGHT && commandButton->getCommandType() == GUI_COMMAND_UNIT_BUILD )
+	{
+		const ThingTemplate *whatToRepeat = commandButton->getThingTemplate();
+		ProductionUpdateInterface *pu = obj ? obj->getProductionUpdateInterface() : nullptr;
+		if( whatToRepeat == nullptr || pu == nullptr )
+			return CBC_COMMAND_USED;
+
+		if( !pu->isUnitInRepeatQueue( whatToRepeat ) &&
+				pu->getRepeatProductionCount() >= MAX_REPEAT_PRODUCTION_ENTRIES )
+		{
+			TheInGameUI->message( "GUI:ProductionQueueFull" );
+			return CBC_COMMAND_USED;
+		}
+
+		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_TOGGLE_REPEAT_UNIT_CREATE );
+		msg->appendIntegerArgument( whatToRepeat->getTemplateID() );
+		return CBC_COMMAND_USED;
+	}
+
 	//@todo Kris -- Special case code so convoy trucks can detonate nuke trucks -- if other things need this,
 	//rethink it.
 	if( obj && BitIsSet( commandButton->getOptions(), SINGLE_USE_COMMAND ) )

@@ -893,6 +893,23 @@ void ControlBar::updateContextCommand()
 
 		}
 
+		// Standing production recipes are distinct from the physical queue: latched
+		// buttons look pressed, while the next recipe entry gets a scheme-colored border.
+		if( command->getCommandType() == GUI_COMMAND_UNIT_BUILD && pu )
+		{
+			const ThingTemplate *repeatThing = command->getThingTemplate();
+			if( pu->isUnitInRepeatQueue( repeatThing ) )
+			{
+				WinInstanceData *instData = win->winGetInstanceData();
+				if( instData )
+					BitSet( instData->m_state, WIN_STATE_SELECTED );
+			}
+
+			setCommandBarBorder( win, command->getCommandButtonMappedBorderType() );
+			if( pu->isNextRepeatUnit( repeatThing ) )
+				GadgetButtonSetBorder( win, m_commandButtonBorderSystemColor );
+		}
+
 	}
 
 	// After Every change to the m_commandWIndows, we need to show fill in the missing blanks with the images
