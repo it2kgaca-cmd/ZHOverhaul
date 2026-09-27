@@ -3025,6 +3025,14 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		}
 
 		//-----------------------------------------------------------------------------------------
+		case GameMessage::MSG_META_RESUME_NEAREST_CONSTRUCTION:
+		{
+			TheMessageStream->appendMessage(GameMessage::MSG_RESUME_NEAREST_CONSTRUCTION);
+			disp = DESTROY_MESSAGE;
+			break;
+		}
+
+		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_SELECT_HERO:
 		{
 			// if there is nothing on the screen, bail
