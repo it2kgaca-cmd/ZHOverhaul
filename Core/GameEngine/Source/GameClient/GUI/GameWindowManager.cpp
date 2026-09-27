@@ -1004,6 +1004,20 @@ WinInputReturnCode GameWindowManager::winProcessMouseEvent( GameWindowMessage ms
 					window = findWindowUnderMouse(toolTipWindow, mousePos, WIN_STATUS_BELOW, WIN_STATUS_HIDDEN);
 			}
 
+			// A disabled command button normally cannot receive mouse input at all.
+			// Right-click repeat-production is different: a player must be able to
+			// arm or cancel a standing recipe while broke, queue-full, or otherwise
+			// temporarily unable to left-click the purchase.  The tooltip lookup
+			// already finds the deepest child regardless of enabled state, so use it
+			// as the right-click target when that child explicitly opted in.
+			if( (msg == GWM_RIGHT_DOWN || msg == GWM_RIGHT_UP) &&
+					toolTipWindow &&
+					BitIsSet( toolTipWindow->m_status, WIN_STATUS_RIGHT_CLICK ) &&
+					!BitIsSet( toolTipWindow->m_status, WIN_STATUS_HIDDEN ) )
+			{
+				window = toolTipWindow;
+			}
+
 			if( window )
 				if( BitIsSet( window->m_status, WIN_STATUS_NO_INPUT ) )
 				{
