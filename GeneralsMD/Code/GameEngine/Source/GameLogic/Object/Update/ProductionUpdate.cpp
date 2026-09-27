@@ -699,7 +699,8 @@ UpdateSleepTime ProductionUpdate::update()
 
 	// Standing repeat-production recipes do not occupy the normal queue. When the
 	// real queue is empty, insert exactly one recipe entry.
-	if( production == nullptr && m_repeatProductionCount > 0 )
+	if( production == nullptr && m_repeatProductionCount > 0 &&
+			!us->getStatusBits().test( OBJECT_STATUS_SOLD ) )
 	{
 		const ThingTemplate *nextRepeat = getNextRepeatUnit();
 		if( nextRepeat && TheBuildAssistant->canMakeUnit( us, nextRepeat ) == CANMAKE_OK )
