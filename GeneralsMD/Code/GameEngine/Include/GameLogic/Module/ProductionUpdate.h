@@ -140,6 +140,8 @@ public:
 //-------------------------------------------------------------------------------------------------
 enum CanMakeType CPP_11(: Int);
 
+enum { MAX_REPEAT_PRODUCTION_ENTRIES = 9 };
+
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 class ProductionUpdateInterface
@@ -156,6 +158,11 @@ public:
 	virtual Bool cancelUpgrade( const UpgradeTemplate *upgrade ) = 0;
 	virtual Bool isUpgradeInQueue( const UpgradeTemplate *upgrade ) const = 0;
 	virtual UnsignedInt countUnitTypeInQueue( const ThingTemplate *unitType ) const = 0;
+
+	virtual Bool toggleRepeatUnit( const ThingTemplate *unitType ) = 0;
+	virtual Bool isUnitInRepeatQueue( const ThingTemplate *unitType ) const = 0;
+	virtual Bool isNextRepeatUnit( const ThingTemplate *unitType ) const = 0;
+	virtual UnsignedInt getRepeatProductionCount() const = 0;
 
 	virtual Bool queueCreateUnit( const ThingTemplate *unitType, ProductionID productionID ) = 0;
 	virtual Bool cancelUnitCreate( ProductionID productionID ) = 0;
@@ -213,6 +220,11 @@ public:
 	virtual Bool isUpgradeInQueue( const UpgradeTemplate *upgrade ) const override;		///< is the upgrade in our production queue already
 	virtual UnsignedInt countUnitTypeInQueue( const ThingTemplate *unitType ) const override;  ///< count number of units with matching unit type in the production queue
 
+	virtual Bool toggleRepeatUnit( const ThingTemplate *unitType ) override;
+	virtual Bool isUnitInRepeatQueue( const ThingTemplate *unitType ) const override;
+	virtual Bool isNextRepeatUnit( const ThingTemplate *unitType ) const override;
+	virtual UnsignedInt getRepeatProductionCount() const override { return m_repeatProductionCount; }
+
 	virtual Bool queueCreateUnit( const ThingTemplate *unitType, ProductionID productionID ) override;					///< queue unit to be produced
 	virtual Bool cancelUnitCreate( ProductionID productionID ) override;		      ///< cancel construction of unit with matching production ID
 	virtual void cancelAllUnitsOfType( const ThingTemplate *unitType) override;	///< cancel all production of type unitType
@@ -239,6 +251,8 @@ public:
 
 protected:
 
+	const ThingTemplate *getNextRepeatUnit() const;
+
 	void addToProductionQueue( ProductionEntry *production );				///< add to *END* of production queue list
 	void removeFromProductionQueue( ProductionEntry *production );	///< remove production from the queue list
 
@@ -260,6 +274,9 @@ protected:
 	ProductionEntry*		m_productionQueueTail;					///< tail pointer for m_productionQueue
 	ProductionID				m_uniqueID;											///< unique ID counter for producing units
 	UnsignedInt					m_productionCount;							///< # of things in the production queue
+	const ThingTemplate *	m_repeatProduction[MAX_REPEAT_PRODUCTION_ENTRIES]; ///< standing right-click production sequence
+	UnsignedInt					m_repeatProductionCount;
+	const ThingTemplate *	m_lastRepeatProduced;				///< last unit inserted by the repeat scheduler
 	UnsignedInt					m_constructionCompleteFrame;		///< frame construction was complete on
 	DoorInfo						m_doors[DOOR_COUNT_MAX];
 	ModelConditionFlags m_clearFlags;										///< flags to clear from model

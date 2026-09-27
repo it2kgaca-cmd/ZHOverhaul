@@ -195,6 +195,10 @@ ProductionUpdate::ProductionUpdate( Thing *thing, const ModuleData* moduleData )
 	m_setFlags.clear();
 	m_flagsDirty = FALSE;
 	m_specialPowerConstructionCommandButton = nullptr;
+	m_repeatProductionCount = 0;
+	m_lastRepeatProduced = nullptr;
+	for (Int i = 0; i < MAX_REPEAT_PRODUCTION_ENTRIES; ++i)
+		m_repeatProduction[i] = nullptr;
 
 }
 
@@ -249,6 +253,88 @@ CanMakeType ProductionUpdate::canQueueCreateUnit( const ThingTemplate *unitType 
 
 	return CANMAKE_OK;
 
+}
+
+
+//-------------------------------------------------------------------------------------------------
+const ThingTemplate *ProductionUpdate::getNextRepeatUnit() const
+{
+	if (m_repeatProductionCount == 0)
+		return nullptr;
+
+	if (m_lastRepeatProduced)
+	{
+		for (UnsignedInt i = 0; i < m_repeatProductionCount; ++i)
+		{
+			const ThingTemplate *entry = m_repeatProduction[i];
+			if (entry && entry->isEquivalentTo(m_lastRepeatProduced))
+				return m_repeatProduction[(i + 1) % m_repeatProductionCount];
+		}
+	}
+
+	return m_repeatProduction[0];
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool ProductionUpdate::isUnitInRepeatQueue( const ThingTemplate *unitType ) const
+{
+	if (unitType == nullptr)
+		return FALSE;
+
+	for (UnsignedInt i = 0; i < m_repeatProductionCount; ++i)
+	{
+		const ThingTemplate *entry = m_repeatProduction[i];
+		if (entry && entry->isEquivalentTo(unitType))
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool ProductionUpdate::isNextRepeatUnit( const ThingTemplate *unitType ) const
+{
+	const ThingTemplate *next = getNextRepeatUnit();
+	return next && unitType && next->isEquivalentTo(unitType);
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool ProductionUpdate::toggleRepeatUnit( const ThingTemplate *unitType )
+{
+	if (unitType == nullptr)
+		return FALSE;
+
+	if (!TheBuildAssistant->isPossibleToMakeUnit(getObject(), unitType))
+		return FALSE;
+
+	for (UnsignedInt i = 0; i < m_repeatProductionCount; ++i)
+	{
+		const ThingTemplate *entry = m_repeatProduction[i];
+		if (entry && entry->isEquivalentTo(unitType))
+		{
+			Bool removedWasLast = m_lastRepeatProduced && m_lastRepeatProduced->isEquivalentTo(entry);
+			for (UnsignedInt j = i + 1; j < m_repeatProductionCount; ++j)
+				m_repeatProduction[j - 1] = m_repeatProduction[j];
+
+			--m_repeatProductionCount;
+			m_repeatProduction[m_repeatProductionCount] = nullptr;
+
+			if (m_repeatProductionCount == 0)
+				m_lastRepeatProduced = nullptr;
+			else if (removedWasLast)
+			{
+				UnsignedInt predecessor = (i == 0) ? (m_repeatProductionCount - 1) : (i - 1);
+				m_lastRepeatProduced = m_repeatProduction[predecessor];
+			}
+			return TRUE;
+		}
+	}
+
+	if (m_repeatProductionCount >= MAX_REPEAT_PRODUCTION_ENTRIES)
+		return FALSE;
+
+	m_repeatProduction[m_repeatProductionCount++] = unitType;
+	return TRUE;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -609,6 +695,22 @@ UpdateSleepTime ProductionUpdate::update()
 		m_setFlags.clear();
 		m_flagsDirty = FALSE;
 
+	}
+
+	// Standing repeat-production recipes do not occupy the normal queue. When the
+	// real queue is empty, insert exactly one recipe entry.
+	if( production == nullptr && m_repeatProductionCount > 0 )
+	{
+		const ThingTemplate *nextRepeat = getNextRepeatUnit();
+		if( nextRepeat && TheBuildAssistant->canMakeUnit( us, nextRepeat ) == CANMAKE_OK )
+		{
+			ProductionID repeatID = requestUniqueUnitID();
+			if( queueCreateUnit( nextRepeat, repeatID ) )
+			{
+				m_lastRepeatProduced = nextRepeat;
+				production = m_productionQueue;
+			}
+		}
 	}
 
 	// if nothing in the queue get outta here
@@ -1245,18 +1347,29 @@ void ProductionUpdate::crc( Xfer *xfer )
 	// extend base class
 	UpdateModule::crc( xfer );
 
+	UnsignedInt repeatCount = m_repeatProductionCount;
+	xfer->xferUnsignedInt( &repeatCount );
+	for (UnsignedInt i = 0; i < m_repeatProductionCount; ++i)
+	{
+		AsciiString name = m_repeatProduction[i] ? m_repeatProduction[i]->getName() : AsciiString::TheEmptyString;
+		xfer->xferAsciiString( &name );
+	}
+	AsciiString lastRepeatName = m_lastRepeatProduced ? m_lastRepeatProduced->getName() : AsciiString::TheEmptyString;
+	xfer->xferAsciiString( &lastRepeatName );
+
 }
 
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 2: Added standing repeat-production sequence */
 // ------------------------------------------------------------------------------------------------
 void ProductionUpdate::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 1;
+	XferVersion currentVersion = 2;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -1420,6 +1533,53 @@ void ProductionUpdate::xfer( Xfer *xfer )
 
 	// flags dirty
 	xfer->xferBool( &m_flagsDirty );
+
+	if (version >= 2)
+	{
+		UnsignedInt repeatCount = m_repeatProductionCount;
+		xfer->xferUnsignedInt( &repeatCount );
+		if (xfer->getXferMode() == XFER_LOAD)
+		{
+			if (repeatCount > MAX_REPEAT_PRODUCTION_ENTRIES)
+				throw SC_INVALID_DATA;
+			m_repeatProductionCount = repeatCount;
+		}
+
+		for (UnsignedInt i = 0; i < repeatCount; ++i)
+		{
+			AsciiString name;
+			if (xfer->getXferMode() == XFER_SAVE && m_repeatProduction[i])
+				name = m_repeatProduction[i]->getName();
+			xfer->xferAsciiString( &name );
+			if (xfer->getXferMode() == XFER_LOAD)
+			{
+				m_repeatProduction[i] = TheThingFactory->findTemplate( name );
+				if (m_repeatProduction[i] == nullptr)
+					throw SC_INVALID_DATA;
+			}
+		}
+		if (xfer->getXferMode() == XFER_LOAD)
+			for (UnsignedInt i = repeatCount; i < MAX_REPEAT_PRODUCTION_ENTRIES; ++i)
+				m_repeatProduction[i] = nullptr;
+
+		AsciiString lastRepeatName;
+		if (xfer->getXferMode() == XFER_SAVE && m_lastRepeatProduced)
+			lastRepeatName = m_lastRepeatProduced->getName();
+		xfer->xferAsciiString( &lastRepeatName );
+		if (xfer->getXferMode() == XFER_LOAD)
+		{
+			m_lastRepeatProduced = lastRepeatName.isEmpty() ? nullptr : TheThingFactory->findTemplate( lastRepeatName );
+			if (lastRepeatName.isNotEmpty() && m_lastRepeatProduced == nullptr)
+				throw SC_INVALID_DATA;
+		}
+	}
+	else if (xfer->getXferMode() == XFER_LOAD)
+	{
+		m_repeatProductionCount = 0;
+		m_lastRepeatProduced = nullptr;
+		for (Int i = 0; i < MAX_REPEAT_PRODUCTION_ENTRIES; ++i)
+			m_repeatProduction[i] = nullptr;
+	}
 
 }
 
