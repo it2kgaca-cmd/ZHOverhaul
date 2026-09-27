@@ -3776,24 +3776,35 @@ StateReturnType AIAttackMoveToState::update()
 			}
 		}
 
-		// ZH Overhaul 0.1.0: attack-move is an explicit combat order, so
-		// hostile structures are valid targets. For turreted units, scan the
-		// visible engagement area rather than only current weapon range so the
-		// turret can begin traversing before the hull arrives.
-		// Attack-move is an explicit combat order, not ambient idle behavior.
-		// Spread searches deterministically over three frames, but force the mood
-		// timer due on those frames so normal fog/shroud legality is preserved.
+		// Attack-move has two acquisition layers.  First resolve the best target
+		// that can be fired on RIGHT NOW.  Only if no immediate engagement exists
+		// may an independently turning turret spend attention on a farther pre-aim
+		// target.  This prevents a tank from ignoring a shootable building/unit
+		// because a tactically higher-scoring enemy is visible farther ahead.
 		const UnsignedInt now = TheGameLogic->getFrame();
 		const Bool explicitCombatScan =
 			forceRetargetThisFrame || (((now + owner->getID()) % 3) == 0);
-		Object *scannedTarget = nullptr;
+
+		Object *nextObjectToAttack = nullptr;
+		Object *widePreAimTarget = nullptr;
 		if (explicitCombatScan)
 		{
 			ai->setNextMoodCheckTime(now);
-			scannedTarget = ai->getNextMoodTarget(
-				true, false, true, !canPreAimCurrentWeapon, true);
+			nextObjectToAttack = ai->getNextMoodTarget(
+				true, false, true, true, true);
+
+			if (nextObjectToAttack == nullptr && canPreAimCurrentWeapon)
+			{
+				// The first mood query advances its cadence; force the explicitly ordered
+				// attack-move scan due again for the wider pre-aim-only pass.
+				ai->setNextMoodCheckTime(now);
+				widePreAimTarget = ai->getNextMoodTarget(
+					true, false, true, false, true);
+			}
 		}
-		Object *nextObjectToAttack = scannedTarget ? scannedTarget : preAimTarget;
+
+		if (nextObjectToAttack == nullptr)
+			nextObjectToAttack = widePreAimTarget ? widePreAimTarget : preAimTarget;
 
 		if (nextObjectToAttack != nullptr)
 		{
