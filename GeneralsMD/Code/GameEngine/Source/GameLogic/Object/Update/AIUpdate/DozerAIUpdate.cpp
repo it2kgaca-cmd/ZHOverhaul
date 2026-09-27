@@ -888,6 +888,45 @@ void DozerActionStateMachine::loadPostProcess()
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
+static Object *findObjectToResumeConstruction( Object *dozer )
+{
+	if (dozer == nullptr || dozer->getAIUpdateInterface() == nullptr)
+		return nullptr;
+
+	const DozerAIInterface *dozerAI = dozer->getAIUpdateInterface()->getDozerAIInterface();
+	if (dozerAI == nullptr)
+		return nullptr;
+
+	PartitionFilterSamePlayer filter1(dozer->getControllingPlayer());
+	PartitionFilterAcceptByKindOf filter2(MAKE_KINDOF_MASK(KINDOF_STRUCTURE), KINDOFMASK_NONE);
+	PartitionFilterSameMapStatus filterMapStatus(dozer);
+	PartitionFilter *filters[] = { &filter1, &filter2, &filterMapStatus, nullptr };
+	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(
+		dozer->getPosition(), dozerAI->getBoredRange(), FROM_CENTER_2D, filters);
+	MemoryPoolObjectHolder hold(iter);
+
+	Object *closest = nullptr;
+	Real closestDistSqr = 0.0f;
+	for (Object *obj = iter->first(); obj; obj = iter->next())
+	{
+		if (!obj->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION))
+			continue;
+		if (!TheActionManager->canResumeConstructionOf(dozer, obj, CMD_FROM_AI))
+			continue;
+
+		const Real distSqr = ThePartitionManager->getDistanceSquared(dozer, obj, FROM_CENTER_2D);
+		if (closest == nullptr || distSqr < closestDistSqr ||
+				(distSqr == closestDistSqr && obj->getID() < closest->getID()))
+		{
+			closest = obj;
+			closestDistSqr = distSqr;
+		}
+	}
+	return closest;
+}
+
+//-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
 static Object *findObjectToRepair( Object *dozer )
 {
 
@@ -1142,24 +1181,27 @@ StateReturnType DozerPrimaryIdleState::update()
 		//
 		m_idleTooLongTimestamp = TheGameLogic->getFrame();
 
-		// try to find something around us that we can repair
-		Object *repairTarget = findObjectToRepair( dozer );
-		if( repairTarget )
+		// Prefer finishing an abandoned paid-for construction site before passive
+		// repair work. canResumeConstructionOf() rejects sites already actively owned
+		// by another builder, so idle workers naturally distribute one-per-site.
+		Object *buildTarget = findObjectToResumeConstruction(dozer);
+		if (buildTarget)
 		{
-
-			// issue the command
-			ai->aiRepair( repairTarget, CMD_FROM_AI );
-
-			//
-			// in theory we would need to "interrupt" whatever it is the Dozer is doing now, but
-			// we know we're in the idle state doing nothing so we don't really need to
-			//
-
-		} else {
-			getMachineOwner()->setWeaponSetFlag(WEAPONSET_MINE_CLEARING_DETAIL);//maybe go clear some mines, if I feel like it
-			Object *mine = findMine(dozer);
-			if (mine!=nullptr) {
-				ai->aiAttackObject( mine, 1, CMD_FROM_DOZER);
+			ai->aiResumeConstruction(buildTarget, CMD_FROM_AI);
+		}
+		else
+		{
+			Object *repairTarget = findObjectToRepair(dozer);
+			if (repairTarget)
+			{
+				ai->aiRepair(repairTarget, CMD_FROM_AI);
+			}
+			else
+			{
+				getMachineOwner()->setWeaponSetFlag(WEAPONSET_MINE_CLEARING_DETAIL);
+				Object *mine = findMine(dozer);
+				if (mine != nullptr)
+					ai->aiAttackObject(mine, 1, CMD_FROM_DOZER);
 			}
 		}
 
