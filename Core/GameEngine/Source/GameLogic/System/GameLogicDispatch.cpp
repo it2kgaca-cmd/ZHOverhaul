@@ -1862,9 +1862,10 @@ bool GameLogic::onToggleRepeatUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupP
 	if (pu == nullptr)
 		return false;
 
-	if (!TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate))
-		return false;
-
+	// ProductionUpdate owns the toggle semantics.  Removing an existing standing
+	// recipe is always legal, while additions still validate that this factory
+	// can legitimately make the unit.  Affordability is intentionally NOT part
+	// of this command: the recipe waits until money becomes available.
 	return pu->toggleRepeatUnit(whatToCreate);
 }
 
