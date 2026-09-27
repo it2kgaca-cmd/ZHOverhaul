@@ -1346,7 +1346,7 @@ AIUpdateInterface::LocalTrafficClass AIUpdateInterface::classifyLocalTraffic(Obj
  * This never changes the displaced unit's state-machine command or path.  Once traffic clears it
  * waits briefly, then drifts back toward the position it occupied before the push.
  */
-void AIUpdateInterface::receiveTrafficPush(Object *pusher)
+void AIUpdateInterface::receiveTrafficPush(const Object *pusher)
 {
 	Object *obj = getObject();
 	if (obj == nullptr || pusher == nullptr)
@@ -2707,7 +2707,7 @@ Real AIUpdateInterface::friend_getEffectiveGroupArrivalTolerance() const
 		return 0.0f;
 
 	Real effective = m_groupArrivalTolerance;
-	Object *obj = getObject();
+	const Object *obj = getObject();
 	if (obj == nullptr || ThePartitionManager == nullptr)
 		return effective;
 
