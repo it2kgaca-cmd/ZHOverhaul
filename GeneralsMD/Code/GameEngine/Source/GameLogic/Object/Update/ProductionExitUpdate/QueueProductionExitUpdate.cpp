@@ -137,14 +137,17 @@ void QueueProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorType 
 		exitPath.push_back(tmp);
 
 		AIUpdateInterface  *ai = newObj->getAIUpdateInterface();
+		Coord3D finalParking = tmp;
+		Bool reserveFinalParking = FALSE;
 		if (ai && ai->isDoingGroundMovement())
 		{
 			const Coord3D naturalExit = tmp;
-			Coord3D finalParking = m_rallyPointExists ? m_rallyPoint : naturalExit;
+			finalParking = m_rallyPointExists ? m_rallyPoint : naturalExit;
 			const Coord3D *parkingAnchor = m_rallyPointExists ? &m_rallyPoint : &naturalExit;
 
 			if (TheAI->pathfinder()->adjustDestination(newObj, ai->getLocomotorSet(), &finalParking, parkingAnchor))
 			{
+				reserveFinalParking = TRUE;
 				const Real dx = finalParking.x - naturalExit.x;
 				const Real dy = finalParking.y - naturalExit.y;
 				if (m_rallyPointExists || dx*dx + dy*dy > sqr(PATHFIND_CELL_SIZE_F * 0.25f))
@@ -153,6 +156,9 @@ void QueueProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorType 
 		}
 		if (ai) {
 			ai->aiFollowExitProductionPath( &exitPath, creationObject, CMD_FROM_AI );
+			if (reserveFinalParking)
+				TheAI->pathfinder()->updateGoal(newObj, &finalParking,
+					TheTerrainLogic->getLayerForDestination(&finalParking));
 		}
 		m_currentDelay = md->m_exitDelayData;
 
