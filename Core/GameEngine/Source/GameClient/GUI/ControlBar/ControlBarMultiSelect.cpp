@@ -123,7 +123,8 @@ void ControlBar::addCommonCommands( Drawable *draw, Bool firstDrawable )
 			command = commandSet->getCommandButton(i);
 
 			// add if present and can be used in a multi select
-			if( command && BitIsSet( command->getOptions(), OK_FOR_MULTI_SELECT ) == TRUE )
+			if( command && (BitIsSet( command->getOptions(), OK_FOR_MULTI_SELECT ) == TRUE ||
+							 command->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT) )
 			{
 
 				// put it in the common command set
@@ -159,7 +160,34 @@ void ControlBar::addCommonCommands( Drawable *draw, Bool firstDrawable )
 			Bool objectUpgrade = (command && command->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE) ||
 												(m_commonCommands[ i ] && m_commonCommands[ i ]->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE);
 
-			if (objectUpgrade)
+			Bool dozerConstruct = (command && command->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT) ||
+									(m_commonCommands[ i ] && m_commonCommands[ i ]->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT);
+
+			if (dozerConstruct)
+			{
+				const CommandButton *existing = m_commonCommands[i];
+				const ThingTemplate *existingThing = existing ? existing->getThingTemplate() : nullptr;
+				const ThingTemplate *candidateThing = command ? command->getThingTemplate() : nullptr;
+				const Bool sameBuild =
+					existing && command &&
+					existing->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT &&
+					command->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT &&
+					existingThing && candidateThing &&
+					existingThing->isEquivalentTo(candidateThing);
+
+				if (sameBuild)
+				{
+					m_commandWindows[i]->winHide(FALSE);
+					m_commandWindows[i]->winEnable(TRUE);
+					setControlCommand(m_commandWindows[i], existing);
+				}
+				else
+				{
+					m_commonCommands[i] = nullptr;
+					m_commandWindows[i]->winHide(TRUE);
+				}
+			}
+			else if (objectUpgrade)
 			{
 				const CommandButton *upgradeCommand =
 					(command && command->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE) ?
@@ -378,7 +406,8 @@ void ControlBar::updateContextMultiSelect()
 			switch( availability )
 			{
 				case COMMAND_HIDDEN:
-					if (command->getCommandType() != GUI_COMMAND_OBJECT_UPGRADE)
+					if (command->getCommandType() != GUI_COMMAND_OBJECT_UPGRADE &&
+							command->getCommandType() != GUI_COMMAND_DOZER_CONSTRUCT)
 						win->winHide( TRUE );
 					break;
 				case COMMAND_RESTRICTED:
@@ -438,6 +467,13 @@ void ControlBar::updateContextMultiSelect()
 			{
 				m_commandWindows[i]->winHide(TRUE);
 			}
+			continue;
+		}
+
+		if (m_commonCommands[i]->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT)
+		{
+			m_commandWindows[i]->winHide(FALSE);
+			m_commandWindows[i]->winEnable(objectsThatCanDoCommand[i] > 0);
 			continue;
 		}
 
