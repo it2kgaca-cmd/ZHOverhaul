@@ -716,6 +716,9 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 		MemoryPoolObjectHolder guardHold(guardIter);
 		for (Object *guard = guardIter->first(); guard; guard = guardIter->next())
 		{
+			if (guard == obj)
+				continue;
+
 			AIUpdateInterface *guardAI = guard->getAIUpdateInterface();
 			if (guardAI == nullptr || guardAI->getCurrentStateID() != AI_GUARD ||
 					!guard->isAbleToAttack())
@@ -761,12 +764,14 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 					{
 						if (ai->getCurrentStateID() == AI_GUARD)
 						{
-							// Preserve an explicit Guard order. Hand the aggressor to the Guard
-							// machine as a temporary threat instead of clearing the entire AI
-							// state into the legacy standalone GuardRetaliate behavior.
-							ai->friend_setGuardThreat(
-								damager->getID(),
-								TheGameLogic->getFrame() + TheAI->getAiData()->m_guardChaseUnitFrames);
+							// The damaged guard already has the aggressor in its BodyModule.
+							// Only nearby *other* guards need the shared pending threat.
+							if (them != obj)
+							{
+								ai->friend_setGuardThreat(
+									damager->getID(),
+									TheGameLogic->getFrame() + TheAI->getAiData()->m_guardChaseUnitFrames);
+							}
 						}
 						else
 						{
