@@ -823,7 +823,7 @@ static const char *EngineErrorCodeName(ErrorCode code)
 
 static void GetFaultModule(void *address, char *modulePath, size_t modulePathCount, uintptr_t *moduleOffset)
 {
-	modulePath[0] = 0;
+	strlcpy(modulePath, "<Unknown>", modulePathCount);
 	if (moduleOffset)
 		*moduleOffset = 0;
 
@@ -856,9 +856,8 @@ static LONG WINAPI UnHandledExceptionFilter(struct _EXCEPTION_POINTERS* e_info)
 	char functionName[512] = "<Unknown>";
 	char sourceFile[MAX_PATH] = "<Unknown>";
 	unsigned int sourceLine = 0xFFFFFFFF;
-	unsigned int resolvedAddress = 0;
 	void *faultAddress = e_info->ExceptionRecord->ExceptionAddress;
-	GetFunctionDetails(faultAddress, functionName, sourceFile, &sourceLine, &resolvedAddress);
+	GetFunctionDetails(faultAddress, functionName, sourceFile, &sourceLine, nullptr);
 
 	char modulePath[MAX_PATH] = "<Unknown>";
 	uintptr_t moduleOffset = 0;
