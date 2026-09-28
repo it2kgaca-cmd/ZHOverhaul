@@ -81,7 +81,40 @@ static void prepareGuardWeapon(Object *obj)
 		return;
 
 	AIUpdateInterface *ai = obj->getAIUpdateInterface();
-	ai->prepareTurretForGuard(ai->getWhichTurretForCurWeapon());
+	Weapon *weapon = obj->getCurrentWeapon();
+	if (ai == nullptr || weapon == nullptr)
+		return;
+
+	const WhichTurretType turret = ai->getWhichTurretForCurWeapon();
+	ai->prepareTurretForGuard(turret);
+
+	// Artillery should acquire and pre-aim before a target crosses the legal firing
+	// boundary. This does NOT extend weapon range; it only spends idle/guard time
+	// slewing the turret toward a prospective target so it can fire immediately
+	// when the target enters range.
+	const Real acquisitionRange = weapon->getAttackRange(obj) * 1.25f;
+	PartitionFilterRelationship relationship(obj, PartitionFilterRelationship::ALLOW_ENEMIES);
+	PartitionFilterPossibleToAttack possible(ATTACK_NEW_TARGET, obj, CMD_FROM_AI);
+	PartitionFilterSameMapStatus sameMap(obj);
+	PartitionFilter *filters[] = { &relationship, &possible, &sameMap, nullptr };
+
+	SimpleObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(
+		obj->getPosition(), acquisitionRange, FROM_CENTER_2D, filters, ITER_SORTED_NEAR_TO_FAR);
+	MemoryPoolObjectHolder hold(iter);
+
+	Object *preAimTarget = nullptr;
+	for (Object *candidate = iter ? iter->first() : nullptr; candidate; candidate = iter->next())
+	{
+		// Do not pre-aim into our own minimum-range dead zone.
+		if (!weapon->isTooClose(obj, candidate))
+		{
+			preAimTarget = candidate;
+			break;
+		}
+	}
+
+	if (preAimTarget)
+		ai->setTurretTargetObject(turret, preAimTarget, FALSE);
 }
 
 
@@ -89,51 +122,47 @@ static Bool hasAttackedMeAndICanReturnFire( State *thisState, void* /*userData*/
 {
 	Object *obj = thisState->getMachineOwner();
 	BodyModuleInterface *bmi = obj ? obj->getBodyModule() : nullptr;
-
-	if (!(obj && bmi)) {
+	if (!(obj && bmi))
 		return FALSE;
-	}
 
-	if (bmi->getClearableLastAttacker() == INVALID_ID) {
+	// Do not tear down a valid guard attack just because another shell landed.
+	// Leave the clearable attacker intact so it can be reconsidered as soon as the
+	// current engagement ends.
+	if (thisState->isAttack())
 		return FALSE;
-	}
 
-	// K. It appears we have a valid aggressor. Find it, and determine if we can attack it, etc.
-	Object *target = TheGameLogic->findObjectByID(bmi->getClearableLastAttacker());
-	bmi->clearLastAttacker();
-
-	// We use the clearable last attacker because we should continue attacking the guy. But if he
-	// stops attacking us, then we want our timer to kick us off of him and make us go attack
-	// other units instead.
-
-
-	if (!target) {
+	const ObjectID attackerID = bmi->getClearableLastAttacker();
+	if (attackerID == INVALID_ID)
 		return FALSE;
-	}
 
-	if (obj->getRelationship(target) != ENEMIES) {
-		return FALSE;
-	}
-
-	// This is a quick test on the target. It will be duplicated in getAbleToAttackSpecificObject,
-	// but the payoff is worth the duplication.
-	if (target->isEffectivelyDead()) {
-		return FALSE;
-	}
-
-	//@todo: Get this out of here. Move it into the declaration of calling this function, or figure
-	// out some way to call it less often.
-
-	if (!obj->isAbleToAttack()) {
+	Object *target = TheGameLogic->findObjectByID(attackerID);
+	if (target == nullptr || obj->getRelationship(target) != ENEMIES || target->isEffectivelyDead() ||
+			!obj->isAbleToAttack())
+	{
+		bmi->clearLastAttacker();
 		return FALSE;
 	}
 
 	CanAttackResult result = obj->getAbleToAttackSpecificObject(ATTACK_NEW_TARGET, target, CMD_FROM_AI);
-	if( result == ATTACKRESULT_POSSIBLE || result == ATTACKRESULT_POSSIBLE_AFTER_MOVING )
+	if (result != ATTACKRESULT_POSSIBLE && result != ATTACKRESULT_POSSIBLE_AFTER_MOVING)
 	{
-		return TRUE;
+		bmi->clearLastAttacker();
+		return FALSE;
 	}
-	return FALSE;
+
+	// Emplaced artillery never abandons its firing position merely to retaliate.
+	// Keep the threat remembered until it enters our firing envelope.
+	if (isStationaryGuardArtillery(obj))
+	{
+		Weapon *weapon = obj->getCurrentWeapon();
+		if (weapon == nullptr || !weapon->isWithinAttackRange(obj, target))
+			return FALSE;
+	}
+
+	AIGuardMachine *guardMachine = (AIGuardMachine *)thisState->getMachine();
+	guardMachine->setNemesisID(attackerID);
+	bmi->clearLastAttacker();
+	return TRUE;
 }
 
 //-- ExitConditions -------------------------------------------------------------------------------
@@ -208,15 +237,11 @@ AIGuardMachine::AIGuardMachine( Object *owner ) :
 	//Kris: Except that guard return is more like an attack move, and will acquire targets while moving there.
 	//This breaks deployAI units because they have to completely unpack before realizing that there is a target in range.
 	//So I'm making AI_GUARD_INNER the first state.
-#if RETAIL_COMPATIBLE_CRC
+	// Proactive guard retaliation is safe in all normal guard phases now that the
+	// condition does not interrupt an active inner attack. A returning unit may
+	// cleanly abandon its return move to counter a real aggressor, then come home.
 	defineState( AI_GUARD_INNER,						newInstance(AIGuardInnerState)( this ), AI_GUARD_OUTER, AI_GUARD_OUTER, attackAggressors );
 	defineState( AI_GUARD_RETURN,						newInstance(AIGuardReturnState)( this ), AI_GUARD_IDLE, AI_GUARD_INNER, attackAggressors );
-#else
-	// TheSuperHackers @bugfix 09/04/2026 The attack aggressors conditions for AI_GUARD_INNER and AI_GUARD_RETURN
-	// were removed to fix the conflicting movement and fire behavior in guard mode when the unit is under attack.
-	defineState( AI_GUARD_INNER,						newInstance(AIGuardInnerState)( this ), AI_GUARD_OUTER, AI_GUARD_OUTER );
-	defineState( AI_GUARD_RETURN,						newInstance(AIGuardReturnState)( this ), AI_GUARD_IDLE, AI_GUARD_INNER );
-#endif
 	defineState( AI_GUARD_IDLE,							newInstance(AIGuardIdleState)( this ), AI_GUARD_INNER, AI_GUARD_RETURN, attackAggressors );
 	defineState( AI_GUARD_OUTER,						newInstance(AIGuardOuterState)( this ), AI_GUARD_GET_CRATE, AI_GUARD_GET_CRATE );
 	defineState( AI_GUARD_GET_CRATE,				newInstance(AIGuardPickUpCrateState)( this ), AI_GUARD_RETURN, AI_GUARD_RETURN );
@@ -897,13 +922,6 @@ AIGuardAttackAggressorState::~AIGuardAttackAggressorState()
 StateReturnType AIGuardAttackAggressorState::onEnter()
 {
 	Object *obj = getMachineOwner();
-	ObjectID nemID = INVALID_ID;
-
-	if (obj->getBodyModule() && obj->getBodyModule()->getLastDamageInfo()->in.m_sourceID) {
-		nemID = obj->getBodyModule()->getLastDamageInfo()->in.m_sourceID;
-		getGuardMachine()->setNemesisID(nemID);
-	}
-
 	Object *nemesis = TheGameLogic->findObjectByID(getGuardMachine()->getNemesisID());
 	if (nemesis == nullptr)
 	{
@@ -911,33 +929,41 @@ StateReturnType AIGuardAttackAggressorState::onEnter()
 		return STATE_SUCCESS;
 	}
 
-	if (isStationaryGuardArtillery(obj))
-	{
-		Weapon *weapon = obj->getCurrentWeapon();
-		if (weapon == nullptr || !weapon->isWithinAttackRange(obj, nemesis))
-			return STATE_SUCCESS;
-	}
+	Weapon *weapon = obj->getCurrentWeapon();
+	const Bool stationaryArtillery = isStationaryGuardArtillery(obj);
+	const Bool noPursuit = getGuardMachine()->getGuardMode() == GUARDMODE_GUARD_WITHOUT_PURSUIT;
+
+	// Stationary artillery and explicit no-pursuit guarders counter-fire only when
+	// the aggressor is already in a legal firing envelope.
+	if ((stationaryArtillery || noPursuit) &&
+			(weapon == nullptr || !weapon->isWithinAttackRange(obj, nemesis)))
+		return STATE_SUCCESS;
 
 	Object* targetToGuard = getGuardMachine()->findTargetToGuardByID();
 	Coord3D pos = targetToGuard ? *targetToGuard->getPosition() : *getGuardMachine()->getPositionToGuard();
-	//Don't allow guarding units to leave their guard radius!
+
+	// Ordinary targets remain bound to the normal guard circle. An enemy that is
+	// actively damaging the guard force receives a larger, temporary retaliation
+	// leash so long-range artillery cannot shell the position with impunity.
+	Real retaliationRange = AIGuardMachine::getStdGuardRange(obj);
+	if (!stationaryArtillery && !noPursuit)
+		retaliationRange *= 3.0f;
+
 	m_exitConditions.m_center = pos;
-	m_exitConditions.m_radiusSqr = sqr(AIGuardMachine::getStdGuardRange(getMachineOwner()));
+	m_exitConditions.m_radiusSqr = sqr(retaliationRange);
 	m_exitConditions.m_attackGiveUpFrame = TheGameLogic->getFrame() + TheAI->getAiData()->m_guardChaseUnitFrames;
 	m_exitConditions.m_conditionsToConsider = (ExitConditions::ATTACK_ExitIfExpiredDuration |
-																						 ExitConditions::ATTACK_ExitIfNoUnitFound |
-																						 ExitConditions::ATTACK_ExitIfOutsideRadius );
+													 ExitConditions::ATTACK_ExitIfNoUnitFound |
+													 ExitConditions::ATTACK_ExitIfOutsideRadius );
 
-	const Bool followAggressor = !isStationaryGuardArtillery(obj);
+	const Bool followAggressor = !stationaryArtillery && !noPursuit;
 	m_attackState = newInstance(AIAttackState)(getMachine(), followAggressor, true, false, &m_exitConditions);
 	m_attackState->getMachine()->setGoalObject(nemesis);
 
 	StateReturnType returnVal = m_attackState->onEnter();
-	if (returnVal == STATE_CONTINUE) {
+	if (returnVal == STATE_CONTINUE)
 		return STATE_CONTINUE;
-	}
 
-	// if we had no one to attack, we were successful, so go to the next state.
 	return STATE_SUCCESS;
 }
 
