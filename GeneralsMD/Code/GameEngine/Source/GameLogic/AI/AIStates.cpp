@@ -1914,6 +1914,38 @@ StateReturnType AIInternalMoveToState::update()
 	// made production exits complete while tanks were still inside their factories.
 	Real closeEnoughDist = ai->getCurLocomotor() ? ai->getCurLocomotor()->getCloseEnoughDist() : 0.0f;
 
+	// Once an occupancy-resolved group member is physically parked at its own
+	// terminal slot, stop grooming the path. Vehicles otherwise keep rotating to
+	// satisfy a tiny residual closest-point/path-heading error even though their
+	// body is already exactly where the blob planner wanted it.
+	if (ai->isDoingGroundMovement() && ai->friend_hasGroupArrival() && ai->getPath())
+	{
+		PathNode *lastNode = ai->getPath()->getLastNode();
+		if (lastNode)
+		{
+			const Coord3D *slot = lastNode->getPosition();
+			const Real dx = obj->getPosition()->x - slot->x;
+			const Real dy = obj->getPosition()->y - slot->y;
+			Real settleDist = obj->getGeometryInfo().getBoundingCircleRadius() * 0.30f;
+			if (settleDist < closeEnoughDist)
+				settleDist = closeEnoughDist;
+			if (settleDist < PATHFIND_CELL_SIZE_F * 0.20f)
+				settleDist = PATHFIND_CELL_SIZE_F * 0.20f;
+			if (settleDist > PATHFIND_CELL_SIZE_F * 0.55f)
+				settleDist = PATHFIND_CELL_SIZE_F * 0.55f;
+
+			if (dx*dx + dy*dy <= sqr(settleDist))
+			{
+				ai->setLocomotorGoalNone();
+				obj->clearModelConditionState(MODELCONDITION_MOVING);
+				obj->clearModelConditionState(MODELCONDITION_CLIMBING);
+				obj->clearModelConditionState(MODELCONDITION_RAPPELLING);
+				TheAI->pathfinder()->updateGoal(obj, obj->getPosition(), obj->getLayer());
+				return STATE_SUCCESS;
+			}
+		}
+	}
+
 	Real onPathDistToGoal = ai->getLocomotorDistanceToGoal();
 	//DEBUG_LOG(("onPathDistToGoal = %f %s",onPathDistToGoal, obj->getTemplate()->getName().str()));
 	if (ai->getCurLocomotor() && (onPathDistToGoal < closeEnoughDist))
