@@ -58,6 +58,12 @@
 
 // PUBLIC /////////////////////////////////////////////////////////////////////////////////////////
 
+static Bool sameRepeatProductionTemplate(const ThingTemplate *a, const ThingTemplate *b)
+{
+	return a != nullptr && b != nullptr && a->getName().compareNoCase(b->getName()) == 0;
+}
+
+//-------------------------------------------------------------------------------------------------
 static const ModelConditionFlagType theOpeningFlags[DOOR_COUNT_MAX] =
 {
 	MODELCONDITION_DOOR_1_OPENING,
@@ -267,7 +273,7 @@ const ThingTemplate *ProductionUpdate::getNextRepeatUnit() const
 		for (UnsignedInt i = 0; i < m_repeatProductionCount; ++i)
 		{
 			const ThingTemplate *entry = m_repeatProduction[i];
-			if (entry && entry->isEquivalentTo(m_lastRepeatProduced))
+			if (entry && sameRepeatProductionTemplate(entry, m_lastRepeatProduced))
 				return m_repeatProduction[(i + 1) % m_repeatProductionCount];
 		}
 	}
@@ -284,7 +290,7 @@ Bool ProductionUpdate::isUnitInRepeatQueue( const ThingTemplate *unitType ) cons
 	for (UnsignedInt i = 0; i < m_repeatProductionCount; ++i)
 	{
 		const ThingTemplate *entry = m_repeatProduction[i];
-		if (entry && entry->isEquivalentTo(unitType))
+		if (entry && sameRepeatProductionTemplate(entry, unitType))
 			return TRUE;
 	}
 
@@ -295,7 +301,7 @@ Bool ProductionUpdate::isUnitInRepeatQueue( const ThingTemplate *unitType ) cons
 Bool ProductionUpdate::isNextRepeatUnit( const ThingTemplate *unitType ) const
 {
 	const ThingTemplate *next = getNextRepeatUnit();
-	return next && unitType && next->isEquivalentTo(unitType);
+	return sameRepeatProductionTemplate(next, unitType);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -307,9 +313,9 @@ Bool ProductionUpdate::toggleRepeatUnit( const ThingTemplate *unitType )
 	for (UnsignedInt i = 0; i < m_repeatProductionCount; ++i)
 	{
 		const ThingTemplate *entry = m_repeatProduction[i];
-		if (entry && entry->isEquivalentTo(unitType))
+		if (entry && sameRepeatProductionTemplate(entry, unitType))
 		{
-			Bool removedWasLast = m_lastRepeatProduced && m_lastRepeatProduced->isEquivalentTo(entry);
+			Bool removedWasLast = sameRepeatProductionTemplate(m_lastRepeatProduced, entry);
 			for (UnsignedInt j = i + 1; j < m_repeatProductionCount; ++j)
 				m_repeatProduction[j - 1] = m_repeatProduction[j];
 
@@ -710,6 +716,13 @@ UpdateSleepTime ProductionUpdate::update()
 			ProductionID repeatID = requestUniqueUnitID();
 			if( queueCreateUnit( nextRepeat, repeatID ) )
 			{
+#if defined(RTS_PROFILE_TRACY)
+				AsciiString message;
+				message.format("RepeatSchedule frame=%u factory=%u unit=%s templateID=%u productionID=%u",
+					TheGameLogic->getFrame(), us->getID(), nextRepeat->getName().str(),
+					(UnsignedInt)nextRepeat->getTemplateID(), (UnsignedInt)repeatID);
+				PROFILER_MSG(message.str(), message.getLength());
+#endif
 				m_lastRepeatProduced = nextRepeat;
 				production = m_productionQueue;
 			}
