@@ -70,8 +70,11 @@ static Bool isStationaryGuardArtillery(Object *obj)
 	if (turret == TURRET_INVALID || ai->getTurretTurnRate(turret) <= 0.0f)
 		return FALSE;
 
+	// Classify against ordinary perception, not Guard's expanded inner scan radius.
+	// Using GUARDINNER here can inflate a human guarder's 180 vision to ~324 and
+	// make a genuine 350-range deploy artillery piece stop looking like artillery.
 	const Real visionRange = TheAI->getAdjustedVisionRangeForObject(obj,
-		AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD | AI_VISIONFACTOR_GUARDINNER);
+		AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
 	return weapon->getAttackRange(obj) > visionRange * 1.10f;
 }
 
