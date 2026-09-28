@@ -69,6 +69,7 @@
 #include "GameLogic/Module/OpenContain.h"
 #include "GameLogic/Module/ProductionUpdate.h"
 #include "GameLogic/Module/SpecialPowerModule.h"
+#include "GameLogic/Module/SpawnBehavior.h"
 #include "GameLogic/ScriptActions.h"
 #include "GameLogic/ScriptEngine.h"
 #include "GameLogic/VictoryConditions.h"
@@ -394,6 +395,73 @@ static Bool forceAttackMemberCanAttackTarget(Object *member, Object *target)
 	return FALSE;
 }
 
+static void issueForceAttackForMember(Object *member, Object *target)
+{
+	if (member == nullptr || target == nullptr)
+		return;
+
+	ContainModuleInterface *contain = member->getContain();
+	if (contain && contain->isPassengerAllowedToFire())
+	{
+		const ContainedItemsList *items = contain->getContainedItemsList();
+		if (items)
+		{
+			for (ContainedItemsList::const_iterator it = items->begin(); it != items->end(); ++it)
+			{
+				Object *passenger = *it;
+				if (passenger == nullptr || passenger->isEffectivelyDead() ||
+						!contain->isPassengerAllowedToFire(passenger->getID()))
+					continue;
+				CanAttackResult result = passenger->getAbleToAttackSpecificObject(
+					ATTACK_NEW_TARGET_FORCED, target, CMD_FROM_PLAYER);
+				if (result == ATTACKRESULT_POSSIBLE || result == ATTACKRESULT_POSSIBLE_AFTER_MOVING)
+				{
+					AIUpdateInterface *passengerAI = passenger->getAIUpdateInterface();
+					if (passengerAI)
+						passengerAI->aiForceAttackObject(target, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER);
+				}
+			}
+		}
+	}
+
+	SpawnBehaviorInterface *spawn = member->getSpawnBehaviorInterface();
+	if (spawn && !spawn->doSlavesHaveFreedom())
+		spawn->orderSlavesToAttackTarget(target, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER);
+
+	AIUpdateInterface *ai = member->getAIUpdateInterface();
+	if (ai && member != target)
+		ai->aiForceAttackObject(target, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER);
+}
+
+static void installPersistentForceAttackSet(Object *member, const std::vector<ObjectID>& orderedTargets, ObjectID currentTargetID)
+{
+	if (member == nullptr || orderedTargets.empty())
+		return;
+
+	AIUpdateInterface *memberAI = member->getAIUpdateInterface();
+	if (memberAI)
+		memberAI->setPersistentForceAttackTargetSet(orderedTargets, currentTargetID);
+
+	ContainModuleInterface *contain = member->getContain();
+	if (contain == nullptr || !contain->isPassengerAllowedToFire())
+		return;
+
+	const ContainedItemsList *items = contain->getContainedItemsList();
+	if (items == nullptr)
+		return;
+
+	for (ContainedItemsList::const_iterator it = items->begin(); it != items->end(); ++it)
+	{
+		Object *passenger = *it;
+		if (passenger == nullptr || passenger->isEffectivelyDead() ||
+				!contain->isPassengerAllowedToFire(passenger->getID()))
+			continue;
+		AIUpdateInterface *passengerAI = passenger->getAIUpdateInterface();
+		if (passengerAI)
+			passengerAI->setPersistentForceAttackTargetSet(orderedTargets, currentTargetID);
+	}
+}
+
 static Bool assignSelectedUnitsToForceAttackTargets(AIGroup *selection, const GameMessage *msg)
 {
 	if (selection == nullptr || selection->isEmpty() || msg == nullptr || msg->getArgumentCount() == 0)
@@ -482,35 +550,28 @@ static Bool assignSelectedUnitsToForceAttackTargets(AIGroup *selection, const Ga
 	}
 
 	Bool assignedAny = FALSE;
-	for (Int targetIndex = 0; targetIndex < (Int)targetIDs.size(); ++targetIndex)
+	for (Int attackerIndex = 0; attackerIndex < (Int)attackerIDs.size(); ++attackerIndex)
 	{
-#if RETAIL_COMPATIBLE_AIGROUP
-		AIGroup *targetGroup = TheAI->createGroup();
-#else
-		AIGroupPtr targetGroup = TheAI->createGroup();
-#endif
-		for (Int attackerIndex = 0; attackerIndex < (Int)attackerIDs.size(); ++attackerIndex)
-		{
-			if (attackerTarget[attackerIndex] != targetIndex)
-				continue;
-			Object *member = TheGameLogic->findObjectByID(attackerIDs[attackerIndex]);
-			if (member)
-				targetGroup->add(member);
-		}
+		const Int targetIndex = attackerTarget[attackerIndex];
+		if (targetIndex < 0 || targetIndex >= static_cast<Int>(targetIDs.size()))
+			continue;
 
-		if (!targetGroup->isEmpty())
-		{
-			Object *target = TheGameLogic->findObjectByID(targetIDs[targetIndex]);
-			if (target)
-			{
-				targetGroup->releaseWeaponLockForGroup(LOCKED_TEMPORARILY);
-				targetGroup->groupForceAttackObject(target, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER);
-				assignedAny = TRUE;
-			}
-		}
-#if RETAIL_COMPATIBLE_AIGROUP
-		TheAI->destroyGroup(targetGroup);
-#endif
+		Object *member = TheGameLogic->findObjectByID(attackerIDs[attackerIndex]);
+		Object *target = TheGameLogic->findObjectByID(targetIDs[targetIndex]);
+		if (member == nullptr || target == nullptr)
+			continue;
+
+		// Rotate each attacker's copy so its initially assigned target is first, followed by the
+		// rest of the box in deterministic ID order. This keeps subsequent demolition passes spread
+		// across the set instead of every survivor immediately dog-piling the same second target.
+		std::vector<ObjectID> orderedTargets;
+		orderedTargets.reserve(targetIDs.size());
+		for (Int offset = 0; offset < static_cast<Int>(targetIDs.size()); ++offset)
+			orderedTargets.push_back(targetIDs[(targetIndex + offset) % targetIDs.size()]);
+
+		issueForceAttackForMember(member, target);
+		installPersistentForceAttackSet(member, orderedTargets, target->getID());
+		assignedAny = TRUE;
 	}
 
 #if defined(RTS_PROFILE_TRACY)

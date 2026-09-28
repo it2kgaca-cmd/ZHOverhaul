@@ -455,6 +455,7 @@ public:
 private:
 	Bool computePath( PathfindServicesInterface *pathfinder, Coord3D *destination );	///< computes path to destination, returns false if no path
 	Bool computeAttackPath(PathfindServicesInterface *pathfinder,  const Object *victim, const Coord3D* victimPos );	///< computes path to attack the current target, returns false if no path
+	void updatePersistentForceAttackTargetSet(UpdateSleepTime& sleepTime);
 #ifdef ALLOW_SURRENDER
 	void doSurrenderUpdateStuff();
 #endif
@@ -539,6 +540,11 @@ public:
 
 	/// if we are attacking "fromID", stop that and attack "toID" instead
 	void transferAttack(ObjectID fromID, ObjectID toID);
+
+	// Ctrl-box force attack target set. The set survives each individual target and is
+	// consumed until no valid visible/attackable targets remain or the player gives a new order.
+	void setPersistentForceAttackTargetSet(const std::vector<ObjectID>& orderedTargets, ObjectID currentTargetID);
+	void clearPersistentForceAttackTargetSet();
 
 	void setCurrentVictim( const Object *nemesis );			///<  Current victim.
 	Object *getCurrentVictim() const;
@@ -720,6 +726,9 @@ private:
 	AIStateMachine*			m_stateMachine;							///< the state machine
 	UnsignedInt					m_nextEnemyScanTime;				///< how long until the next enemy scan
 	ObjectID						m_currentVictimID;					///< if not INVALID_ID, this agent's current victim.
+	std::vector<ObjectID>	m_persistentForceAttackTargets;	///< ordered target set from Ctrl-box force attack
+	UnsignedInt				m_persistentForceAttackCursor;	///< next target index to consider
+	ObjectID						m_persistentForceAttackCurrentID;	///< target currently being worked by this set
 	Real								m_desiredSpeed;							///< the desired speed of the tank
 	CommandSourceType		m_lastCommandSource;			/**< Keep track of the source of the last command we got.
 																									This is set immediately before the SetState that goes

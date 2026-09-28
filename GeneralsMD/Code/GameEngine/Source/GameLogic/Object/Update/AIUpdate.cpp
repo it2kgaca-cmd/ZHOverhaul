@@ -214,6 +214,9 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_stateMachine = nullptr;
 	m_nextEnemyScanTime = 0;
 	m_currentVictimID = INVALID_ID;
+	m_persistentForceAttackTargets.clear();
+	m_persistentForceAttackCursor = 0;
+	m_persistentForceAttackCurrentID = INVALID_ID;
 	m_desiredSpeed = FAST_AS_POSSIBLE;
 	m_lastCommandSource = CMD_FROM_AI;
 	m_guardMode = GUARDMODE_NORMAL;
@@ -1181,6 +1184,8 @@ UpdateSleepTime AIUpdateInterface::update()
 #endif
 
 	m_isInUpdate = FALSE;
+
+	updatePersistentForceAttackTargetSet(subMachineSleep);
 
 	if (m_completedWaypoint != nullptr)
 	{
@@ -3405,6 +3410,9 @@ void AIUpdateInterface::aiDoCommand(const AICommandParms* parms)
 	if (!isAllowedToRespondToAiCommands(parms))
 		return;
 
+	if (parms->m_cmdSource == CMD_FROM_PLAYER)
+		clearPersistentForceAttackTargetSet();
+
 #ifdef ALLOW_SURRENDER
 	// surrendered items have very limited options, and only via AI cmds
 	if (isSurrendered())
@@ -4982,6 +4990,124 @@ void AIUpdateInterface::privateHackInternet( CommandSourceType cmdSource )
 	}
 }
 
+//----------------------------------------------------------------------------------------------------------
+void AIUpdateInterface::clearPersistentForceAttackTargetSet()
+{
+	m_persistentForceAttackTargets.clear();
+	m_persistentForceAttackCursor = 0;
+	m_persistentForceAttackCurrentID = INVALID_ID;
+}
+
+//----------------------------------------------------------------------------------------------------------
+void AIUpdateInterface::setPersistentForceAttackTargetSet(const std::vector<ObjectID>& orderedTargets, ObjectID currentTargetID)
+{
+	m_persistentForceAttackTargets = orderedTargets;
+	m_persistentForceAttackCursor = 0;
+	m_persistentForceAttackCurrentID = currentTargetID;
+
+	if (!m_persistentForceAttackTargets.empty())
+	{
+		for (UnsignedInt i = 0; i < static_cast<UnsignedInt>(m_persistentForceAttackTargets.size()); ++i)
+		{
+			if (m_persistentForceAttackTargets[i] == currentTargetID)
+			{
+				m_persistentForceAttackCursor = (i + 1) % static_cast<UnsignedInt>(m_persistentForceAttackTargets.size());
+				break;
+			}
+		}
+	}
+
+	wakeUpNow();
+}
+
+//----------------------------------------------------------------------------------------------------------
+void AIUpdateInterface::updatePersistentForceAttackTargetSet(UpdateSleepTime& sleepTime)
+{
+	if (m_persistentForceAttackTargets.empty())
+		return;
+
+	Object *self = getObject();
+	Player *owner = self ? self->getControllingPlayer() : nullptr;
+	if (self == nullptr || owner == nullptr || self->isEffectivelyDead())
+	{
+		clearPersistentForceAttackTargetSet();
+		return;
+	}
+
+	const Int playerIndex = owner->getPlayerIndex();
+	Object *current = m_persistentForceAttackCurrentID != INVALID_ID ?
+		TheGameLogic->findObjectByID(m_persistentForceAttackCurrentID) : nullptr;
+	const Bool currentLive = current && !current->isEffectivelyDead() && !current->isOffMap() && !current->isContained();
+	const Bool currentVisible = currentLive && current->getShroudedStatus(playerIndex) == OBJECTSHROUD_CLEAR;
+	const Bool currentIsOurGoal = current && getStateMachine()->getGoalObject() == current;
+
+	// Keep working the current target while it remains visible. Allied/shared sight is sufficient;
+	// the attacker's own vision radius is intentionally irrelevant.
+	if (currentLive && currentVisible && currentIsOurGoal && isAttacking())
+		return;
+
+	const ObjectID failedVisibleTarget = (currentLive && currentVisible && !isAttacking()) ?
+		m_persistentForceAttackCurrentID : INVALID_ID;
+
+	// If the current target vanished back into shroud, immediately stop blind-firing. We keep the
+	// ID in the set so it can become eligible again if a friendly spotter reveals it later.
+	if (isAttacking() && (!currentLive || !currentVisible || !currentIsOurGoal))
+		privateIdle(CMD_FROM_AI);
+
+	m_persistentForceAttackCurrentID = INVALID_ID;
+
+	Bool anyLiveTarget = FALSE;
+	Bool anyLiveHiddenTarget = FALSE;
+	const UnsignedInt count = static_cast<UnsignedInt>(m_persistentForceAttackTargets.size());
+	if (count == 0)
+	{
+		clearPersistentForceAttackTargetSet();
+		return;
+	}
+
+	for (UnsignedInt offset = 0; offset < count; ++offset)
+	{
+		const UnsignedInt index = (m_persistentForceAttackCursor + offset) % count;
+		const ObjectID targetID = m_persistentForceAttackTargets[index];
+		if (targetID == INVALID_ID || targetID == failedVisibleTarget)
+			continue;
+
+		Object *target = TheGameLogic->findObjectByID(targetID);
+		if (target == nullptr || target->isEffectivelyDead() || target->isOffMap() || target->isContained())
+			continue;
+
+		anyLiveTarget = TRUE;
+		if (target->getShroudedStatus(playerIndex) != OBJECTSHROUD_CLEAR)
+		{
+			anyLiveHiddenTarget = TRUE;
+			continue;
+		}
+
+		CanAttackResult result = self->getAbleToAttackSpecificObject(ATTACK_NEW_TARGET_FORCED, target, CMD_FROM_PLAYER);
+		if (result != ATTACKRESULT_POSSIBLE && result != ATTACKRESULT_POSSIBLE_AFTER_MOVING)
+			continue;
+
+		m_persistentForceAttackCursor = (index + 1) % count;
+		m_persistentForceAttackCurrentID = targetID;
+		privateForceAttackObject(target, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER);
+		sleepTime = UPDATE_SLEEP_NONE;
+		return;
+	}
+
+	if (!anyLiveTarget || (!anyLiveHiddenTarget && failedVisibleTarget == INVALID_ID))
+	{
+		// Nothing left that this unit can meaningfully consume.
+		clearPersistentForceAttackTargetSet();
+		return;
+	}
+
+	// Remaining targets are hidden, or the only visible target just failed. Stay idle but retain
+	// the set; periodic wakeups let newly spotted targets resume the demolition chain automatically.
+	const UpdateSleepTime retrySleep = UPDATE_SLEEP(10);
+	if (retrySleep < sleepTime)
+		sleepTime = retrySleep;
+}
+
 /// if we are attacking "fromID", stop that and attack "toID" instead
 void AIUpdateInterface::transferAttack(ObjectID fromID, ObjectID toID)
 {
@@ -5399,28 +5525,21 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 		}
 	}
 
-	// Use Guard Outer, which typically corresponds to the total range.
-	Real rangeToFindWithin = TheAI->getAdjustedVisionRangeForObject(obj, AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
+	// Engagement awareness follows actual weapon reach, not the unit's personal vision radius.
+	// Visibility is checked separately through the player's shroud state below. This deliberately
+	// gives long-range weapons StarCraft-style spotting: a unit may fire beyond its own sight when
+	// another friendly observer has the target revealed.
+	Real rangeToFindWithin = 0.0f;
+	for (Int slot = 0; slot < WEAPONSLOT_COUNT; ++slot)
+	{
+		const Weapon *weapon = obj->getWeaponInWeaponSlot((WeaponSlotType)slot);
+		if (weapon)
+			rangeToFindWithin = max(rangeToFindWithin, weapon->getAttackRange(obj));
+	}
 
-	// A firing garrison uses the building as its firing platform. Retail only searched out to the
-	// passenger's vision range, which can be shorter than its weapon range; that is why a Technical
-	// can sometimes shoot a garrison without the occupants automatically answering. Search at least
-	// as far as the passenger's longest weapon plus the container radius.
 	const Object *container = obj->getContainedBy();
 	ContainModuleInterface *containerContain = container ? container->getContain() : nullptr;
 	if (container && containerContain && containerContain->isPassengerAllowedToFire(obj->getID()))
-	{
-		Real longestWeaponRange = 0.0f;
-		for (Int slot = 0; slot < WEAPONSLOT_COUNT; ++slot)
-		{
-			const Weapon *weapon = obj->getWeaponInWeaponSlot((WeaponSlotType)slot);
-			if (weapon)
-				longestWeaponRange = max(longestWeaponRange, weapon->getAttackRange(obj));
-		}
-		rangeToFindWithin = max(rangeToFindWithin, longestWeaponRange);
-	}
-
-	if (container)
 		rangeToFindWithin += container->getGeometryInfo().getBoundingCircleRadius();
 
 	if (rangeToFindWithin <= 0.0f)
@@ -5468,10 +5587,7 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 
 	// Instead of shroud affecting the ability to attack, it affects the ability to target.
 	// The same checks apply as the old WeaponSet check (now commented out, search for getShroudedStatus)
-	if( calledByAI
-			&& obj->getControllingPlayer()
-			&& obj->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN
-		)
+	if (calledByAI && obj->getControllingPlayer())
 	{
 		flags |= AI::UNFOGGED;
 	}
@@ -5893,6 +6009,7 @@ void AIUpdateInterface::crc( Xfer *x )
 	* 4: Read m_curLocomotorSet from ini
 	* 5: TheSuperHackers @fix Fixed out-of-bounds xfer of m_guardTargetType
 	* 6: Added pending Guard threat ID/expiry so retaliation preserves explicit Guard orders
+	* 7: Added persistent Ctrl-box force-attack target set state
 	*/
 // ------------------------------------------------------------------------------------------------
 void AIUpdateInterface::xfer( Xfer *xfer )
@@ -5901,7 +6018,7 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 #if RETAIL_COMPATIBLE_CRC || RETAIL_COMPATIBLE_XFER_SAVE
 	const XferVersion currentVersion = 4;
 #else
-	const XferVersion currentVersion = 6;
+	const XferVersion currentVersion = 7;
 #endif
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
@@ -5958,6 +6075,31 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 	{
 		m_guardThreatID = INVALID_ID;
 		m_guardThreatExpireFrame = 0;
+	}
+
+	if (version >= 7)
+	{
+		Int forceTargetCount = static_cast<Int>(m_persistentForceAttackTargets.size());
+		xfer->xferInt(&forceTargetCount);
+		if (forceTargetCount < 0 || forceTargetCount > 64)
+		{
+			DEBUG_CRASH(("Invalid persistent force-attack target count %d", forceTargetCount));
+			throw SC_INVALID_DATA;
+		}
+		if (xfer->getXferMode() == XFER_LOAD)
+			m_persistentForceAttackTargets.resize(forceTargetCount, INVALID_ID);
+		for (Int i = 0; i < forceTargetCount; ++i)
+			xfer->xferObjectID(&m_persistentForceAttackTargets[i]);
+		xfer->xferUnsignedInt(&m_persistentForceAttackCursor);
+		xfer->xferObjectID(&m_persistentForceAttackCurrentID);
+		if (!m_persistentForceAttackTargets.empty())
+			m_persistentForceAttackCursor %= static_cast<UnsignedInt>(m_persistentForceAttackTargets.size());
+		else
+			m_persistentForceAttackCursor = 0;
+	}
+	else if (xfer->getXferMode() == XFER_LOAD)
+	{
+		clearPersistentForceAttackTargetSet();
 	}
 
 	AsciiString attackName;
