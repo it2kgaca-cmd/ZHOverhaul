@@ -5489,7 +5489,27 @@ StateReturnType AIAttackFireWeaponState::update()
     // that lookl like the //LINKED TURRETS// block, below
 
 
-		obj->fireCurrentWeapon(victim);
+		Bool firedPredictive = FALSE;
+		AIUpdateInterface *fireAI = obj->getAI();
+		if (fireAI && fireAI->getCurrentStateID() == AI_GUARD)
+		{
+			const Real ordinaryVision = TheAI->getAdjustedVisionRangeForObject(
+				obj, AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
+			const Bool longRangeGuardWeapon =
+				weapon->getAttackRange(obj) > ordinaryVision * 1.10f;
+			if (longRangeGuardWeapon)
+			{
+				Coord3D intercept;
+				if (weapon->computePredictiveIntercept(obj, victim, &intercept) &&
+						weapon->isWithinAttackRange(obj, &intercept))
+				{
+					obj->fireCurrentWeapon(&intercept);
+					firedPredictive = TRUE;
+				}
+			}
+		}
+		if (!firedPredictive)
+			obj->fireCurrentWeapon(victim);
 
 		//Kris: October 21, 2003 - Patch 1.01
 		//Fixes cases where some units couldn't transfer their attack to a different object. One example was Colonel Burton attacking
