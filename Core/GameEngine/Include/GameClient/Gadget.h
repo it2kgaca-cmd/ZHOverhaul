@@ -431,6 +431,7 @@ typedef struct _PushButtonData
 	void *userData;					///< random additional data we can set
 	const Image *overlayImage; ///< An overlay image (like a veterancy symbol)
 	AsciiString altSound;		///< use an alternative sound if one is set
+	Bool rightClickArmed;		///< tracks an in-progress RMB gesture independently of visual selected state
 } PushButtonData;
 
 // TabControlData ------------------------------------------------------------
