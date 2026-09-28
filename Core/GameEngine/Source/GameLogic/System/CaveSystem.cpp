@@ -142,7 +142,8 @@ void CaveSystem::xfer( Xfer *xfer )
 	xfer->xferVersion( &version, currentVersion );
 
 	// tunnel tracker size and data
-	UnsignedShort count = m_tunnelTrackerVector.size();
+	DEBUG_ASSERTCRASH(m_tunnelTrackerVector.size() <= 0xffffu, ("Tunnel tracker list exceeds save format capacity"));
+	UnsignedShort count = static_cast<UnsignedShort>(m_tunnelTrackerVector.size());
 	xfer->xferUnsignedShort( &count );
 	TunnelTracker *tracker;
 	if( xfer->getXferMode() == XFER_SAVE )

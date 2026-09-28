@@ -4058,7 +4058,8 @@ void W3DModelDraw::xfer( Xfer *xfer )
 	{
 
 		// count of data here
-		recoilInfoCount = m_weaponRecoilInfoVec[ i ].size();
+		DEBUG_ASSERTCRASH(m_weaponRecoilInfoVec[i].size() <= 0xffu, ("Weapon recoil info exceeds 8-bit save format capacity"));
+		recoilInfoCount = static_cast<UnsignedByte>(m_weaponRecoilInfoVec[i].size());
 		xfer->xferUnsignedByte( &recoilInfoCount );
 		if( xfer->getXferMode() == XFER_SAVE )
 		{
@@ -4111,7 +4112,8 @@ void W3DModelDraw::xfer( Xfer *xfer )
 	}
 
 	// sub object vector
-	UnsignedByte subObjectCount = m_subObjectVec.size();
+	DEBUG_ASSERTCRASH(m_subObjectVec.size() <= 0xffu, ("Model sub-object list exceeds save format capacity"));
+	UnsignedByte subObjectCount = static_cast<UnsignedByte>(m_subObjectVec.size());
 	xfer->xferUnsignedByte( &subObjectCount );
 	ModelConditionInfo::HideShowSubObjInfo hideShowSubObjInfo;
 	if( xfer->getXferMode() == XFER_SAVE )
