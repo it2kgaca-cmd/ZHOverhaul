@@ -1255,7 +1255,7 @@ bool DX8Wrapper::Set_Device_Resolution(int width,int height,int bits,int windowe
 		{
 			Resize_And_Position_Window();
 		}
-#pragma message("TODO: support changing windowed status and changing the bit depth")
+// Legacy TODO: support changing windowed status and bit depth without printing during every build.
 		WWDEBUG_SAY(("DX8Wrapper::Set_Device_Resolution is resetting the device."));
 		return Reset_Device();
 	} else {
