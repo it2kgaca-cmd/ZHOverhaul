@@ -624,8 +624,11 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 #endif
 				pilotAssignedIDs.push_back(pilot->getID());
 				reservedPilotVehicleIDs.push_back(bestVehicle->getID());
+				if (!smartLoadContainsID(usedAsDestination, bestVehicle->getID()))
+					usedAsDestination.push_back(bestVehicle->getID());
 				std::sort(pilotAssignedIDs.begin(), pilotAssignedIDs.end());
 				std::sort(reservedPilotVehicleIDs.begin(), reservedPilotVehicleIDs.end());
+				std::sort(usedAsDestination.begin(), usedAsDestination.end());
 				assignedAny = TRUE;
 			}
 		}
