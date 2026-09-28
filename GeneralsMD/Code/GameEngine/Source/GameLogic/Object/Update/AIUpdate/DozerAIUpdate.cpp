@@ -128,11 +128,15 @@ void DozerActionPickActionPosState::crc( Xfer *xfer )
 void DozerActionPickActionPosState::xfer( Xfer *xfer )
 {
   // version
-  XferVersion currentVersion = 1;
+  XferVersion currentVersion = 2;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
 	xfer->xferUser(&m_task, sizeof(m_task));
+	if (version >= 2)
+		xfer->xferBool(&m_builderPhase);
+	else if (xfer->getXferMode() == XFER_LOAD)
+		m_builderPhase = FALSE;
 	xfer->xferInt(&m_failedAttempts);
 }
 
@@ -234,6 +238,61 @@ StateReturnType DozerActionPickActionPosState::update()
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Builder Phase is only a last-resort straight approach through friendly base
+ *  geometry. Never use it to cheat cliffs, enemy structures, water, or map bounds. */
+static Bool isSafeBuilderPhaseCorridor(Object *dozer, AIUpdateInterface *ai, const Coord3D& goal)
+{
+	if (dozer == nullptr || ai == nullptr)
+		return FALSE;
+
+	const Coord3D start = *dozer->getPosition();
+	Coord3D delta;
+	delta.x = goal.x - start.x;
+	delta.y = goal.y - start.y;
+	delta.z = 0.0f;
+	const Real dist = delta.length();
+	if (dist < 1.0f)
+		return TRUE;
+
+	const Int samples = max(1, REAL_TO_INT_CEIL(dist / (PATHFIND_CELL_SIZE_F * 0.45f)));
+	for (Int i = 1; i <= samples; ++i)
+	{
+		const Real t = INT_TO_REAL(i) / INT_TO_REAL(samples);
+		Coord3D p = start;
+		p.x += delta.x * t;
+		p.y += delta.y * t;
+		p.z = TheTerrainLogic->getLayerHeight(p.x, p.y, dozer->getLayer());
+
+		PathfindCell *cell = TheAI->pathfinder()->getCell(dozer->getLayer(), &p);
+		if (cell == nullptr)
+			return FALSE;
+
+		// Never phase across cliff topology. If the legitimate route needs a ramp,
+		// normal strategic pathfinding remains authoritative.
+		if (cell->getType() == PathfindCell::CELL_CLIFF || cell->getPinched())
+			return FALSE;
+
+		if (TheAI->pathfinder()->validMovementPosition(
+				dozer->getCrusherLevel() > 0, dozer->getLayer(), ai->getLocomotorSet(), &p))
+		{
+			continue;
+		}
+
+		// A normally-invalid sample is phaseable only when the obstacle is one of
+		// our own/allied structures. Everything else stays hard.
+		if (cell->getType() != PathfindCell::CELL_OBSTACLE)
+			return FALSE;
+
+		Object *obstacle = TheGameLogic->findObjectByID(cell->getObstacleID());
+		if (obstacle == nullptr || !obstacle->isKindOf(KINDOF_STRUCTURE) ||
+				dozer->getRelationship(obstacle) != ALLIES)
+			return FALSE;
+	}
+
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Dozer moves to the action position */
 //-------------------------------------------------------------------------------------------------
 class DozerActionMoveToActionPosState : public State
@@ -242,8 +301,13 @@ class DozerActionMoveToActionPosState : public State
 
 public:
 
-	DozerActionMoveToActionPosState( StateMachine *machine, DozerTask task ) : State( machine, "DozerActionMoveToActionPosState" ) { m_task = task; }
+	DozerActionMoveToActionPosState( StateMachine *machine, DozerTask task ) : State( machine, "DozerActionMoveToActionPosState" )
+	{
+		m_task = task;
+		m_builderPhase = FALSE;
+	}
 	virtual StateReturnType update() override;
+	virtual void onExit( StateExitType status ) override;
 
 protected:
 	// snapshot interface
@@ -254,6 +318,7 @@ protected:
 protected:
 
 	DozerTask m_task;						///< our task
+	Bool m_builderPhase;				///< last-resort friendly-structure phasing active
 
 };
 EMPTY_DTOR(DozerActionMoveToActionPosState)
@@ -283,6 +348,22 @@ void DozerActionMoveToActionPosState::xfer( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 void DozerActionMoveToActionPosState::loadPostProcess()
 {
+}
+
+//-------------------------------------------------------------------------------------------------
+void DozerActionMoveToActionPosState::onExit( StateExitType status )
+{
+	if (!m_builderPhase)
+		return;
+
+	Object *dozer = getMachineOwner();
+	AIUpdateInterface *ai = dozer ? dozer->getAIUpdateInterface() : nullptr;
+	if (ai)
+	{
+		ai->setCanPathThroughUnits(FALSE);
+		ai->setLocomotorGoalNone();
+	}
+	m_builderPhase = FALSE;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -343,6 +424,13 @@ StateReturnType DozerActionMoveToActionPosState::update()
 
 	if( distSqr <= allowableDistanceSqr )
 	{
+		if (m_builderPhase && ai)
+		{
+			ai->setCanPathThroughUnits(FALSE);
+			ai->setLocomotorGoalNone();
+			m_builderPhase = FALSE;
+		}
+
 		if( m_task == DOZER_TASK_BUILD )
 		{
 
@@ -362,11 +450,32 @@ StateReturnType DozerActionMoveToActionPosState::update()
 	}
 
 
-	// if we're in the idle state fail our move
-	// Failure transition is back to DOZER_ACTION_PICK_ACTION_POS, so
-	// it is ok to fail. jba.
-	if( ai && ai->isIdle() )
+	// Normal route first. If a BUILD approach genuinely stops short, escalate once
+	// into Builder Phase: direct locomotion may pass through friendly structures/units
+	// only when the straight corridor is otherwise terrain-safe.
+	if (ai && ai->isIdle() && !m_builderPhase)
+	{
+		if (m_task == DOZER_TASK_BUILD && goalPos &&
+				isSafeBuilderPhaseCorridor(dozer, ai, *goalPos))
+		{
+			m_builderPhase = TRUE;
+			ai->ignoreObstacle(goalObject);
+			ai->setCanPathThroughUnits(TRUE);
+			ai->setIgnoreCollisionTime(LOGICFRAMES_PER_SECOND * 2);
+			ai->setLocomotorGoalPositionExplicit(*goalPos);
+			return STATE_CONTINUE;
+		}
 		return STATE_FAILURE;
+	}
+
+	if (m_builderPhase && ai && goalPos)
+	{
+		// Refresh collision immunity while the short direct approach is active.
+		ai->setCanPathThroughUnits(TRUE);
+		ai->setIgnoreCollisionTime(LOGICFRAMES_PER_SECOND * 2);
+		ai->setLocomotorGoalPositionExplicit(*goalPos);
+		return STATE_CONTINUE;
+	}
 
 	return STATE_CONTINUE;
 
