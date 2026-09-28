@@ -3414,6 +3414,8 @@ Bool W3DView::isDoingScriptedCamera()
 void W3DView::stopDoingScriptedCamera()
 {
 	m_scriptedState = 0;
+	m_freezeTimeForCameraMovement = false;
+	m_timeMultiplier = 1;
 }
 
 // ------------------------------------------------------------------------------------------------

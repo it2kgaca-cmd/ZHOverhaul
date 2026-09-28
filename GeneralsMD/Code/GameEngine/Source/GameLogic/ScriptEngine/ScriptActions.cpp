@@ -85,6 +85,7 @@
 #include "GameLogic/Weapon.h"
 #include "GameLogic/VictoryConditions.h"
 #include "GameLogic/AIPathfind.h"
+#include "GameNetwork/NetworkInterface.h"
 
 
 // Kind of hacky, but we need to dance on the guts of the terrain.
@@ -126,6 +127,7 @@ GameWindow *ScriptActions::m_messageWindow = nullptr;
 ScriptActions::ScriptActions()
 {
 	m_suppressNewWindows = FALSE;
+	m_skipCinematicPresentation = FALSE;
 	m_unnamedUnit = AsciiString::TheEmptyString;
 
 }
@@ -153,6 +155,7 @@ void ScriptActions::init()
 void ScriptActions::reset()
 {
 	m_suppressNewWindows = FALSE;
+	m_skipCinematicPresentation = FALSE;
 	closeWindows(FALSE); // Close victory or defeat windows.
 
 }
@@ -163,6 +166,52 @@ void ScriptActions::reset()
 void ScriptActions::update()
 {
 	// Empty for now.  jba.
+}
+
+
+//-------------------------------------------------------------------------------------------------
+/** Skip the presentation layer of an in-engine scripted cinematic without skipping mission logic. */
+//-------------------------------------------------------------------------------------------------
+Bool ScriptActions::skipCurrentCinematic()
+{
+	// Script skipping changes local presentation state and scripted time. Keep it single-player only
+	// so a client cannot desynchronize a network game by escaping a scripted sequence independently.
+	if (TheNetwork != nullptr || TheInGameUI == nullptr || TheInGameUI->getInputEnabled() || m_messageWindow != nullptr)
+		return FALSE;
+
+	m_skipCinematicPresentation = TRUE;
+
+	TheInGameUI->setInputEnabled(TRUE);
+	if (TheMouse)
+		TheMouse->setVisibility(TRUE);
+
+	if (TheDisplay)
+	{
+		TheDisplay->enableLetterBox(FALSE);
+		TheDisplay->setCinematicText(AsciiString::TheEmptyString);
+		TheDisplay->setCinematicTextFrames(0);
+	}
+	ShowControlBar(FALSE);
+
+	if (TheTacticalView)
+	{
+		TheTacticalView->stopDoingScriptedCamera();
+		TheTacticalView->lockUserControlUntilFrame(0);
+		TheTacticalView->setCameraLock(INVALID_ID);
+		TheTacticalView->setCameraLockDrawable(nullptr);
+		TheTacticalView->cameraDisableSlaveMode();
+		TheTacticalView->setTimeMultiplier(1);
+		TheTacticalView->setViewFilterMode(FM_NULL_MODE);
+		TheTacticalView->setViewFilter(FT_NULL_FILTER);
+		TheTacticalView->setFadeParameters(0, -1);
+		TheTacticalView->setUserControlled(TRUE);
+	}
+
+	if (TheScriptEngine)
+		TheScriptEngine->doUnfreezeTime();
+
+	DEBUG_LOG(("Skipped scripted cinematic presentation at frame %u", TheGameLogic ? TheGameLogic->getFrame() : 0));
+	return TRUE;
 }
 
 
@@ -3259,6 +3308,11 @@ void ScriptActions::doMergeTeamIntoTeam(const AsciiString& teamSrcName, const As
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doDisableInput()
 {
+	// Once the player skips a cinematic, later presentation scripts in that same sequence must not
+	// steal control back. The sequence's normal ENABLE_INPUT action clears this suppression state.
+	if (m_skipCinematicPresentation)
+		return;
+
 #if defined(RTS_DEBUG)
 	if (!TheGlobalData->m_disableScriptedInputDisabling)
 #endif
@@ -3278,6 +3332,7 @@ void ScriptActions::doDisableInput()
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doEnableInput()
 {
+	m_skipCinematicPresentation = FALSE;
 	TheInGameUI->setInputEnabled(true);
 	TheMouse->setVisibility(true);
 }
@@ -6536,10 +6591,59 @@ void ScriptActions::doNamedSetTrainHeld( const AsciiString &locoName, const Bool
 
 
 //-------------------------------------------------------------------------------------------------
+Bool ScriptActions::shouldSuppressSkippedCinematicAction(const ScriptAction *action) const
+{
+	if (action == nullptr)
+		return FALSE;
+
+	switch (action->getActionType())
+	{
+		case ScriptAction::MOVE_CAMERA_TO:
+		case ScriptAction::SETUP_CAMERA:
+		case ScriptAction::ZOOM_CAMERA:
+		case ScriptAction::PITCH_CAMERA:
+		case ScriptAction::CAMERA_FOLLOW_NAMED:
+		case ScriptAction::CAMERA_MOD_LOOK_TOWARD:
+		case ScriptAction::CAMERA_MOD_FINAL_LOOK_TOWARD:
+		case ScriptAction::MOVE_CAMERA_ALONG_WAYPOINT_PATH:
+		case ScriptAction::ROTATE_CAMERA:
+		case ScriptAction::CAMERA_LOOK_TOWARD_OBJECT:
+		case ScriptAction::CAMERA_LOOK_TOWARD_WAYPOINT:
+		case ScriptAction::RESET_CAMERA:
+		case ScriptAction::MOVE_CAMERA_TO_SELECTION:
+		case ScriptAction::CAMERA_MOD_FREEZE_TIME:
+		case ScriptAction::CAMERA_MOD_FREEZE_ANGLE:
+		case ScriptAction::CAMERA_MOD_SET_FINAL_ZOOM:
+		case ScriptAction::CAMERA_MOD_SET_FINAL_PITCH:
+		case ScriptAction::CAMERA_MOD_SET_FINAL_SPEED_MULTIPLIER:
+		case ScriptAction::CAMERA_MOD_SET_ROLLING_AVERAGE:
+		case ScriptAction::SET_VISUAL_SPEED_MULTIPLIER:
+		case ScriptAction::DISPLAY_CINEMATIC_TEXT:
+		case ScriptAction::CAMERA_LETTERBOX_BEGIN:
+		case ScriptAction::CAMERA_BW_MODE_BEGIN:
+		case ScriptAction::CAMERA_MOTION_BLUR:
+		case ScriptAction::CAMERA_MOTION_BLUR_JUMP:
+		case ScriptAction::CAMERA_MOTION_BLUR_FOLLOW:
+		case ScriptAction::CAMERA_MOTION_BLUR_END_FOLLOW:
+		case ScriptAction::FREEZE_TIME:
+		case ScriptAction::SHOW_MILITARY_CAPTION:
+		case ScriptAction::CAMERA_TETHER_NAMED:
+		case ScriptAction::CAMERA_ENABLE_SLAVE_MODE:
+		case ScriptAction::CAMERA_ADD_SHAKER_AT:
+			return TRUE;
+		default:
+			return FALSE;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Execute an action */
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::executeAction( ScriptAction *pAction )
 {
+	if (m_skipCinematicPresentation && shouldSuppressSkippedCinematicAction(pAction))
+		return;
+
 	switch (pAction->getActionType()) {
 		default:
 			DEBUG_CRASH(("Unknown ScriptAction type %d", pAction->getActionType())); return;

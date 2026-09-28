@@ -50,6 +50,7 @@ public:
 
 	virtual void executeAction( ScriptAction *pAction ) = 0; ///< execute a script action.
 	virtual void closeWindows( Bool suppressNewWindows ) = 0;
+	virtual Bool skipCurrentCinematic() = 0; ///< Skip presentation-only parts of the current scripted cinematic.
 
 	// Called by the script engine in postProcessLoad()
 	virtual void doEnableOrDisableObjectDifficultyBonuses(Bool enableBonuses) = 0;
@@ -76,6 +77,7 @@ public:
 
 	virtual void executeAction( ScriptAction *pAction ) override;
 	virtual void closeWindows( Bool suppressNewWindows ) override;
+	virtual Bool skipCurrentCinematic() override;
 
 	virtual void doEnableOrDisableObjectDifficultyBonuses(Bool enableBonuses) override;
 
@@ -85,9 +87,11 @@ protected:
 	static void clearWindow() {m_messageWindow=nullptr;};
 
 	Bool m_suppressNewWindows;
+	Bool m_skipCinematicPresentation;
 	AsciiString m_unnamedUnit;
 
 protected: // helper functions
+	Bool shouldSuppressSkippedCinematicAction(const ScriptAction *action) const;
 	void changeObjectPanelFlagForSingleObject(Object *obj, const AsciiString& flagToChange, Bool newVal );
 
 protected:

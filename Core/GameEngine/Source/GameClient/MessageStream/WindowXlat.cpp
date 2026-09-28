@@ -55,6 +55,9 @@
 #include "GameClient/WindowXlat.h"
 #include "GameClient/Shell.h"
 #include "GameClient/Display.h"
+#if defined(RTS_ZEROHOUR)
+#include "GameLogic/ScriptActions.h"
+#endif
 
 
 // DEFINES ////////////////////////////////////////////////////////////////////
@@ -330,6 +333,12 @@ GameMessageDisposition WindowTranslator::translateGameMessage(const GameMessage 
 					TheDisplay->stopMovie();
 					returnCode = WIN_INPUT_USED;
 				}
+#if defined(RTS_ZEROHOUR)
+				else if (TheScriptActions && TheScriptActions->skipCurrentCinematic())
+				{
+					returnCode = WIN_INPUT_USED;
+				}
+#endif
 			}
 
 			// TheSuperHackers @bugfix If the input is disabled, then only allow the ESC button to get through.
