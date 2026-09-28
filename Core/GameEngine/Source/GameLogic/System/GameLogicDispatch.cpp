@@ -62,6 +62,7 @@
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/BodyModule.h"
+#include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/DozerAIUpdate.h"
 #include "GameLogic/Module/OpenContain.h"
 #include "GameLogic/Module/ProductionUpdate.h"
@@ -350,6 +351,241 @@ static Bool assignSelectedBuildersToNearestConstruction(AIGroup *selection, Play
 			claimedSites.push_back(bestSite->getID());
 			ai->aiResumeConstruction(bestSite, CMD_FROM_PLAYER);
 			assignedAny = TRUE;
+		}
+	}
+
+\treturn assignedAny;
+}
+
+// ------------------------------------------------------------------------------------------------
+// Smart Load / Auto Garrison.
+// The command is synchronized and derives every assignment deterministically from the selected
+// group plus current world state. Capacity is reserved here before issuing any enter orders so
+// multiple passengers cannot all select the same last slot during the same logic frame.
+// ------------------------------------------------------------------------------------------------
+struct SmartLoadContainerCandidate
+{
+	ObjectID id;
+	Int remainingCapacity;
+	Bool selected;
+	Bool garrisonOrTunnel;
+};
+
+static Bool smartLoadContainsID(const std::vector<ObjectID>& ids, ObjectID id)
+{
+	return std::binary_search(ids.begin(), ids.end(), id);
+}
+
+static Int smartLoadSlotsRequired(const Object *passenger, const ContainModuleInterface *contain)
+{
+	if (passenger == nullptr || contain == nullptr)
+		return 0;
+
+	// Garrisons and tunnel networks count occupants rather than transport slots.
+	if (contain->isGarrisonable() || contain->isTunnelContain())
+		return 1;
+
+	const Int slots = passenger->getTransportSlotCount();
+	return slots > 0 ? slots : 0;
+}
+
+static Bool smartLoadIsUsableContainer(Object *container)
+{
+	if (container == nullptr || container->isEffectivelyDead() || container->isContained() ||
+			container->testStatus(OBJECT_STATUS_SOLD))
+		return FALSE;
+
+	ContainModuleInterface *contain = container->getContain();
+	if (contain == nullptr || contain->getContainMax() == 0)
+		return FALSE;
+
+	return TRUE;
+}
+
+static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *issuingPlayer)
+{
+	if (selection == nullptr || issuingPlayer == nullptr || selection->isEmpty())
+		return FALSE;
+
+	VecObjectID selected = selection->getAllIDs();
+	std::sort(selected.begin(), selected.end());
+
+	std::vector<ObjectID> passengerIDs;
+	std::vector<SmartLoadContainerCandidate> containers;
+
+	// First collect selected passengers and selected containers.
+	for (VecObjectID::const_iterator it = selected.begin(); it != selected.end(); ++it)
+	{
+		Object *obj = TheGameLogic->findObjectByID(*it);
+		if (obj == nullptr || obj->getControllingPlayer() != issuingPlayer ||
+				obj->isEffectivelyDead() || obj->isContained())
+			continue;
+
+		if (obj->getAIUpdateInterface() != nullptr && obj->getTransportSlotCount() > 0)
+			passengerIDs.push_back(obj->getID());
+
+		if (smartLoadIsUsableContainer(obj))
+		{
+			ContainModuleInterface *contain = obj->getContain();
+			Int maxCapacity = contain->getContainMax();
+			Int remaining = 0x3fffffff;
+			if (maxCapacity >= 0)
+			{
+				remaining = maxCapacity - ((Int)contain->getContainCount() + contain->getExtraSlotsInUse());
+				if (remaining <= 0)
+					continue;
+			}
+
+			SmartLoadContainerCandidate candidate;
+			candidate.id = obj->getID();
+			candidate.remainingCapacity = remaining;
+			candidate.selected = TRUE;
+			candidate.garrisonOrTunnel = contain->isGarrisonable() || contain->isTunnelContain();
+			containers.push_back(candidate);
+		}
+	}
+
+	if (passengerIDs.empty())
+		return FALSE;
+
+	// Add nearby compatible container candidates. Selected destinations always outrank these.
+	// This intentionally scans only on explicit hotkey use, not every frame.
+	const Real nearbyRangeSqr = sqr(600.0f);
+	for (Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject())
+	{
+		if (!smartLoadIsUsableContainer(obj) || smartLoadContainsID(selected, obj->getID()))
+			continue;
+
+		ContainModuleInterface *contain = obj->getContain();
+		const Bool isGarrisonOrTunnel = contain->isGarrisonable() || contain->isTunnelContain();
+
+		// Nearby transports/tunnels must be ours. Neutral/allied garrisons are permitted only
+		// when their own contain rules accept the passenger later.
+		if (!isGarrisonOrTunnel && obj->getControllingPlayer() != issuingPlayer)
+			continue;
+
+		Bool nearSelection = FALSE;
+		for (std::vector<ObjectID>::const_iterator pit = passengerIDs.begin(); pit != passengerIDs.end(); ++pit)
+		{
+			Object *passenger = TheGameLogic->findObjectByID(*pit);
+			if (passenger && ThePartitionManager->getDistanceSquared(passenger, obj, FROM_CENTER_2D) <= nearbyRangeSqr)
+			{
+				nearSelection = TRUE;
+				break;
+			}
+		}
+		if (!nearSelection)
+			continue;
+
+		Int maxCapacity = contain->getContainMax();
+		Int remaining = 0x3fffffff;
+		if (maxCapacity >= 0)
+		{
+			remaining = maxCapacity - ((Int)contain->getContainCount() + contain->getExtraSlotsInUse());
+			if (remaining <= 0)
+				continue;
+		}
+
+		SmartLoadContainerCandidate candidate;
+		candidate.id = obj->getID();
+		candidate.remainingCapacity = remaining;
+		candidate.selected = FALSE;
+		candidate.garrisonOrTunnel = isGarrisonOrTunnel;
+		containers.push_back(candidate);
+	}
+
+	if (containers.empty())
+		return FALSE;
+
+	std::sort(containers.begin(), containers.end(),
+		[](const SmartLoadContainerCandidate& a, const SmartLoadContainerCandidate& b)
+		{
+			return a.id < b.id;
+		});
+
+	// IDs used as destinations this invocation may not themselves be ordered into another
+	// transport until a later Smart Load press. This prevents a container from driving away
+	// while passengers assigned in the same command are still trying to board it.
+	std::vector<ObjectID> usedAsDestination;
+	Bool assignedAny = FALSE;
+
+	// Pass 0 fills selected/nearby containers with non-container passengers first.
+	// Pass 1 allows already-loaded or otherwise unused selected containers to nest when legal.
+	for (Int pass = 0; pass < 2; ++pass)
+	{
+		for (std::vector<ObjectID>::const_iterator pit = passengerIDs.begin(); pit != passengerIDs.end(); ++pit)
+		{
+			Object *passenger = TheGameLogic->findObjectByID(*pit);
+			if (passenger == nullptr || passenger->isContained() || passenger->isEffectivelyDead())
+				continue;
+
+			const Bool passengerIsContainer = smartLoadIsUsableContainer(passenger);
+			if ((pass == 0 && passengerIsContainer) || (pass == 1 && !passengerIsContainer))
+				continue;
+			if (pass == 1 && std::find(usedAsDestination.begin(), usedAsDestination.end(), passenger->getID()) != usedAsDestination.end())
+				continue;
+
+			AIUpdateInterface *ai = passenger->getAIUpdateInterface();
+			if (ai == nullptr)
+				continue;
+
+			Int bestIndex = -1;
+			Int bestPriority = 999;
+			Real bestDistSqr = 1.0e30f;
+			ObjectID bestID = INVALID_ID;
+
+			for (Int i = 0; i < (Int)containers.size(); ++i)
+			{
+				SmartLoadContainerCandidate& candidate = containers[i];
+				if (candidate.id == passenger->getID())
+					continue;
+
+				Object *containerObj = TheGameLogic->findObjectByID(candidate.id);
+				if (!smartLoadIsUsableContainer(containerObj))
+					continue;
+
+				ContainModuleInterface *contain = containerObj->getContain();
+				if (contain == nullptr || !contain->isValidContainerFor(passenger, FALSE))
+					continue;
+
+				const Int slotsRequired = smartLoadSlotsRequired(passenger, contain);
+				if (slotsRequired <= 0 || candidate.remainingCapacity < slotsRequired)
+					continue;
+
+				// Selected destination first; then our nearby transports/tunnels; then legal
+				// nearby garrisons. Distance and object ID provide deterministic tie breaks.
+				Int priority = candidate.selected ? 0 :
+					((containerObj->getControllingPlayer() == issuingPlayer && !contain->isGarrisonable()) ? 1 : 2);
+				const Real distSqr = ThePartitionManager->getDistanceSquared(passenger, containerObj, FROM_CENTER_2D);
+
+				if (bestIndex < 0 || priority < bestPriority ||
+						(priority == bestPriority && (distSqr < bestDistSqr ||
+						(distSqr == bestDistSqr && candidate.id < bestID))))
+				{
+					bestIndex = i;
+					bestPriority = priority;
+					bestDistSqr = distSqr;
+					bestID = candidate.id;
+				}
+			}
+
+			if (bestIndex >= 0)
+			{
+				Object *containerObj = TheGameLogic->findObjectByID(containers[bestIndex].id);
+				ContainModuleInterface *contain = containerObj ? containerObj->getContain() : nullptr;
+				const Int slotsRequired = smartLoadSlotsRequired(passenger, contain);
+				if (containerObj && contain && slotsRequired > 0)
+				{
+					containers[bestIndex].remainingCapacity -= slotsRequired;
+					if (!smartLoadContainsID(usedAsDestination, containerObj->getID()))
+					{
+						usedAsDestination.push_back(containerObj->getID());
+						std::sort(usedAsDestination.begin(), usedAsDestination.end());
+					}
+					ai->aiEnter(containerObj, CMD_FROM_PLAYER);
+					assignedAny = TRUE;
+				}
+			}
 		}
 	}
 
@@ -819,6 +1055,15 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			assignSelectedBuildersToNearestConstruction(currentlySelectedGroup, msgPlayer);
 #else
 			assignSelectedBuildersToNearestConstruction(currentlySelectedGroup.Peek(), msgPlayer);
+#endif
+			break;
+		}
+		case GameMessage::MSG_SMART_LOAD:
+		{
+#if RETAIL_COMPATIBLE_AIGROUP
+			assignSelectedUnitsToSmartContainers(currentlySelectedGroup, msgPlayer);
+#else
+			assignSelectedUnitsToSmartContainers(currentlySelectedGroup.Peek(), msgPlayer);
 #endif
 			break;
 		}
