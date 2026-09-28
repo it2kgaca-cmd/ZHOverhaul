@@ -2023,11 +2023,8 @@ bool GameLogic::onToggleRepeatUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupP
 	VecObjectID selectedObjects = selection->getAllIDs();
 	std::sort(selectedObjects.begin(), selectedObjects.end());
 
-	// Group toggle semantics: if any eligible selected factory does NOT have this
-	// repeat recipe, RMB means "arm it everywhere possible". If all eligible
-	// factories already have it, RMB means "remove it everywhere".
-	Bool foundEligible = FALSE;
-	Bool shouldAdd = FALSE;
+	Bool anyActive = FALSE;
+	Bool anyAddable = FALSE;
 	for (VecObjectID::const_iterator it = selectedObjects.begin(); it != selectedObjects.end(); ++it)
 	{
 		Object *producer = TheGameLogic->findObjectByID(*it);
@@ -2038,17 +2035,14 @@ bool GameLogic::onToggleRepeatUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupP
 		if (pu == nullptr)
 			continue;
 
-		const Bool hasRecipe = pu->isUnitInRepeatQueue(whatToCreate);
-		const Bool canAdd = TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate);
-		if (!hasRecipe && !canAdd)
-			continue;
-
-		foundEligible = TRUE;
-		if (!hasRecipe && canAdd)
-			shouldAdd = TRUE;
+		if (pu->isUnitInRepeatQueue(whatToCreate))
+			anyActive = TRUE;
+		else if (TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate) &&
+				pu->getRepeatProductionCount() < MAX_REPEAT_PRODUCTION_ENTRIES)
+			anyAddable = TRUE;
 	}
 
-	if (!foundEligible)
+	if (!anyActive && !anyAddable)
 		return false;
 
 	Bool changedAny = FALSE;
@@ -2063,16 +2057,16 @@ bool GameLogic::onToggleRepeatUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupP
 			continue;
 
 		const Bool hasRecipe = pu->isUnitInRepeatQueue(whatToCreate);
-		const Bool canAdd = TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate);
-		if (shouldAdd)
+		if (anyActive)
 		{
-			if (!hasRecipe && canAdd &&
-					pu->getRepeatProductionCount() < MAX_REPEAT_PRODUCTION_ENTRIES)
+			// Group check-like semantics: a latched group button always means RMB
+			// removes this recipe everywhere it is armed, regardless of money/prereqs.
+			if (hasRecipe)
 				changedAny |= pu->toggleRepeatUnit(whatToCreate);
 		}
-		else if (hasRecipe)
+		else if (TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate) &&
+				pu->getRepeatProductionCount() < MAX_REPEAT_PRODUCTION_ENTRIES)
 		{
-			// toggleRepeatUnit removes first, before prerequisite validation.
 			changedAny |= pu->toggleRepeatUnit(whatToCreate);
 		}
 	}
