@@ -254,7 +254,7 @@ static Bool isSafeBuilderPhaseCorridor(Object *dozer, AIUpdateInterface *ai, con
 	if (dist < 1.0f)
 		return TRUE;
 
-	const Int samples = max(1, REAL_TO_INT_CEIL(dist / (PATHFIND_CELL_SIZE_F * 0.45f)));
+	const Int samples = max(1, (Int)ceilf(dist / (PATHFIND_CELL_SIZE_F * 0.45f)));
 	for (Int i = 1; i <= samples; ++i)
 	{
 		const Real t = INT_TO_REAL(i) / INT_TO_REAL(samples);
