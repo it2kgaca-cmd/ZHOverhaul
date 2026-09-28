@@ -1042,6 +1042,26 @@ StateReturnType TurretAIAimTurretState::update()
 			else
 			{
 				enemyPosition = *enemy->getPosition();
+
+				// Keep the target as an object for all normal validity/range/targeter
+				// bookkeeping, but let Guard artillery physically aim at the same
+				// intercept point its non-tracking projectile will actually fire at.
+				AIUpdateInterface *ownerAI = obj->getAI();
+				Weapon *aimWeapon = obj->getCurrentWeapon();
+				if (ownerAI && ownerAI->getCurrentStateID() == AI_GUARD && aimWeapon)
+				{
+					const Real ordinaryVision = TheAI->getAdjustedVisionRangeForObject(
+						obj, AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
+					if (aimWeapon->getAttackRange(obj) > ordinaryVision * 1.10f)
+					{
+						Coord3D intercept;
+						if (aimWeapon->computePredictiveIntercept(obj, enemy, &intercept) &&
+								aimWeapon->isWithinAttackRange(obj, &intercept))
+						{
+							enemyPosition = intercept;
+						}
+					}
+				}
 			}
 
 			enemyAI = enemy ? enemy->getAI() : nullptr;
