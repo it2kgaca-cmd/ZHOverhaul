@@ -76,6 +76,7 @@
 #include "GameClient/GlobalLanguage.h"
 
 #include "GameLogic/AIGuard.h"
+#include "GameLogic/AIPathfind.h"
 #include "GameLogic/Weapon.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/GameLogic.h"
@@ -2668,7 +2669,6 @@ void InGameUI::createGarrisonHint( const GameMessage *msg )
 #ifdef AI_DEBUG_TOOLTIPS
 #include "Common/StateMachine.h"
 #include "GameLogic/Module/AIUpdate.h"
-#include "GameLogic/AIPathfind.h"
 #endif // AI_DEBUG_TOOLTIPS
 
 #endif // defined(RTS_DEBUG)
