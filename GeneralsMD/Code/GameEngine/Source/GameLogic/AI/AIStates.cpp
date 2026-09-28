@@ -6988,6 +6988,7 @@ void AIGuardState::onExit( StateExitType status )
 
 	Object *obj = getMachineOwner();
 	obj->getAI()->clearGuardTargetType();
+	obj->getAI()->friend_clearGuardThreat();
 }
 
 //----------------------------------------------------------------------------------------------------------
