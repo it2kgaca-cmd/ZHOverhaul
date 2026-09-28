@@ -352,12 +352,14 @@ void ControlBar::updateContextMultiSelect()
 	GameWindow *win;
 	Int objectsThatCanDoCommand[ MAX_COMMANDS_PER_SET ];
 	Int repeatActiveCount[ MAX_COMMANDS_PER_SET ];
+	Int repeatProducerCount[ MAX_COMMANDS_PER_SET ];
 	Bool repeatNext[ MAX_COMMANDS_PER_SET ];
 	Int i;
 
 	// zero aggregate command/repeat state
 	memset( objectsThatCanDoCommand, 0, sizeof( objectsThatCanDoCommand ) );
 	memset( repeatActiveCount, 0, sizeof( repeatActiveCount ) );
+	memset( repeatProducerCount, 0, sizeof( repeatProducerCount ) );
 	memset( repeatNext, 0, sizeof( repeatNext ) );
 
 	// sanity
@@ -416,6 +418,7 @@ void ControlBar::updateContextMultiSelect()
 				const ThingTemplate *repeatThing = command->getThingTemplate();
 				if (pu && repeatThing)
 				{
+					++repeatProducerCount[i];
 					repeatActiveForObject = pu->isUnitInRepeatQueue(repeatThing);
 					if (repeatActiveForObject)
 						++repeatActiveCount[i];
@@ -498,7 +501,9 @@ void ControlBar::updateContextMultiSelect()
 			WinInstanceData *instData = repeatWin->winGetInstanceData();
 			if (instData)
 			{
-				if (repeatActiveCount[i] > 0)
+				// Full latch only when every selected producer carries the recipe.
+				// Mixed state intentionally appears unlatched so RMB converges it to ON.
+				if (repeatProducerCount[i] > 0 && repeatActiveCount[i] == repeatProducerCount[i])
 					BitSet(instData->m_state, WIN_STATE_SELECTED);
 				else
 					BitClear(instData->m_state, WIN_STATE_SELECTED);
