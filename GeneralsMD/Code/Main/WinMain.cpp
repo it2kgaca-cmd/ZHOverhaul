@@ -38,6 +38,8 @@
 #include <eh.h>
 #include <ole2.h>
 #include <dbt.h>
+#include <exception>
+#include <stdint.h>
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "WinMain.h"
@@ -48,6 +50,8 @@
 #include "Common/GameEngine.h"
 #include "Common/GameSounds.h"
 #include "Common/Debug.h"
+#include "Common/Errors.h"
+#include "Common/INIException.h"
 #include "Common/GameMemory.h"
 #include "Common/StackDump.h"
 #include "Common/MessageStream.h"
@@ -773,22 +777,143 @@ static Bool initializeAppWindows( HINSTANCE hInstance, Int nCmdShow, Bool runWin
 // Necessary to allow memory managers and such to have useful critical sections
 static CriticalSection critSec1, critSec2, critSec3, critSec4, critSec5;
 
+// Exception diagnostics =======================================================
+static const char *ExceptionCodeName(DWORD code)
+{
+	switch (code)
+	{
+		case EXCEPTION_ACCESS_VIOLATION: return "EXCEPTION_ACCESS_VIOLATION";
+		case EXCEPTION_ARRAY_BOUNDS_EXCEEDED: return "EXCEPTION_ARRAY_BOUNDS_EXCEEDED";
+		case EXCEPTION_BREAKPOINT: return "EXCEPTION_BREAKPOINT";
+		case EXCEPTION_DATATYPE_MISALIGNMENT: return "EXCEPTION_DATATYPE_MISALIGNMENT";
+		case EXCEPTION_FLT_DENORMAL_OPERAND: return "EXCEPTION_FLT_DENORMAL_OPERAND";
+		case EXCEPTION_FLT_DIVIDE_BY_ZERO: return "EXCEPTION_FLT_DIVIDE_BY_ZERO";
+		case EXCEPTION_FLT_INEXACT_RESULT: return "EXCEPTION_FLT_INEXACT_RESULT";
+		case EXCEPTION_FLT_INVALID_OPERATION: return "EXCEPTION_FLT_INVALID_OPERATION";
+		case EXCEPTION_FLT_OVERFLOW: return "EXCEPTION_FLT_OVERFLOW";
+		case EXCEPTION_FLT_STACK_CHECK: return "EXCEPTION_FLT_STACK_CHECK";
+		case EXCEPTION_FLT_UNDERFLOW: return "EXCEPTION_FLT_UNDERFLOW";
+		case EXCEPTION_ILLEGAL_INSTRUCTION: return "EXCEPTION_ILLEGAL_INSTRUCTION";
+		case EXCEPTION_IN_PAGE_ERROR: return "EXCEPTION_IN_PAGE_ERROR";
+		case EXCEPTION_INT_DIVIDE_BY_ZERO: return "EXCEPTION_INT_DIVIDE_BY_ZERO";
+		case EXCEPTION_INT_OVERFLOW: return "EXCEPTION_INT_OVERFLOW";
+		case EXCEPTION_INVALID_DISPOSITION: return "EXCEPTION_INVALID_DISPOSITION";
+		case EXCEPTION_NONCONTINUABLE_EXCEPTION: return "EXCEPTION_NONCONTINUABLE_EXCEPTION";
+		case EXCEPTION_PRIV_INSTRUCTION: return "EXCEPTION_PRIV_INSTRUCTION";
+		case EXCEPTION_SINGLE_STEP: return "EXCEPTION_SINGLE_STEP";
+		case EXCEPTION_STACK_OVERFLOW: return "EXCEPTION_STACK_OVERFLOW";
+		default: return "UNKNOWN_EXCEPTION";
+	}
+}
+
+static const char *EngineErrorCodeName(ErrorCode code)
+{
+	switch (code)
+	{
+		case ERROR_BUG: return "ERROR_BUG";
+		case ERROR_OUT_OF_MEMORY: return "ERROR_OUT_OF_MEMORY";
+		case ERROR_BAD_ARG: return "ERROR_BAD_ARG";
+		case ERROR_INVALID_FILE_VERSION: return "ERROR_INVALID_FILE_VERSION";
+		case ERROR_CORRUPT_FILE_FORMAT: return "ERROR_CORRUPT_FILE_FORMAT";
+		case ERROR_BAD_INI: return "ERROR_BAD_INI";
+		case ERROR_INVALID_D3D: return "ERROR_INVALID_D3D";
+		default: return "UNKNOWN_ENGINE_ERROR";
+	}
+}
+
+static void GetFaultModule(void *address, char *modulePath, size_t modulePathCount, uintptr_t *moduleOffset)
+{
+	modulePath[0] = 0;
+	if (moduleOffset)
+		*moduleOffset = 0;
+
+	HMODULE module = nullptr;
+	if (!::GetModuleHandleExA(
+			GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			reinterpret_cast<LPCSTR>(address),
+			&module))
+	{
+		return;
+	}
+
+	::GetModuleFileNameA(module, modulePath, static_cast<DWORD>(modulePathCount));
+	if (moduleOffset)
+		*moduleOffset = reinterpret_cast<uintptr_t>(address) - reinterpret_cast<uintptr_t>(module);
+}
+
 // UnHandledExceptionFilter ===================================================
 /** Handler for unhandled win32 exceptions. */
-//=============================================================================
-static LONG WINAPI UnHandledExceptionFilter( struct _EXCEPTION_POINTERS* e_info )
+static LONG WINAPI UnHandledExceptionFilter(struct _EXCEPTION_POINTERS* e_info)
 {
-	DumpExceptionInfo( e_info->ExceptionRecord->ExceptionCode, e_info );
+	if (e_info == nullptr || e_info->ExceptionRecord == nullptr)
+	{
+		ReleaseCrashWithLocation("Unhandled Win32 exception with no EXCEPTION_RECORD.", __FILE__, __LINE__, __FUNCTION__);
+		return EXCEPTION_EXECUTE_HANDLER;
+	}
+
+	DumpExceptionInfo(e_info->ExceptionRecord->ExceptionCode, e_info);
+
+	char functionName[512] = "<Unknown>";
+	char sourceFile[MAX_PATH] = "<Unknown>";
+	unsigned int sourceLine = 0xFFFFFFFF;
+	unsigned int resolvedAddress = 0;
+	void *faultAddress = e_info->ExceptionRecord->ExceptionAddress;
+	GetFunctionDetails(faultAddress, functionName, sourceFile, &sourceLine, &resolvedAddress);
+
+	char modulePath[MAX_PATH] = "<Unknown>";
+	uintptr_t moduleOffset = 0;
+	GetFaultModule(faultAddress, modulePath, ARRAY_SIZE(modulePath), &moduleOffset);
+
+	char reason[4096];
+	const DWORD code = e_info->ExceptionRecord->ExceptionCode;
+	if (code == EXCEPTION_ACCESS_VIOLATION && e_info->ExceptionRecord->NumberParameters >= 2)
+	{
+		const ULONG_PTR operation = e_info->ExceptionRecord->ExceptionInformation[0];
+		const ULONG_PTR target = e_info->ExceptionRecord->ExceptionInformation[1];
+		const char *operationName = operation == 0 ? "read" : (operation == 1 ? "write" : (operation == 8 ? "execute" : "access"));
+		snprintf(reason, ARRAY_SIZE(reason),
+			"%s (0x%08lX)\n"
+			"Fault instruction: %p\n"
+			"Module: %s + 0x%llX\n"
+			"Symbol: %s\n"
+			"Attempted to %s address: 0x%llX",
+			ExceptionCodeName(code), static_cast<unsigned long>(code),
+			faultAddress,
+			modulePath, static_cast<unsigned long long>(moduleOffset),
+			functionName,
+			operationName, static_cast<unsigned long long>(target));
+	}
+	else
+	{
+		snprintf(reason, ARRAY_SIZE(reason),
+			"%s (0x%08lX)\n"
+			"Fault instruction: %p\n"
+			"Module: %s + 0x%llX\n"
+			"Symbol: %s",
+			ExceptionCodeName(code), static_cast<unsigned long>(code),
+			faultAddress,
+			modulePath, static_cast<unsigned long long>(moduleOffset),
+			functionName);
+	}
+
 #ifdef RTS_ENABLE_CRASHDUMP
 	if (TheMiniDumper && TheMiniDumper->IsInitialized())
 	{
-		// Create both minimal and full memory dumps
+		// Preserve the actual exception context in both dump sizes.
 		TheMiniDumper->TriggerMiniDumpForException(e_info, DumpType_Minimal);
 		TheMiniDumper->TriggerMiniDumpForException(e_info, DumpType_Full);
 	}
-
 	MiniDumper::shutdownMiniDumper();
 #endif
+
+	const Bool haveSource = sourceFile[0] != 0 && strcmp(sourceFile, "<Unknown>") != 0;
+	const Bool haveFunction = functionName[0] != 0 && strcmp(functionName, "<Unknown>") != 0;
+	ReleaseCrashWithLocation(
+		reason,
+		haveSource ? sourceFile : nullptr,
+		sourceLine != 0xFFFFFFFF ? static_cast<Int>(sourceLine) : 0,
+		haveFunction ? functionName : nullptr);
+
 	return EXCEPTION_EXECUTE_HANDLER;
 }
 
@@ -935,9 +1060,34 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		// BGC - shut down COM
 	//	OleUninitialize();
 	}
+	catch (const INIException& e)
+	{
+		char reason[4096];
+		snprintf(reason, ARRAY_SIZE(reason), "Unhandled INIException: %s", e.mFailureMessage ? e.mFailureMessage : "<no parser message>");
+		ReleaseCrashWithLocation(reason, __FILE__, __LINE__, "WinMain catch(INIException)");
+	}
+	catch (ErrorCode error)
+	{
+		char reason[1024];
+		snprintf(reason, ARRAY_SIZE(reason), "Unhandled engine ErrorCode: %s (0x%08X)",
+			EngineErrorCodeName(error), static_cast<UnsignedInt>(error));
+		ReleaseCrashWithLocation(reason, __FILE__, __LINE__, "WinMain catch(ErrorCode)");
+	}
+	catch (const std::exception& e)
+	{
+		char reason[4096];
+		snprintf(reason, ARRAY_SIZE(reason), "Unhandled C++ exception: %s", e.what());
+		ReleaseCrashWithLocation(reason, __FILE__, __LINE__, "WinMain catch(std::exception)");
+	}
+	catch (const char *message)
+	{
+		char reason[4096];
+		snprintf(reason, ARRAY_SIZE(reason), "Unhandled string exception: %s", message ? message : "<null>");
+		ReleaseCrashWithLocation(reason, __FILE__, __LINE__, "WinMain catch(const char*)");
+	}
 	catch (...)
 	{
-
+		ReleaseCrashWithLocation("Unhandled C++ exception of unknown type.", __FILE__, __LINE__, "WinMain catch(...)");
 	}
 
 #ifdef RTS_ENABLE_CRASHDUMP

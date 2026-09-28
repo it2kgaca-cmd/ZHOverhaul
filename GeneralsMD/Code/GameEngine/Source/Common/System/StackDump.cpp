@@ -547,7 +547,7 @@ void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info )
 	AsciiString msg;
 
 // DOUBLE_DEBUG does a DEBUG_LOG, and concats to g_LastErrorDump.  jba.
-#define DOUBLE_DEBUG(x) { msg.format x; g_LastErrorDump.concat(msg); DEBUG_LOG( x ); }
+#define DOUBLE_DEBUG(x) { msg.format x; g_LastErrorDump.concat(msg); g_LastErrorDump.concat("\n"); DEBUG_LOG( x ); }
 
 	if ( e_info->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION )
 	{

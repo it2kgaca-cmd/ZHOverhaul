@@ -72,6 +72,7 @@
 #ifdef RTS_ENABLE_CRASHDUMP
 #include "Common/MiniDumper.h"
 #endif
+#include "gitinfo.h"
 
 // Horrible reference, but we really, really need to know if we are windowed.
 extern bool DX8Wrapper_IsWindowed;
@@ -735,7 +736,7 @@ static void TriggerMiniDump()
 #ifdef RTS_ENABLE_CRASHDUMP
 	if (TheMiniDumper && TheMiniDumper->IsInitialized())
 	{
-		// Create both minimal and full memory dumps
+		// Create both minimal and full memory dumps.
 		TheMiniDumper->TriggerMiniDump(DumpType_Minimal);
 		TheMiniDumper->TriggerMiniDump(DumpType_Full);
 	}
@@ -744,91 +745,159 @@ static void TriggerMiniDump()
 #endif
 }
 
-
-void ReleaseCrash(const char *reason)
+// ----------------------------------------------------------------------------
+// Build crash-report paths. Prefer the normal user-data directory, but fall back
+// to the executable directory if a fatal error occurs before/after GlobalData exists.
+// ----------------------------------------------------------------------------
+static void buildReleaseCrashPaths(char *prevbuf, size_t prevCount, char *curbuf, size_t curCount)
 {
-	/// do additional reporting on the crash, if possible
+	prevbuf[0] = 0;
+	curbuf[0] = 0;
 
-	if (!DX8Wrapper_IsWindowed) {
-		if (ApplicationHWnd) {
-			ShowWindow(ApplicationHWnd, SW_HIDE);
-		}
+	if (TheGlobalData)
+	{
+		strlcpy(curbuf, TheGlobalData->getPath_UserData().str(), curCount);
+	}
+	else
+	{
+		::GetModuleFileName(nullptr, curbuf, static_cast<DWORD>(curCount));
+		char *slash = strrchr(curbuf, '\\');
+		if (slash)
+			*(slash + 1) = 0;
+		else
+			curbuf[0] = 0;
 	}
 
-	TriggerMiniDump();
+	strlcpy(prevbuf, curbuf, prevCount);
+	strlcat(prevbuf, RELEASECRASH_FILE_NAME_PREV, prevCount);
+	strlcat(curbuf, RELEASECRASH_FILE_NAME, curCount);
+}
 
-	char prevbuf[ _MAX_PATH ];
-	char curbuf[ _MAX_PATH ];
-
-	if (TheGlobalData==nullptr) {
-		return; // We are shutting down, and TheGlobalData has been freed.  jba. [4/15/2003]
-	}
-
-	strlcpy(prevbuf, TheGlobalData->getPath_UserData().str(), ARRAY_SIZE(prevbuf));
-	strlcat(prevbuf, RELEASECRASH_FILE_NAME_PREV, ARRAY_SIZE(prevbuf));
-	strlcpy(curbuf, TheGlobalData->getPath_UserData().str(), ARRAY_SIZE(curbuf));
-	strlcat(curbuf, RELEASECRASH_FILE_NAME, ARRAY_SIZE(curbuf));
-
- 	remove(prevbuf);
+// ----------------------------------------------------------------------------
+static void writeReleaseCrashReport(
+	const char *reason,
+	const char *sourceFile,
+	Int sourceLine,
+	const char *functionName,
+	const char *prevbuf,
+	const char *curbuf)
+{
+	remove(prevbuf);
 	if (rename(curbuf, prevbuf) != 0)
 	{
 #ifdef DEBUG_LOGGING
-		DebugLog("Warning: Could not rename buffer file '%s' to '%s'. Will remove instead", curbuf, prevbuf);
+		DebugLog("Warning: Could not rotate crash report '%s' to '%s'. Will replace current report.", curbuf, prevbuf);
 #endif
-		if (remove(curbuf) != 0)
-		{
-#ifdef DEBUG_LOGGING
-			DebugLog("Warning: Failed to remove file '%s'", curbuf);
-#endif
-		}
+		remove(curbuf);
 	}
 
 	theReleaseCrashLogFile = fopen(curbuf, "w");
-	if (theReleaseCrashLogFile)
+	if (!theReleaseCrashLogFile)
+		return;
+
+	char executable[_MAX_PATH] = { 0 };
+	::GetModuleFileName(nullptr, executable, ARRAY_SIZE(executable));
+
+	fprintf(theReleaseCrashLogFile, "ZHOverhaul Crash Report\n");
+	fprintf(theReleaseCrashLogFile, "Time: %s\n", getCurrentTimeString());
+	fprintf(theReleaseCrashLogFile, "Build: %s\n", GitShortSHA1);
+	fprintf(theReleaseCrashLogFile, "Process: %lu  Thread: %lu\n",
+		static_cast<unsigned long>(::GetCurrentProcessId()),
+		static_cast<unsigned long>(::GetCurrentThreadId()));
+	fprintf(theReleaseCrashLogFile, "Executable: %s\n", executable);
+	fprintf(theReleaseCrashLogFile, "\nReason:\n%s\n", reason ? reason : "<no reason supplied>");
+
+	if (sourceFile && sourceFile[0])
 	{
-		fprintf(theReleaseCrashLogFile, "Release Crash at %s; Reason %s\n", getCurrentTimeString(), reason);
-		fprintf(theReleaseCrashLogFile, "\nLast error:\n%s\n\nCurrent stack:\n", g_LastErrorDump.str());
-		const int STACKTRACE_SIZE	= 12;
-		const int STACKTRACE_SKIP = 6;
-		void* stacktrace[STACKTRACE_SIZE];
-		::FillStackAddresses(stacktrace, STACKTRACE_SIZE, STACKTRACE_SKIP);
-		::StackDumpFromAddresses(stacktrace, STACKTRACE_SIZE, releaseCrashLogOutput);
-
-		fflush(theReleaseCrashLogFile);
-		fclose(theReleaseCrashLogFile);
-		theReleaseCrashLogFile = nullptr;
+		fprintf(theReleaseCrashLogFile, "\nFatal call site:\n%s", sourceFile);
+		if (sourceLine > 0)
+			fprintf(theReleaseCrashLogFile, ":%d", sourceLine);
+		if (functionName && functionName[0])
+			fprintf(theReleaseCrashLogFile, " (%s)", functionName);
+		fprintf(theReleaseCrashLogFile, "\n");
 	}
 
-	if (!DX8Wrapper_IsWindowed) {
-		if (ApplicationHWnd) {
-			ShowWindow(ApplicationHWnd, SW_HIDE);
-		}
-	}
+	fprintf(theReleaseCrashLogFile, "\nLast exception/error context:\n%s\n",
+		g_LastErrorDump.isNotEmpty() ? g_LastErrorDump.str() : "<none captured>");
 
-#if defined(RTS_DEBUG)
-	/* static */ char buff[8192]; // not so static so we can be threadsafe
-	snprintf(buff, 8192, "Sorry, a serious error occurred. (%s)", reason);
-	if (!(TheGlobalData && TheGlobalData->m_headless))
+	fprintf(theReleaseCrashLogFile, "\nCurrent stack:\n");
+	const int STACKTRACE_SIZE = 24;
+	const int STACKTRACE_SKIP = 5;
+	void* stacktrace[STACKTRACE_SIZE];
+	::FillStackAddresses(stacktrace, STACKTRACE_SIZE, STACKTRACE_SKIP);
+	::StackDumpFromAddresses(stacktrace, STACKTRACE_SIZE, releaseCrashLogOutput);
+
+	fflush(theReleaseCrashLogFile);
+	fclose(theReleaseCrashLogFile);
+	theReleaseCrashLogFile = nullptr;
+}
+
+// ----------------------------------------------------------------------------
+static void showReleaseCrashDialog(
+	const char *reason,
+	const char *sourceFile,
+	Int sourceLine,
+	const char *functionName,
+	const char *reportPath)
+{
+	if (TheGlobalData && TheGlobalData->m_headless)
+		return;
+
+	char source[2048];
+	if (sourceFile && sourceFile[0])
 	{
-		::MessageBox(nullptr, buff, "Technical Difficulties...", MB_OK|MB_SYSTEMMODAL|MB_ICONERROR);
+		if (sourceLine > 0 && functionName && functionName[0])
+			snprintf(source, ARRAY_SIZE(source), "%s:%d (%s)", sourceFile, sourceLine, functionName);
+		else if (sourceLine > 0)
+			snprintf(source, ARRAY_SIZE(source), "%s:%d", sourceFile, sourceLine);
+		else
+			snprintf(source, ARRAY_SIZE(source), "%s", sourceFile);
 	}
-#else
-// crash error messaged changed 3/6/03 BGC
-//	::MessageBox(nullptr, "Sorry, a serious error occurred.", "Technical Difficulties...", MB_OK|MB_TASKMODAL|MB_ICONERROR);
-//	::MessageBox(nullptr, "You have encountered a serious error.  Serious errors can be caused by many things including viruses, overheated hardware and hardware that does not meet the minimum specifications for the game. Please visit the forums at www.generals.ea.com for suggested courses of action or consult your manual for Technical Support contact information.", "Technical Difficulties...", MB_OK|MB_TASKMODAL|MB_ICONERROR);
-
-// crash error message changed again 8/22/03 M Lorenzen... made this message box modal to the system so it will appear on top of any task-modal windows, splash-screen, etc.
-	if (!(TheGlobalData && TheGlobalData->m_headless))
+	else
 	{
-		::MessageBox(nullptr, "You have encountered a serious error.  Serious errors can be caused by many things including viruses, overheated hardware and hardware that does not meet the minimum specifications for the game. Please visit the forums at www.generals.ea.com for suggested courses of action or consult your manual for Technical Support contact information.",
-			"Technical Difficulties...",
-			MB_OK|MB_SYSTEMMODAL|MB_ICONERROR);
+		strlcpy(source, "<not available>", ARRAY_SIZE(source));
 	}
 
-
+	char message[8192];
+	snprintf(message, ARRAY_SIZE(message),
+		"ZHOverhaul hit a fatal error.\n\n"
+		"Reason:\n%s\n\n"
+		"Source:\n%s\n\n"
+		"Build: %s\n\n"
+		"Diagnostic report:\n%s\n\n"
+#ifdef RTS_ENABLE_CRASHDUMP
+		"Minimal/full crash dumps (Crash*.dmp) are written to the same user-data directory.\n\n"
 #endif
+		"Please use the report and dumps instead of the old generic 'serious error' message.",
+		reason ? reason : "<no reason supplied>",
+		source,
+		GitShortSHA1,
+		reportPath ? reportPath : "<report path unavailable>");
+
+	::MessageBox(nullptr, message, "ZHOverhaul Fatal Error", MB_OK | MB_SYSTEMMODAL | MB_ICONERROR);
+}
+
+// ----------------------------------------------------------------------------
+void ReleaseCrashWithLocation(const char *reason, const char *sourceFile, Int sourceLine, const char *functionName)
+{
+	if (!DX8Wrapper_IsWindowed && ApplicationHWnd)
+		ShowWindow(ApplicationHWnd, SW_HIDE);
+
+	TriggerMiniDump();
+
+	char prevbuf[_MAX_PATH];
+	char curbuf[_MAX_PATH];
+	buildReleaseCrashPaths(prevbuf, ARRAY_SIZE(prevbuf), curbuf, ARRAY_SIZE(curbuf));
+	writeReleaseCrashReport(reason, sourceFile, sourceLine, functionName, prevbuf, curbuf);
+	showReleaseCrashDialog(reason, sourceFile, sourceLine, functionName, curbuf);
 
 	_exit(1);
+}
+
+// ----------------------------------------------------------------------------
+void ReleaseCrash(const char *reason)
+{
+	ReleaseCrashWithLocation(reason, nullptr, 0, nullptr);
 }
 
 void ReleaseCrashLocalized(const AsciiString& p, const AsciiString& m)
