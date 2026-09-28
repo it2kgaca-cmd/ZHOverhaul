@@ -212,7 +212,7 @@ class AsciiString;
 #endif
 
 DEBUG_EXTERN_C void ReleaseCrash(const char* reason);
-DEBUG_EXTERN_C void ReleaseCrashWithLocation(const char* reason, const char* sourceFile, Int sourceLine, const char* functionName);
+DEBUG_EXTERN_C void ReleaseCrashWithLocation(const char* reason, const char* sourceFile, int sourceLine, const char* functionName);
 DEBUG_EXTERN_C void ReleaseCrashLocalized(const AsciiString& p, const AsciiString& m);
 
 #define RELEASE_CRASH(m)				do { ReleaseCrashWithLocation((m), __FILE__, __LINE__, __FUNCTION__); } while (0)
