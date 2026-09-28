@@ -1429,8 +1429,8 @@ void BridgeBehavior::xfer( Xfer *xfer )
 	xfer->xferBool( &m_scaffoldPresent );
 
 	// scaffold object id list
-	UnsignedShort scaffoldObjectCount = 0;
-	scaffoldObjectCount = m_scaffoldObjectIDList.size();
+	DEBUG_ASSERTCRASH(m_scaffoldObjectIDList.size() <= 0xffffu, ("Bridge scaffold list exceeds 16-bit save format capacity"));
+	UnsignedShort scaffoldObjectCount = static_cast<UnsignedShort>(m_scaffoldObjectIDList.size());
 	xfer->xferUnsignedShort( &scaffoldObjectCount );
 	ObjectID scaffoldObjectID;
 	if( xfer->getXferMode() == XFER_SAVE )

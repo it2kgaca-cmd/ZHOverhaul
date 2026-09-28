@@ -241,7 +241,8 @@ void PlayerRelationMap::xfer( Xfer *xfer )
 
 	// player relation count
 	PlayerRelationMapType::iterator playerRelationIt;
-	UnsignedShort playerRelationCount = m_map.size();
+	DEBUG_ASSERTCRASH(m_map.size() <= 0xffffu, ("Player relation map exceeds save format capacity"));
+	UnsignedShort playerRelationCount = static_cast<UnsignedShort>(m_map.size());
 	xfer->xferUnsignedShort( &playerRelationCount );
 
 	// player relations
@@ -4142,7 +4143,8 @@ void Player::xfer( Xfer *xfer )
 	// team prototypes ... this is only the fact that team prototypes are on this player
 	// it is not the team prototype data itself
 	//
-	UnsignedShort prototypeCount = m_playerTeamPrototypes.size();
+	DEBUG_ASSERTCRASH(m_playerTeamPrototypes.size() <= 0xffffu, ("Player team prototype list exceeds save format capacity"));
+	UnsignedShort prototypeCount = static_cast<UnsignedShort>(m_playerTeamPrototypes.size());
 	xfer->xferUnsignedShort( &prototypeCount );
 	TeamPrototypeID prototypeID;
 	TeamPrototype *prototype;
@@ -4307,7 +4309,8 @@ void Player::xfer( Xfer *xfer )
 			This code is WRONG WRONG WRONG and must not be used or mimicked; it
 			is present for backwards "compatibility" only. (srj)
 		*/
-		UnsignedShort scienceCount = m_sciences.size();
+		DEBUG_ASSERTCRASH(m_sciences.size() <= 0xffffu, ("Player science list exceeds save format capacity"));
+	UnsignedShort scienceCount = static_cast<UnsignedShort>(m_sciences.size());
 		xfer->xferUnsignedShort( &scienceCount );
 		ScienceType science;
 		if( xfer->getXferMode() == XFER_SAVE )
@@ -4396,7 +4399,8 @@ void Player::xfer( Xfer *xfer )
 	xfer->xferSnapshot( &m_scoreKeeper );
 
 	// size of and data for kindof percent production change list
-	UnsignedShort percentProductionChangeCount = m_kindOfPercentProductionChangeList.size();
+	DEBUG_ASSERTCRASH(m_kindOfPercentProductionChangeList.size() <= 0xffffu, ("Production modifier list exceeds save format capacity"));
+	UnsignedShort percentProductionChangeCount = static_cast<UnsignedShort>(m_kindOfPercentProductionChangeList.size());
 	xfer->xferUnsignedShort( &percentProductionChangeCount );
 	KindOfPercentProductionChange *entry;
 	if( xfer->getXferMode() == XFER_SAVE )
@@ -4465,7 +4469,8 @@ void Player::xfer( Xfer *xfer )
 	}
 	else
 	{
-		UnsignedShort timerListSize = m_specialPowerReadyTimerList.size();
+		DEBUG_ASSERTCRASH(m_specialPowerReadyTimerList.size() <= 0xffffu, ("Special-power timer list exceeds save format capacity"));
+	UnsignedShort timerListSize = static_cast<UnsignedShort>(m_specialPowerReadyTimerList.size());
 		xfer->xferUnsignedShort( &timerListSize );// HANDY LITTLE SHORT TO SIZE MY LIST
 		if( xfer->getXferMode() == XFER_SAVE )
 		{

@@ -97,7 +97,8 @@ void TeamRelationMap::xfer( Xfer *xfer )
 
 	// team relation count
 	TeamRelationMapType::iterator teamRelationIt;
-	UnsignedShort teamRelationCount = m_map.size();
+	DEBUG_ASSERTCRASH(m_map.size() <= 0xffffu, ("Team relation map exceeds save format capacity"));
+	UnsignedShort teamRelationCount = static_cast<UnsignedShort>(m_map.size());
 	xfer->xferUnsignedShort( &teamRelationCount );
 
 	// team relations
@@ -441,7 +442,8 @@ void TeamFactory::xfer( Xfer *xfer )
 	xfer->xferUser( &m_uniqueTeamID, sizeof( TeamID ) );
 
 	// how many team prototypes of data do we have to write
-	UnsignedShort prototypeCount = m_prototypes.size();
+	DEBUG_ASSERTCRASH(m_prototypes.size() <= 0xffffu, ("Team prototype list exceeds save format capacity"));
+	UnsignedShort prototypeCount = static_cast<UnsignedShort>(m_prototypes.size());
 	xfer->xferUnsignedShort( &prototypeCount );
 
 	//
