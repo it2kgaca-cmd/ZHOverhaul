@@ -691,6 +691,46 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 	//Also only retaliate if we're controlled by a human player and the thing that attacked me
 	//is an enemy.
 	Player *controllingPlayer = obj->getControllingPlayer();
+
+	// Explicit Guard is a defensive network, not the legacy 210-unit retaliation bubble.
+	// If something damages a unit/structure near guarding friendlies, tell those guards who
+	// the aggressor is even when the shooter itself is long-range artillery outside retail's
+	// MaxRetaliationDistance. Only guards receive this extended broadcast; their own Guard
+	// logic still enforces capability, no-pursuit/artillery rules, expiry, and retaliation leash.
+	if (controllingPlayer && controllingPlayer->getPlayerType() == PLAYER_HUMAN &&
+			damager && damager->getRelationship(obj) == ENEMIES && !damager->isEffectivelyDead())
+	{
+		PartitionFilterPlayerAffiliation guardFriends(controllingPlayer, ALLOW_ALLIES, true);
+		PartitionFilterOnMap guardMapStatus;
+		PartitionFilter *guardFilters[] = { &guardFriends, &guardMapStatus, nullptr };
+
+		Real guardShareRadius = TheAI->getAiData()->m_retaliateFriendsRadius;
+		const Real localVision = TheAI->getAdjustedVisionRangeForObject(
+			obj, AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_GUARDINNER);
+		if (localVision > guardShareRadius)
+			guardShareRadius = localVision;
+		guardShareRadius += obj->getGeometryInfo().getBoundingCircleRadius();
+
+		SimpleObjectIterator *guardIter = ThePartitionManager->iterateObjectsInRange(
+			obj->getPosition(), guardShareRadius, FROM_CENTER_2D, guardFilters, ITER_FASTEST);
+		MemoryPoolObjectHolder guardHold(guardIter);
+		for (Object *guard = guardIter->first(); guard; guard = guardIter->next())
+		{
+			AIUpdateInterface *guardAI = guard->getAIUpdateInterface();
+			if (guardAI == nullptr || guardAI->getCurrentStateID() != AI_GUARD ||
+					!guard->isAbleToAttack())
+				continue;
+
+			CanAttackResult guardResult =
+				guard->getAbleToAttackSpecificObject(ATTACK_NEW_TARGET, damager, CMD_FROM_AI);
+			if (guardResult == ATTACKRESULT_POSSIBLE || guardResult == ATTACKRESULT_POSSIBLE_AFTER_MOVING)
+			{
+				guardAI->friend_setGuardThreat(
+					damager->getID(),
+					TheGameLogic->getFrame() + TheAI->getAiData()->m_guardChaseUnitFrames);
+			}
+		}
+	}
 	if( controllingPlayer && controllingPlayer->isLogicalRetaliationModeEnabled() && controllingPlayer->getPlayerType() == PLAYER_HUMAN )
 	{
 		if( shouldRetaliateAgainstAggressor(obj, damager))
