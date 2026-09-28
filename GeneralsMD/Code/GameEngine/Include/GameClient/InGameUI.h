@@ -444,6 +444,7 @@ public:  // ********************************************************************
 	virtual Bool isPlacementAnchored();													///< is placement arrow anchor set
 	virtual void getPlacementPoints( ICoord2D *start, ICoord2D *end );///< get the placemnt arrow points
 	virtual Real getPlacementAngle();														///< placement angle of drawable at cursor when placing down structures
+	virtual Bool getPlacementResolvedTransform( Coord3D *pos, Real *angle ); ///< transform currently shown by the placement ghost
 
 	// Drawable selection mechanisms
 	virtual void selectDrawable( Drawable *draw );					///< Mark given Drawable as "selected"
