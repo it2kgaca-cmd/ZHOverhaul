@@ -369,7 +369,6 @@ struct SmartLoadContainerCandidate
 	ObjectID id;
 	Int remainingCapacity;
 	Bool selected;
-	Bool garrisonOrTunnel;
 };
 
 static Bool smartLoadContainsID(const std::vector<ObjectID>& ids, ObjectID id)
@@ -441,7 +440,6 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 			candidate.id = obj->getID();
 			candidate.remainingCapacity = remaining;
 			candidate.selected = TRUE;
-			candidate.garrisonOrTunnel = contain->isGarrisonable() || contain->isTunnelContain();
 			containers.push_back(candidate);
 		}
 	}
@@ -458,12 +456,27 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 			continue;
 
 		ContainModuleInterface *contain = obj->getContain();
-		const Bool isGarrisonOrTunnel = contain->isGarrisonable() || contain->isTunnelContain();
+		const Bool isGarrison = contain->isGarrisonable();
+		const Bool isTunnel = contain->isTunnelContain();
 
-		// Nearby transports/tunnels must be ours. Neutral/allied garrisons are permitted only
-		// when their own contain rules accept the passenger later.
-		if (!isGarrisonOrTunnel && obj->getControllingPlayer() != issuingPlayer)
+		// Nearby mobile transports and tunnel networks must be ours. Garrisons may
+		// be ours, allied, or neutral, but never enemy. (Selected destinations are
+		// already restricted to issuingPlayer above.)
+		if (isTunnel)
+		{
+			if (obj->getControllingPlayer() != issuingPlayer)
+				continue;
+		}
+		else if (isGarrison)
+		{
+			if (obj->getRelationship(passengerIDs.empty() ? nullptr :
+				TheGameLogic->findObjectByID(passengerIDs[0])) == ENEMIES)
+				continue;
+		}
+		else if (obj->getControllingPlayer() != issuingPlayer)
+		{
 			continue;
+		}
 
 		Bool nearSelection = FALSE;
 		for (std::vector<ObjectID>::const_iterator pit = passengerIDs.begin(); pit != passengerIDs.end(); ++pit)
@@ -491,7 +504,6 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 		candidate.id = obj->getID();
 		candidate.remainingCapacity = remaining;
 		candidate.selected = FALSE;
-		candidate.garrisonOrTunnel = isGarrisonOrTunnel;
 		containers.push_back(candidate);
 	}
 
