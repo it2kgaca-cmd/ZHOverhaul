@@ -214,7 +214,12 @@ void W3DProfilerFrameCapture::Capture(UnsignedInt displayWidth, UnsignedInt disp
 	DX8Wrapper::Set_Render_Target(static_cast<IDirect3DSurface8 *>(nullptr));
 
 	// copy the small surface pixels from GPU to CPU
-	RECT srcRect = { 0, 0, PROFILER_FRAME_IMAGE_SIZE, smallRenderDesc.Height };
+	RECT srcRect = {
+		0,
+		0,
+		static_cast<LONG>(PROFILER_FRAME_IMAGE_SIZE),
+		static_cast<LONG>(smallRenderDesc.Height)
+	};
 	POINT dstPoint = { 0, 0 };
 	DX8Wrapper::_Copy_DX8_Rects(
 		smallRenderTargetSurface,
