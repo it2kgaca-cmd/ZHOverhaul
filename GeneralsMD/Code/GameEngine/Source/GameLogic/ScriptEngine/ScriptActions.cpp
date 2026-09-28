@@ -6600,7 +6600,7 @@ void ScriptActions::doNamedSetTrainHeld( const AsciiString &locoName, const Bool
 
 
 //-------------------------------------------------------------------------------------------------
-Bool ScriptActions::shouldSuppressSkippedCinematicAction(const ScriptAction *action) const
+Bool ScriptActions::shouldSuppressSkippedCinematicAction(ScriptAction *action) const
 {
 	if (action == nullptr)
 		return FALSE;
