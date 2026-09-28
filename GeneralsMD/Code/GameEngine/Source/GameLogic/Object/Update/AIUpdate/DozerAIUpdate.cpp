@@ -128,15 +128,11 @@ void DozerActionPickActionPosState::crc( Xfer *xfer )
 void DozerActionPickActionPosState::xfer( Xfer *xfer )
 {
   // version
-  XferVersion currentVersion = 2;
+  XferVersion currentVersion = 1;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
 	xfer->xferUser(&m_task, sizeof(m_task));
-	if (version >= 2)
-		xfer->xferBool(&m_builderPhase);
-	else if (xfer->getXferMode() == XFER_LOAD)
-		m_builderPhase = FALSE;
 	xfer->xferInt(&m_failedAttempts);
 }
 
@@ -336,11 +332,15 @@ void DozerActionMoveToActionPosState::crc( Xfer *xfer )
 void DozerActionMoveToActionPosState::xfer( Xfer *xfer )
 {
   // version
-  XferVersion currentVersion = 1;
+  XferVersion currentVersion = 2;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
 	xfer->xferUser(&m_task, sizeof(m_task));
+	if (version >= 2)
+		xfer->xferBool(&m_builderPhase);
+	else if (xfer->getXferMode() == XFER_LOAD)
+		m_builderPhase = FALSE;
 }
 
 // ------------------------------------------------------------------------------------------------
