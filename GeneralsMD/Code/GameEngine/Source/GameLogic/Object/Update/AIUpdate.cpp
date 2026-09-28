@@ -845,6 +845,14 @@ void AIUpdateInterface::friend_setGuardThreat(ObjectID threatID, UnsignedInt exp
 
 	m_guardThreatID = threatID;
 	m_guardThreatExpireFrame = expireFrame;
+#if defined(RTS_PROFILE_TRACY)
+	Object *threat = TheGameLogic->findObjectByID(threatID);
+	AsciiString message;
+	message.format("GuardThreatReceive frame=%u guard=%u:%s threat=%u:%s expire=%u",
+		TheGameLogic->getFrame(), getObject()->getID(), getObject()->getTemplate()->getName().str(),
+		threatID, threat ? threat->getTemplate()->getName().str() : "unknown", expireFrame);
+	PROFILER_MSG(message.str(), message.getLength());
+#endif
 	wakeUpNow();
 }
 
