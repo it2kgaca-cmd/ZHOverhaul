@@ -351,10 +351,14 @@ void ControlBar::updateContextMultiSelect()
 	const CommandButton *command;
 	GameWindow *win;
 	Int objectsThatCanDoCommand[ MAX_COMMANDS_PER_SET ];
+	Int repeatActiveCount[ MAX_COMMANDS_PER_SET ];
+	Bool repeatNext[ MAX_COMMANDS_PER_SET ];
 	Int i;
 
-	// zero the array that counts how many objects can do each command
+	// zero aggregate command/repeat state
 	memset( objectsThatCanDoCommand, 0, sizeof( objectsThatCanDoCommand ) );
+	memset( repeatActiveCount, 0, sizeof( repeatActiveCount ) );
+	memset( repeatNext, 0, sizeof( repeatNext ) );
 
 	// sanity
 	DEBUG_ASSERTCRASH( TheInGameUI->getSelectCount() > 1,
@@ -405,6 +409,21 @@ void ControlBar::updateContextMultiSelect()
 			if( command == nullptr )
 				continue;
 
+			Bool repeatActiveForObject = FALSE;
+			if (command->getCommandType() == GUI_COMMAND_UNIT_BUILD)
+			{
+				ProductionUpdateInterface *pu = obj->getProductionUpdateInterface();
+				const ThingTemplate *repeatThing = command->getThingTemplate();
+				if (pu && repeatThing)
+				{
+					repeatActiveForObject = pu->isUnitInRepeatQueue(repeatThing);
+					if (repeatActiveForObject)
+						++repeatActiveCount[i];
+					if (pu->isNextRepeatUnit(repeatThing))
+						repeatNext[i] = TRUE;
+				}
+			}
+
 			// can we do the command
 			CommandAvailability availability = getCommandAvailability( command, obj, win );
 
@@ -416,7 +435,8 @@ void ControlBar::updateContextMultiSelect()
 			{
 				case COMMAND_HIDDEN:
 					if (command->getCommandType() != GUI_COMMAND_OBJECT_UPGRADE &&
-							command->getCommandType() != GUI_COMMAND_DOZER_CONSTRUCT)
+							command->getCommandType() != GUI_COMMAND_DOZER_CONSTRUCT &&
+							command->getCommandType() != GUI_COMMAND_UNIT_BUILD)
 						win->winHide( TRUE );
 					break;
 				case COMMAND_RESTRICTED:
@@ -441,8 +461,12 @@ void ControlBar::updateContextMultiSelect()
 				GadgetCheckLikeButtonSetVisualCheck( win, availability == COMMAND_ACTIVE );
 			}
 
-			if( availability == COMMAND_AVAILABLE || availability == COMMAND_ACTIVE )
-					objectsThatCanDoCommand[ i ]++;
+			if( availability == COMMAND_AVAILABLE || availability == COMMAND_ACTIVE ||
+					(command->getCommandType() == GUI_COMMAND_UNIT_BUILD &&
+					 (availability == COMMAND_CANT_AFFORD || repeatActiveForObject)) )
+			{
+				++objectsThatCanDoCommand[i];
+			}
 
 		}
 
@@ -464,6 +488,27 @@ void ControlBar::updateContextMultiSelect()
 		// don't consider slots that don't have commands
 		if( m_commonCommands[ i ] == nullptr )
 			continue;
+
+		if (m_commonCommands[i]->getCommandType() == GUI_COMMAND_UNIT_BUILD)
+		{
+			GameWindow *repeatWin = m_commandWindows[i];
+			repeatWin->winHide(FALSE);
+			repeatWin->winEnable(objectsThatCanDoCommand[i] > 0);
+
+			WinInstanceData *instData = repeatWin->winGetInstanceData();
+			if (instData)
+			{
+				if (repeatActiveCount[i] > 0)
+					BitSet(instData->m_state, WIN_STATE_SELECTED);
+				else
+					BitClear(instData->m_state, WIN_STATE_SELECTED);
+			}
+
+			setCommandBarBorder(repeatWin, m_commonCommands[i]->getCommandButtonMappedBorderType());
+			if (repeatNext[i])
+				GadgetButtonSetBorder(repeatWin, m_commandButtonBorderSystemColor);
+			continue;
+		}
 
 		if (m_commonCommands[i]->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE)
 		{
