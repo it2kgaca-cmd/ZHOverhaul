@@ -31,6 +31,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 #include <algorithm>
+#include <map>
 
 #include "Common/ActionManager.h"
 #include "Common/CRCDebug.h"
@@ -507,6 +508,9 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 	// transport until a later Smart Load press. This prevents a container from driving away
 	// while passengers assigned in the same command are still trying to board it.
 	std::vector<ObjectID> usedAsDestination;
+	// All entrances owned by one GLA player share a single TunnelTracker inventory.
+	// Reserve that shared capacity once per player rather than independently per entrance.
+	std::map<Int, Int> reservedTunnelSlotsByPlayer;
 	Bool assignedAny = FALSE;
 
 	// Pass 0 fills selected/nearby containers with non-container passengers first.
@@ -549,7 +553,18 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 					continue;
 
 				const Int slotsRequired = smartLoadSlotsRequired(passenger, contain);
-				if (slotsRequired <= 0 || candidate.remainingCapacity < slotsRequired)
+				if (slotsRequired <= 0)
+					continue;
+
+				Int availableCapacity = candidate.remainingCapacity;
+				if (contain->isTunnelContain())
+				{
+					Player *tunnelOwner = containerObj->getControllingPlayer();
+					if (tunnelOwner == nullptr)
+						continue;
+					availableCapacity -= reservedTunnelSlotsByPlayer[tunnelOwner->getPlayerIndex()];
+				}
+				if (availableCapacity < slotsRequired)
 					continue;
 
 				// Selected destination first; then our nearby transports/tunnels; then legal
@@ -576,7 +591,17 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 				const Int slotsRequired = smartLoadSlotsRequired(passenger, contain);
 				if (containerObj && contain && slotsRequired > 0)
 				{
-					containers[bestIndex].remainingCapacity -= slotsRequired;
+					if (contain->isTunnelContain())
+					{
+						Player *tunnelOwner = containerObj->getControllingPlayer();
+						if (tunnelOwner == nullptr)
+							continue;
+						reservedTunnelSlotsByPlayer[tunnelOwner->getPlayerIndex()] += slotsRequired;
+					}
+					else
+					{
+						containers[bestIndex].remainingCapacity -= slotsRequired;
+					}
 					if (!smartLoadContainsID(usedAsDestination, containerObj->getID()))
 					{
 						usedAsDestination.push_back(containerObj->getID());
