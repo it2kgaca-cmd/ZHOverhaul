@@ -221,6 +221,8 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_locationToGuard.zero();
 	m_objectToGuard = INVALID_ID;
 	m_areaToGuard = nullptr;
+	m_guardThreatID = INVALID_ID;
+	m_guardThreatExpireFrame = 0;
 	m_attackInfo = nullptr;
 	m_waypointCount = 0;
 	m_waypointIndex = 0;
@@ -830,6 +832,20 @@ void AIUpdateInterface::setLocomotorUpgrade(Bool set)
 	m_upgradedLocomotors = set;
 	if (m_curLocomotorSet == LOCOMOTORSET_NORMAL || m_curLocomotorSet == LOCOMOTORSET_NORMAL_UPGRADED)
 		chooseLocomotorSet(LOCOMOTORSET_NORMAL);
+}
+
+//=============================================================================
+void AIUpdateInterface::friend_setGuardThreat(ObjectID threatID, UnsignedInt expireFrame)
+{
+	if (threatID == INVALID_ID)
+	{
+		friend_clearGuardThreat();
+		return;
+	}
+
+	m_guardThreatID = threatID;
+	m_guardThreatExpireFrame = expireFrame;
+	wakeUpNow();
 }
 
 //=============================================================================
@@ -5855,6 +5871,7 @@ void AIUpdateInterface::crc( Xfer *x )
 	* 3: Removed lastFrameMoved and repulsorCountdown; removed surrender and demoralize variables
 	* 4: Read m_curLocomotorSet from ini
 	* 5: TheSuperHackers @fix Fixed out-of-bounds xfer of m_guardTargetType
+	* 6: Added pending Guard threat ID/expiry so retaliation preserves explicit Guard orders
 	*/
 // ------------------------------------------------------------------------------------------------
 void AIUpdateInterface::xfer( Xfer *xfer )
@@ -5863,7 +5880,7 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 #if RETAIL_COMPATIBLE_CRC || RETAIL_COMPATIBLE_XFER_SAVE
 	const XferVersion currentVersion = 4;
 #else
-	const XferVersion currentVersion = 5;
+	const XferVersion currentVersion = 6;
 #endif
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
@@ -5909,6 +5926,17 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 		if (triggerName.isNotEmpty()) {
 			m_areaToGuard = TheTerrainLogic->getTriggerAreaByName(triggerName);
 		}
+	}
+
+	if (version >= 6)
+	{
+		xfer->xferObjectID(&m_guardThreatID);
+		xfer->xferUnsignedInt(&m_guardThreatExpireFrame);
+	}
+	else if (xfer->getXferMode() == XFER_LOAD)
+	{
+		m_guardThreatID = INVALID_ID;
+		m_guardThreatExpireFrame = 0;
 	}
 
 	AsciiString attackName;
