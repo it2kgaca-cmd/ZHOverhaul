@@ -910,7 +910,7 @@ static LONG WINAPI UnHandledExceptionFilter(struct _EXCEPTION_POINTERS* e_info)
 	ReleaseCrashWithLocation(
 		reason,
 		haveSource ? sourceFile : nullptr,
-		sourceLine != 0xFFFFFFFF ? static_cast<Int>(sourceLine) : 0,
+		sourceLine != 0xFFFFFFFF ? static_cast<int>(sourceLine) : 0,
 		haveFunction ? functionName : nullptr);
 
 	return EXCEPTION_EXECUTE_HANDLER;
