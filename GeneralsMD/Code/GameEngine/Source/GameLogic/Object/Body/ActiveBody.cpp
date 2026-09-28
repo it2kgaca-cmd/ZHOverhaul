@@ -719,7 +719,19 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 					CanAttackResult result = them->getAbleToAttackSpecificObject( ATTACK_NEW_TARGET, damager, CMD_FROM_AI );
 					if( result == ATTACKRESULT_POSSIBLE_AFTER_MOVING || result == ATTACKRESULT_POSSIBLE )
 					{
-						ai->aiGuardRetaliate( damager, them->getPosition(), NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+						if (ai->getCurrentStateID() == AI_GUARD)
+						{
+							// Preserve an explicit Guard order. Hand the aggressor to the Guard
+							// machine as a temporary threat instead of clearing the entire AI
+							// state into the legacy standalone GuardRetaliate behavior.
+							ai->friend_setGuardThreat(
+								damager->getID(),
+								TheGameLogic->getFrame() + TheAI->getAiData()->m_guardChaseUnitFrames);
+						}
+						else
+						{
+							ai->aiGuardRetaliate( damager, them->getPosition(), NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+						}
 					}
 				}
 			}
