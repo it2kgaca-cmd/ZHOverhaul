@@ -3442,6 +3442,19 @@ Real InGameUI::getPlacementAngle()
 }
 
 //-------------------------------------------------------------------------------------------------
+Bool InGameUI::getPlacementResolvedTransform( Coord3D *pos, Real *angle )
+{
+	if (m_placeIcon[0] == nullptr)
+		return FALSE;
+
+	if (pos)
+		*pos = *m_placeIcon[0]->getPosition();
+	if (angle)
+		*angle = m_placeIcon[0]->getOrientation();
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Mark given Drawable as "selected". */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::selectDrawable( Drawable *draw )
