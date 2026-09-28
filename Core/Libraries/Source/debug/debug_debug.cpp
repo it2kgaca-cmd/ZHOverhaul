@@ -264,33 +264,23 @@ Debug::~Debug()
   // again, do not put any code in here
 }
 
-#if defined(_MSC_VER)
-// MSVC: Use SE Translator
-static void LocalSETranslator(unsigned, struct _EXCEPTION_POINTERS *pExPtrs)
-{
-  // simply call our regular exception handler
-  DebugExceptionhandler::ExceptionFilter(pExPtrs);
-}
-#elif defined(__GNUC__) && defined(_WIN32)
-// MinGW-w64: Use Vectored Exception Handler (Windows-only)
-// Note: VEH is process-wide (unlike MSVC's per-thread _set_se_translator),
-// but this matches the existing process-wide SetUnhandledExceptionFilter architecture.
-// Returns EXCEPTION_CONTINUE_SEARCH to avoid interfering with normal exception handling.
+#if defined(_WIN32)
+// Use a vectored exception handler on modern Windows toolchains. Unlike _set_se_translator,
+// VEH does not require /EHa and therefore does not silently depend on a different C++ exception model.
 static LONG WINAPI LocalVectoredExceptionHandler(struct _EXCEPTION_POINTERS *pExPtrs)
 {
-  // Call our regular exception handler
   DebugExceptionhandler::ExceptionFilter(pExPtrs);
   return EXCEPTION_CONTINUE_SEARCH;
 }
+
+static PVOID LocalVectoredExceptionHandle = nullptr;
 #endif
 
 void Debug::InstallExceptionHandler()
 {
-#if defined(_MSC_VER)
-  _set_se_translator(LocalSETranslator);
-#elif defined(__GNUC__) && defined(_WIN32)
-  // MinGW-w64 doesn't support _set_se_translator, use Vectored Exception Handler
-  AddVectoredExceptionHandler(1, LocalVectoredExceptionHandler);
+#if defined(_WIN32)
+  if (!LocalVectoredExceptionHandle)
+    LocalVectoredExceptionHandle = AddVectoredExceptionHandler(1, LocalVectoredExceptionHandler);
 #else
   #error "Unsupported compiler for exception handling"
 #endif
