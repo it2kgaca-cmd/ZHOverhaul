@@ -496,6 +496,7 @@ public:
 
 		*/
 		MSG_META_RESUME_NEAREST_CONSTRUCTION,				///< send selected free builders to nearest abandoned build sites
+		MSG_META_SMART_LOAD,									///< intelligently distribute selected units into transports/garrisons
 
 		MSG_BEGIN_NETWORK_MESSAGES = 1000,					///< MARKER TO DELINEATE MESSAGES THAT GO OVER THE NETWORK
 //*********************************************************************************************************
@@ -608,6 +609,7 @@ public:
 		MSG_ENABLE_RETALIATION_MODE,								///< Turn retaliation mode on or off.
 		MSG_TOGGLE_REPEAT_UNIT_CREATE,						///< Toggle a unit in the selected factory's standing repeat recipe.
 		MSG_RESUME_NEAREST_CONSTRUCTION,					///< selected free dozers claim nearest resumable construction sites
+		MSG_SMART_LOAD,										///< selected units deterministically enter compatible transports/garrisons
 
 		MSG_BEGIN_DEBUG_NETWORK_MESSAGES = 1900,		///< network messages that exist only in debug/internal builds. all grouped separately.
 
