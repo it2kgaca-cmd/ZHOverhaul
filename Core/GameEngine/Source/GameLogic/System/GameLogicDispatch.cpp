@@ -402,6 +402,22 @@ static Bool smartLoadIsUsableContainer(Object *container)
 	return TRUE;
 }
 
+static Bool smartLoadIsPilot(Object *obj)
+{
+	if (obj == nullptr)
+		return FALSE;
+
+	// Detect the capability, not a template name. Human pilots carry this behavior;
+	// ordinary infantry/transports do not.
+	static const NameKeyType pilotFinderKey = NAMEKEY("PilotFindVehicleUpdate");
+	for (BehaviorModule **m = obj->getBehaviorModules(); *m; ++m)
+	{
+		if ((*m)->getModuleNameKey() == pilotFinderKey)
+			return TRUE;
+	}
+	return FALSE;
+}
+
 static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *issuingPlayer)
 {
 	if (selection == nullptr || issuingPlayer == nullptr || selection->isEmpty())
@@ -524,6 +540,85 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 	std::map<Int, Int> reservedTunnelSlotsByPlayer;
 	Bool assignedAny = FALSE;
 
+	// Pilots are special: their valid "enter" target can be a normal ground vehicle
+	// with no Contain module at all. Match them first so a valuable pilot is not
+	// accidentally stuffed into a transport/garrison when a useful vehicle is available.
+	std::vector<ObjectID> pilotAssignedIDs;
+	std::vector<ObjectID> reservedPilotVehicleIDs;
+	for (std::vector<ObjectID>::const_iterator pit = passengerIDs.begin(); pit != passengerIDs.end(); ++pit)
+	{
+		Object *pilot = TheGameLogic->findObjectByID(*pit);
+		if (!smartLoadIsPilot(pilot))
+			continue;
+
+		const Int pilotLevel = (Int)pilot->getVeterancyLevel();
+		Object *bestVehicle = nullptr;
+		Int bestSelectedPriority = 999;
+		Int bestWastedLevels = 999;
+		Int bestFinalLevel = -1;
+		Real bestDistSqr = 1.0e30f;
+
+		for (Object *vehicle = TheGameLogic->getFirstObject(); vehicle; vehicle = vehicle->getNextObject())
+		{
+			if (vehicle == pilot || vehicle->isEffectivelyDead() || vehicle->isContained() ||
+					vehicle->getControllingPlayer() != issuingPlayer ||
+					!vehicle->isKindOf(KINDOF_VEHICLE) ||
+					std::binary_search(reservedPilotVehicleIDs.begin(), reservedPilotVehicleIDs.end(), vehicle->getID()))
+				continue;
+
+			const Bool vehicleSelected = smartLoadContainsID(selected, vehicle->getID());
+			const Real distSqr = ThePartitionManager->getDistanceSquared(pilot, vehicle, FROM_CENTER_2D);
+			if (!vehicleSelected && distSqr > nearbyRangeSqr)
+				continue;
+
+			// This is the authoritative engine path for pilot collision entry, including
+			// same-player, no-dozer, non-airborne and "can still gain veterancy" checks.
+			if (!TheActionManager->canEnterObject(pilot, vehicle, CMD_FROM_PLAYER, DONT_CHECK_CAPACITY))
+				continue;
+
+			const Int vehicleLevel = (Int)vehicle->getVeterancyLevel();
+			const Int levelsAvailable = (Int)LEVEL_LAST - vehicleLevel;
+			const Int levelsGained = min(pilotLevel, levelsAvailable);
+			if (levelsGained <= 0)
+				continue;
+
+			const Int wastedLevels = pilotLevel - levelsGained;
+			const Int finalLevel = vehicleLevel + levelsGained;
+			const Int selectedPriority = vehicleSelected ? 0 : 1;
+
+			if (bestVehicle == nullptr ||
+					selectedPriority < bestSelectedPriority ||
+					(selectedPriority == bestSelectedPriority &&
+						(wastedLevels < bestWastedLevels ||
+						(wastedLevels == bestWastedLevels &&
+							(finalLevel > bestFinalLevel ||
+							(finalLevel == bestFinalLevel &&
+								(distSqr < bestDistSqr ||
+								(distSqr == bestDistSqr && vehicle->getID() < bestVehicle->getID()))))))))
+			{
+				bestVehicle = vehicle;
+				bestSelectedPriority = selectedPriority;
+				bestWastedLevels = wastedLevels;
+				bestFinalLevel = finalLevel;
+				bestDistSqr = distSqr;
+			}
+		}
+
+		if (bestVehicle)
+		{
+			AIUpdateInterface *pilotAI = pilot->getAIUpdateInterface();
+			if (pilotAI)
+			{
+				pilotAI->aiEnter(bestVehicle, CMD_FROM_PLAYER);
+				pilotAssignedIDs.push_back(pilot->getID());
+				reservedPilotVehicleIDs.push_back(bestVehicle->getID());
+				std::sort(pilotAssignedIDs.begin(), pilotAssignedIDs.end());
+				std::sort(reservedPilotVehicleIDs.begin(), reservedPilotVehicleIDs.end());
+				assignedAny = TRUE;
+			}
+		}
+	}
+
 	// Pass 0 fills selected/nearby containers with non-container passengers first.
 	// Pass 1 allows already-loaded or otherwise unused selected containers to nest when legal.
 	for (Int pass = 0; pass < 2; ++pass)
@@ -531,7 +626,8 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 		for (std::vector<ObjectID>::const_iterator pit = passengerIDs.begin(); pit != passengerIDs.end(); ++pit)
 		{
 			Object *passenger = TheGameLogic->findObjectByID(*pit);
-			if (passenger == nullptr || passenger->isContained() || passenger->isEffectivelyDead())
+			if (passenger == nullptr || passenger->isContained() || passenger->isEffectivelyDead() ||
+					std::binary_search(pilotAssignedIDs.begin(), pilotAssignedIDs.end(), passenger->getID()))
 				continue;
 
 			const Bool passengerIsContainer = smartLoadIsUsableContainer(passenger);
