@@ -334,6 +334,11 @@ GameMessageDisposition WindowTranslator::translateGameMessage(const GameMessage 
 					returnCode = WIN_INPUT_USED;
 				}
 #if defined(RTS_ZEROHOUR)
+				else if (TheInGameUI && TheInGameUI->isMoviePlaying())
+				{
+					TheInGameUI->stopMovie();
+					returnCode = WIN_INPUT_USED;
+				}
 				else if (TheScriptActions && TheScriptActions->skipCurrentCinematic())
 				{
 					returnCode = WIN_INPUT_USED;

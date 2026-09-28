@@ -478,6 +478,7 @@ public:  // ********************************************************************
 	/// Ingame video playback
 	virtual void playMovie( const AsciiString& movieName );
 	virtual void stopMovie();
+	virtual Bool isMoviePlaying() const { return m_videoStream != nullptr; }
 	virtual VideoBuffer* videoBuffer();
 
 	/// Ingame cameo video playback

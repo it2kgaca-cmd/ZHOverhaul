@@ -823,7 +823,7 @@ static const char *EngineErrorCodeName(ErrorCode code)
 
 static void GetFaultModule(void *address, char *modulePath, size_t modulePathCount, uintptr_t *moduleOffset)
 {
-	strlcpy(modulePath, "<Unknown>", modulePathCount);
+	snprintf(modulePath, modulePathCount, "<Unknown>");
 	if (moduleOffset)
 		*moduleOffset = 0;
 
