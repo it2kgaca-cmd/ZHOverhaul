@@ -179,6 +179,15 @@ Bool ScriptActions::skipCurrentCinematic()
 	if (TheNetwork != nullptr || TheInGameUI == nullptr || TheInGameUI->getInputEnabled() || m_messageWindow != nullptr)
 		return FALSE;
 
+	// DISABLE_INPUT is also used by non-cinematic mission states (notably victory/defeat). Require
+	// evidence that a presentation sequence is actually active before treating ESC as a cinematic skip.
+	const Bool hasCinematicPresentation =
+		(TheDisplay && (TheDisplay->isLetterBoxed() || TheDisplay->isLetterBoxFading())) ||
+		(TheTacticalView && (TheTacticalView->isDoingScriptedCamera() || TheTacticalView->getCameraLock() != INVALID_ID)) ||
+		(TheScriptEngine && TheScriptEngine->isTimeFrozenScript());
+	if (!hasCinematicPresentation)
+		return FALSE;
+
 	m_skipCinematicPresentation = TRUE;
 
 	TheInGameUI->setInputEnabled(TRUE);
