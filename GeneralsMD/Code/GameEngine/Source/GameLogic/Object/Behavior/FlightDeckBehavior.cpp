@@ -1557,7 +1557,8 @@ void FlightDeckBehavior::xfer( Xfer *xfer )
 	}
 
 	// spaces info count and data
-	UnsignedByte spacesCount = m_spaces.size();
+	DEBUG_ASSERTCRASH(m_spaces.size() <= 0xffu, ("Flight-deck space list exceeds save format capacity"));
+	UnsignedByte spacesCount = static_cast<UnsignedByte>(m_spaces.size());
 	xfer->xferUnsignedByte( &spacesCount );
 	if( xfer->getXferMode() == XFER_SAVE )
 	{
@@ -1597,7 +1598,8 @@ void FlightDeckBehavior::xfer( Xfer *xfer )
 	}
 
 	// runways count and info
-	UnsignedByte runwaysCount = m_runways.size();
+	DEBUG_ASSERTCRASH(m_runways.size() <= 0xffu, ("Flight-deck runway list exceeds save format capacity"));
+	UnsignedByte runwaysCount = static_cast<UnsignedByte>(m_runways.size());
 	xfer->xferUnsignedByte( &runwaysCount );
 	if( xfer->getXferMode() == XFER_SAVE )
 	{
@@ -1645,7 +1647,8 @@ void FlightDeckBehavior::xfer( Xfer *xfer )
 	}
 
 	// healees
-	UnsignedByte healCount = m_healing.size();
+	DEBUG_ASSERTCRASH(m_healing.size() <= 0xffu, ("Flight-deck healing list exceeds save format capacity"));
+	UnsignedByte healCount = static_cast<UnsignedByte>(m_healing.size());
 	xfer->xferUnsignedByte( &healCount );
 	if( xfer->getXferMode() == XFER_SAVE )
 	{

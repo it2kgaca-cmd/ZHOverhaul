@@ -536,7 +536,8 @@ void GenerateMinefieldBehavior::xfer( Xfer *xfer )
 	xfer->xferCoord3D( &m_target );
 
 		// spaces info count and objectID data
-	UnsignedByte spacesCount = m_mineList.size();
+	DEBUG_ASSERTCRASH(m_mineList.size() <= 0xffu, ("Generated mine list exceeds save format capacity"));
+	UnsignedByte spacesCount = static_cast<UnsignedByte>(m_mineList.size());
 	xfer->xferUnsignedByte( &spacesCount );
 	if( xfer->getXferMode() == XFER_SAVE )
 	{

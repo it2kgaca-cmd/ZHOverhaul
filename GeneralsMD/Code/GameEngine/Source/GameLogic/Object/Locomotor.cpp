@@ -2668,7 +2668,8 @@ void LocomotorSet::xfer( Xfer *xfer )
 	xfer->xferVersion( &version, currentVersion );
 
 	// count of vector
-	UnsignedShort count = m_locomotors.size();
+	DEBUG_ASSERTCRASH(m_locomotors.size() <= 0xffffu, ("Locomotor set exceeds save format capacity"));
+	UnsignedShort count = static_cast<UnsignedShort>(m_locomotors.size());
 	xfer->xferUnsignedShort( &count );
 
 	// data
