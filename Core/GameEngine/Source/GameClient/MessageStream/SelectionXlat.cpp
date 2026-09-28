@@ -165,22 +165,9 @@ Bool CanSelectDrawable( const Drawable *draw, Bool dragSelecting )
 		window = window->winGetParent();
 	}
 
-	//
-	// structures cannot be selected by a drag select, you must individually pick them
-	// NOTE that this is really a convenience for the multi select context sensitive UI,
-	// later we might want to allow you to drag select buildings if only one building is
-	// actually in the selection area, but don't forget complications like holding down
-	// a key to "add" to an already existing selection list
-	//
-	// not allowing you to have multiple buildings selected drastically simplifies the
-	// user interface ... including all those context sensitive commands that we
-	// can just assume are for a single building selected.
-	//
-	if( dragSelecting && draw->isKindOf( KINDOF_STRUCTURE ) )
-	{
-		return FALSE;
-	}
-
+	// Structures are now valid owned drag-selection members. The existing
+	// dragSelecting/local-control check below still prevents enemy base box-selection.
+	// Mixed unit+structure boxes keep unit-priority semantics in onMouseLeftClick().
 	// You cannot select something that has a logic override of unselectability or masked
 	if( obj->getStatusBits().testForAny( MAKE_OBJECT_STATUS_MASK2( OBJECT_STATUS_UNSELECTABLE, OBJECT_STATUS_MASKED ) ) )
 	{
@@ -768,9 +755,10 @@ GameMessageDisposition SelectionTranslator::onMouseLeftClick(MAYBE_UNUSED const 
 	if (si.currentCountEnemies > 0 ||
 			si.currentCountCivilians > 0 ||
 			si.currentCountFriends > 0 ||
-			si.currentCountMineBuildings > 0)
+			(si.currentCountMineBuildings > 0 && !TheInGameUI->isInPreferSelectionMode()))
 	{
-		// force a new group creation
+		// Foreign/civilian selection remains exclusive. Owned buildings only force
+		// a fresh selection for a normal click; Shift explicitly means add/remove.
 		addToGroup = FALSE;
 	}
 
@@ -779,44 +767,15 @@ GameMessageDisposition SelectionTranslator::onMouseLeftClick(MAYBE_UNUSED const 
 	{
 		si.selectMine = TRUE;
 
-		// EXACTLY ONE CLICKED OR DRAGGED BUILDING
-		if ( si.newCountMineBuildings == 1 && si.newCountMine == 1 )
+		// If every locally-owned selectable object in the new pick is a structure,
+		// treat the operation as an explicit building selection. This enables
+		// box-selecting several buildings and Shift-click add/remove while preserving
+		// the familiar behavior that mixed army+base boxes select the mobile units.
+		if (si.newCountMineBuildings > 0 && si.newCountMineBuildings == si.newCountMine)
 		{
-			addToGroup = FALSE;
 			si.selectMineBuildings = TRUE;
-		}
-		else if ( si.newCountMineBuildings > 0 )////////////// SO SORRY, I KNOW THIS IS MICKEY MOUSE ///////////////////
-		{ // What we are after here is to allow the drag select to get the building,
-			// if the other things in the list are going to be ignored anyway
-			// so we find out whether the other things are not selectable
-			// this came up with the new AmericaBuildingFireBase, which shows its contained
-			// but does not let you select them. The selection is propagated to the container
-			// in new code in SelectionInfo.cpp, in the static addDrawableToList();
-			// -Mark Lorenzen, 6/12/03
-			Bool onlyTheOneBuildingIsSelectableAnyway = TRUE;
-			DrawableID buildingID = INVALID_DRAWABLE_ID;
-			for (DrawableListIt it = drawablesThatWillSelect.begin(); it != drawablesThatWillSelect.end(); ++it)
-			{
-				const Drawable *d = *it;
-				if ( d->isKindOf( KINDOF_STRUCTURE ) )
-				{// make sure there is really only the one building in the list, as it may be multiply listed
-
-					if ( buildingID == INVALID_DRAWABLE_ID ) // this is the first building
-						buildingID = d->getID();
-					else if ( buildingID != d->getID() )//oops, more than one building!
-						onlyTheOneBuildingIsSelectableAnyway = FALSE;
-				}
-				else if ( d->isSelectable() )
-					onlyTheOneBuildingIsSelectableAnyway = FALSE;
-
-				if ( ! onlyTheOneBuildingIsSelectableAnyway )
-					break;
-			}
-			if ( onlyTheOneBuildingIsSelectableAnyway )
-			{
+			if (!TheInGameUI->isInPreferSelectionMode())
 				addToGroup = FALSE;
-				si.selectMineBuildings = TRUE;
-			}
 		}
 
 	}
