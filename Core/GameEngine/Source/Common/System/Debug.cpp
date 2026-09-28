@@ -807,11 +807,19 @@ static void writeReleaseCrashReport(
 	fprintf(theReleaseCrashLogFile, "Executable: %s\n", executable);
 	fprintf(theReleaseCrashLogFile, "\nReason:\n%s\n", reason ? reason : "<no reason supplied>");
 
-	if (sourceFile && sourceFile[0])
+	if ((sourceFile && sourceFile[0]) || (functionName && functionName[0]))
 	{
-		fprintf(theReleaseCrashLogFile, "\nFatal call site:\n%s", sourceFile);
-		if (sourceLine > 0)
-			fprintf(theReleaseCrashLogFile, ":%d", sourceLine);
+		fprintf(theReleaseCrashLogFile, "\nSource / fault location:\n");
+		if (sourceFile && sourceFile[0])
+		{
+			fprintf(theReleaseCrashLogFile, "%s", sourceFile);
+			if (sourceLine > 0)
+				fprintf(theReleaseCrashLogFile, ":%d", sourceLine);
+		}
+		else
+		{
+			fprintf(theReleaseCrashLogFile, "<source file unavailable>");
+		}
 		if (functionName && functionName[0])
 			fprintf(theReleaseCrashLogFile, " (%s)", functionName);
 		fprintf(theReleaseCrashLogFile, "\n");
@@ -852,6 +860,10 @@ static void showReleaseCrashDialog(
 			snprintf(source, ARRAY_SIZE(source), "%s:%d", sourceFile, sourceLine);
 		else
 			snprintf(source, ARRAY_SIZE(source), "%s", sourceFile);
+	}
+	else if (functionName && functionName[0])
+	{
+		snprintf(source, ARRAY_SIZE(source), "<source file unavailable> (%s)", functionName);
 	}
 	else
 	{
