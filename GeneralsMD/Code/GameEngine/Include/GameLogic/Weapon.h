@@ -632,6 +632,11 @@ public:
 	Bool isWithinAttackRange(const Object *source, const Object *target) const;
 	Bool isWithinAttackRange(const Object *source, const Coord3D* pos) const;
 
+	// For non-correcting dumb projectiles, estimate a constant-velocity intercept
+	// point. Returns FALSE for tracking/homing/non-projectile weapons or when no
+	// sensible intercept exists.
+	Bool computePredictiveIntercept(const Object *source, const Object *target, Coord3D *outPos) const;
+
 	Bool isTooClose(const Object *source, const Object *target) const;
 	Bool isTooClose(const Object *source, const Coord3D *pos) const;
 
