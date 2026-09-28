@@ -614,6 +614,14 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 			if (pilotAI)
 			{
 				pilotAI->aiEnter(bestVehicle, CMD_FROM_PLAYER);
+#if defined(RTS_PROFILE_TRACY)
+				AsciiString message;
+				message.format("SmartLoadAssign frame=%u mode=PILOT passenger=%u:%s destination=%u:%s pilotLevel=%d vehicleLevel=%d",
+					TheGameLogic->getFrame(), pilot->getID(), pilot->getTemplate()->getName().str(),
+					bestVehicle->getID(), bestVehicle->getTemplate()->getName().str(),
+					(Int)pilot->getVeterancyLevel(), (Int)bestVehicle->getVeterancyLevel());
+				PROFILER_MSG(message.str(), message.getLength());
+#endif
 				pilotAssignedIDs.push_back(pilot->getID());
 				reservedPilotVehicleIDs.push_back(bestVehicle->getID());
 				std::sort(pilotAssignedIDs.begin(), pilotAssignedIDs.end());
@@ -720,6 +728,13 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 						std::sort(usedAsDestination.begin(), usedAsDestination.end());
 					}
 					ai->aiEnter(containerObj, CMD_FROM_PLAYER);
+#if defined(RTS_PROFILE_TRACY)
+					AsciiString message;
+					message.format("SmartLoadAssign frame=%u mode=CONTAIN passenger=%u:%s destination=%u:%s slots=%d",
+						TheGameLogic->getFrame(), passenger->getID(), passenger->getTemplate()->getName().str(),
+						containerObj->getID(), containerObj->getTemplate()->getName().str(), slotsRequired);
+					PROFILER_MSG(message.str(), message.getLength());
+#endif
 					assignedAny = TRUE;
 				}
 			}
