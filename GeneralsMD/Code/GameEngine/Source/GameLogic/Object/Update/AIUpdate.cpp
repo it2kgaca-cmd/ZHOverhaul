@@ -1597,21 +1597,10 @@ Bool AIUpdateInterface::computeBlobTrafficGoal(const Coord3D& pathGoal, Coord3D 
 		return FALSE;
 
 	const Coord3D pos = *obj->getPosition();
-	Coord2D intent;
-	intent.x = m_requestedDestination.x - pos.x;
-	intent.y = m_requestedDestination.y - pos.y;
-	Real intentLen = intent.length();
-	if (intentLen > 0.01f)
-	{
-		intent.x /= intentLen;
-		intent.y /= intentLen;
-	}
-
 	Coord2D forward;
 	forward.x = pathGoal.x - pos.x;
 	forward.y = pathGoal.y - pos.y;
 	Real pathForwardLen = forward.length();
-	Bool correctedBackwardGoal = FALSE;
 
 	if (pathForwardLen > 0.01f)
 	{
@@ -1619,16 +1608,10 @@ Bool AIUpdateInterface::computeBlobTrafficGoal(const Coord3D& pathGoal, Coord3D 
 		forward.y /= pathForwardLen;
 	}
 
-	// Local crowd motion may move us off the exact path.  Never reacquire a point behind
-	// us when the original player/AI movement intent still clearly points forward.
-	if (intentLen > PATHFIND_CELL_SIZE_F &&
-			(pathForwardLen < 0.01f || forward.x * intent.x + forward.y * intent.y <= 0.0f))
-	{
-		forward = intent;
-		pathForwardLen = PATHFIND_CELL_SIZE_F * 2.0f;
-		correctedBackwardGoal = TRUE;
-	}
-
+	// The strategic path owns topology. A valid route may deliberately point away
+	// from the final destination to reach a ramp, bridge entrance, canyon turn, etc.
+	// Crowd steering may only bend that path locally; it must never substitute the
+	// raw final-destination vector because it "looks more forward".
 	if (pathForwardLen < 0.01f)
 		return FALSE;
 
@@ -1776,17 +1759,26 @@ Bool AIUpdateInterface::computeBlobTrafficGoal(const Coord3D& pathGoal, Coord3D 
 		lateralSteer += cohesion;
 	}
 
-	if (influenceCount == 0 && !correctedBackwardGoal)
+	if (influenceCount == 0)
 		return FALSE;
 
 	Real maxLateral = ourRadius * 2.5f + PATHFIND_CELL_SIZE_F;
+
+	PathfindCell *ourCell = TheAI->pathfinder()->getCell(obj->getLayer(), obj->getPosition());
+	PathfindCell *goalCell = TheAI->pathfinder()->getCell(obj->getLayer(), &pathGoal);
+	const Bool constrainedTerrain =
+		(ourCell && (ourCell->getType() == PathfindCell::CELL_CLIFF || ourCell->getPinched())) ||
+		(goalCell && (goalCell->getType() == PathfindCell::CELL_CLIFF || goalCell->getPinched()));
+	if (constrainedTerrain)
+		maxLateral = ourRadius * 0.45f; // path discipline wins on ramps/chokes
+
 	if (lateralSteer > maxLateral) lateralSteer = maxLateral;
 	if (lateralSteer < -maxLateral) lateralSteer = -maxLateral;
 
 	Real lookAhead = ourRadius * 2.25f;
 	if (lookAhead < PATHFIND_CELL_SIZE_F * 1.5f)
 		lookAhead = PATHFIND_CELL_SIZE_F * 1.5f;
-	if (!correctedBackwardGoal && pathForwardLen < lookAhead)
+	if (pathForwardLen < lookAhead)
 		lookAhead = pathForwardLen;
 	if (lookAhead < 1.0f)
 		return FALSE;
