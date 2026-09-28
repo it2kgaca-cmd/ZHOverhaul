@@ -2226,7 +2226,15 @@ bool GameLogic::onQueueUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupPtr &cur
 		ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
 		if (pu == nullptr)
 			return false;
-		return pu->queueCreateUnit(whatToCreate, productionID);
+		const Bool queued = pu->queueCreateUnit(whatToCreate, productionID);
+#if defined(RTS_PROFILE_TRACY)
+		AsciiString message;
+		message.format("ProductionQueue frame=%u source=MANUAL factory=%u unit=%s templateID=%u productionID=%u queued=%d",
+			TheGameLogic->getFrame(), producer->getID(), whatToCreate->getName().str(),
+			(UnsignedInt)whatToCreate->getTemplateID(), (UnsignedInt)productionID, queued ? 1 : 0);
+		PROFILER_MSG(message.str(), message.getLength());
+#endif
+		return queued;
 	}
 
 	// Same-type structure groups fan the order out. Sort IDs so the spending/order
@@ -2244,7 +2252,15 @@ bool GameLogic::onQueueUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupPtr &cur
 			continue;
 
 		ProductionID productionID = pu->requestUniqueUnitID();
-		if (pu->queueCreateUnit(whatToCreate, productionID))
+		const Bool queued = pu->queueCreateUnit(whatToCreate, productionID);
+#if defined(RTS_PROFILE_TRACY)
+		AsciiString message;
+		message.format("ProductionQueue frame=%u source=MANUAL_GROUP factory=%u unit=%s templateID=%u productionID=%u queued=%d",
+			TheGameLogic->getFrame(), producer->getID(), whatToCreate->getName().str(),
+			(UnsignedInt)whatToCreate->getTemplateID(), (UnsignedInt)productionID, queued ? 1 : 0);
+		PROFILER_MSG(message.str(), message.getLength());
+#endif
+		if (queued)
 			queuedAny = TRUE;
 	}
 	return queuedAny;
@@ -2267,6 +2283,16 @@ bool GameLogic::onToggleRepeatUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupP
 
 	VecObjectID selectedObjects = selection->getAllIDs();
 	std::sort(selectedObjects.begin(), selectedObjects.end());
+
+#if defined(RTS_PROFILE_TRACY)
+	{
+		AsciiString message;
+		message.format("RepeatClick frame=%u unit=%s templateID=%u selected=%u",
+			TheGameLogic->getFrame(), whatToCreate->getName().str(),
+			(UnsignedInt)whatToCreate->getTemplateID(), (UnsignedInt)selectedObjects.size());
+		PROFILER_MSG(message.str(), message.getLength());
+	}
+#endif
 
 	// Group toggle semantics: mixed state converges to ON. Only when every
 	// eligible selected producer already has this recipe does RMB remove it.
@@ -2314,12 +2340,32 @@ bool GameLogic::onToggleRepeatUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupP
 		if (shouldAdd)
 		{
 			if (!hasRecipe && canAdd)
-				changedAny |= pu->toggleRepeatUnit(whatToCreate);
+			{
+				const Bool changed = pu->toggleRepeatUnit(whatToCreate);
+#if defined(RTS_PROFILE_TRACY)
+				AsciiString message;
+				message.format("RepeatToggle frame=%u factory=%u action=ADD unit=%s templateID=%u changed=%d count=%u",
+					TheGameLogic->getFrame(), producer->getID(), whatToCreate->getName().str(),
+					(UnsignedInt)whatToCreate->getTemplateID(), changed ? 1 : 0,
+					(UnsignedInt)pu->getRepeatProductionCount());
+				PROFILER_MSG(message.str(), message.getLength());
+#endif
+				changedAny |= changed;
+			}
 		}
 		else if (hasRecipe)
 		{
 			// Removal stays legal even if money/prerequisites changed after arming.
-			changedAny |= pu->toggleRepeatUnit(whatToCreate);
+			const Bool changed = pu->toggleRepeatUnit(whatToCreate);
+#if defined(RTS_PROFILE_TRACY)
+			AsciiString message;
+			message.format("RepeatToggle frame=%u factory=%u action=REMOVE unit=%s templateID=%u changed=%d count=%u",
+				TheGameLogic->getFrame(), producer->getID(), whatToCreate->getName().str(),
+				(UnsignedInt)whatToCreate->getTemplateID(), changed ? 1 : 0,
+				(UnsignedInt)pu->getRepeatProductionCount());
+			PROFILER_MSG(message.str(), message.getLength());
+#endif
+			changedAny |= changed;
 		}
 	}
 
