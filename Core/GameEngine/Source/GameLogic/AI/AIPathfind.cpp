@@ -970,10 +970,11 @@ void Path::optimize( const Object *obj, LocomotorSurfaceTypeMask acceptableSurfa
 			{
 				isPassable = true;
 			}
-			PathfindCell* cell = TheAI->pathfinder()->getCell( layer, node->getPosition());
-			if (cell && cell->getType()==PathfindCell::CELL_CLIFF && !cell->getPinched()) {
-				isPassable = true;
-			}
+			// Trust footprint-aware clearance. Cliff/ramp transition nodes are already
+			// marked non-optimizable while reconstructing the A* path. Never resurrect
+			// a shortcut that isLinePassable() rejected merely because its endpoint is
+			// a CELL_CLIFF; doing so can make vehicles drive at a cliff face instead
+			// of following the preserved route to the ramp.
 			// Trust footprint-aware clearance. Do not resurrect a shortcut
 			// through a building corner just because the raw cells line up.
 			if (isPassable)
