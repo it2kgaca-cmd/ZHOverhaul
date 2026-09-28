@@ -181,6 +181,36 @@ void RebuildHoleExposeDie::onDie( const DamageInfo *damageInfo )
 			}
 		}
 
+		//
+		// Carry lethal overkill into the rebuild hole. DamageInfo has already been
+		// resolved by the dying building's body before onDie() is called:
+		//
+		//   actualDamageDealt   = post-armor/scalar damage that wanted to land
+		//   actualDamageClipped = damage the remaining building health could absorb
+		//
+		// The difference is therefore residual damage from the same hit. Apply it
+		// unresistably so the residual is not reduced by a second armor calculation,
+		// while preserving the original source/death/FX attribution.
+		//
+		if (damageInfo)
+		{
+			const Real overflowDamage =
+				damageInfo->out.m_actualDamageDealt - damageInfo->out.m_actualDamageClipped;
+
+			if (overflowDamage > 0.0f && !hole->isEffectivelyDead())
+			{
+				DamageInfo overflowInfo;
+				overflowInfo.in.m_sourceID = damageInfo->in.m_sourceID;
+				overflowInfo.in.m_sourceTemplate = damageInfo->in.m_sourceTemplate;
+				overflowInfo.in.m_sourcePlayerMask = damageInfo->in.m_sourcePlayerMask;
+				overflowInfo.in.m_damageType = DAMAGE_UNRESISTABLE;
+				overflowInfo.in.m_damageFXOverride = damageInfo->in.m_damageType;
+				overflowInfo.in.m_deathType = damageInfo->in.m_deathType;
+				overflowInfo.in.m_amount = overflowDamage;
+				body->attemptDamage(&overflowInfo);
+			}
+		}
+
 	}
 
 }
