@@ -1664,6 +1664,18 @@ static Object *findClosestSelectedBuilderForPlacementPreview(const ThingTemplate
 //-------------------------------------------------------------------------------------------------
 void InGameUI::handleBuildPlacements()
 {
+	// Magnetic placement keeps a little temporal memory so equally-good legal
+	// samples do not alternate every rendered frame.
+	static const ThingTemplate *stickyBuildType = nullptr;
+	static Coord3D stickyPlacement;
+	static Real stickyAngle = 0.0f;
+	static Bool stickyValid = FALSE;
+
+	if (stickyBuildType != m_pendingPlaceType)
+	{
+		stickyBuildType = m_pendingPlaceType;
+		stickyValid = FALSE;
+	}
 
 	//
 	// if we're in the process of placing something we need up update one or more drawables
@@ -1738,6 +1750,7 @@ void InGameUI::handleBuildPlacements()
 				BuildAssistant::SHROUD_REVEALED |
 				BuildAssistant::IGNORE_STEALTHED;
 
+			Coord3D rawWorld = world;
 			Coord3D resolvedWorld = world;
 			Real resolvedAngle = angle;
 			Bool resolvedLegal = FALSE;
@@ -1746,6 +1759,66 @@ void InGameUI::handleBuildPlacements()
 				resolvedLegal = TheBuildAssistant->findNearestLegalPlacement(
 					&world, m_pendingPlaceType, angle, placementOptions,
 					builderObject, nullptr, &resolvedWorld, &resolvedAngle);
+
+				Real stickyRelease = m_pendingPlaceType->getTemplateGeometryInfo().getMajorRadius() * 1.10f;
+				if (stickyRelease < PATHFIND_CELL_SIZE_F * 2.0f)
+					stickyRelease = PATHFIND_CELL_SIZE_F * 2.0f;
+
+				if (resolvedLegal && stickyValid)
+				{
+					// Smooth small legal movements of the snap solution. If interpolation
+					// would cross the obstruction, retain the previous legal transform
+					// until the new solution becomes cleanly reachable.
+					Coord3D smoothed = stickyPlacement;
+					smoothed.x += (resolvedWorld.x - stickyPlacement.x) * 0.45f;
+					smoothed.y += (resolvedWorld.y - stickyPlacement.y) * 0.45f;
+					smoothed.z = TheTerrainLogic->getGroundHeight(smoothed.x, smoothed.y);
+
+					if (TheBuildAssistant->isLocationLegalToBuild(
+							&smoothed, m_pendingPlaceType, resolvedAngle, placementOptions,
+							builderObject, nullptr) == LBC_OK)
+					{
+						resolvedWorld = smoothed;
+					}
+					else
+					{
+						const Real rawDx = rawWorld.x - stickyPlacement.x;
+						const Real rawDy = rawWorld.y - stickyPlacement.y;
+						if (rawDx*rawDx + rawDy*rawDy <= sqr(stickyRelease) &&
+								TheBuildAssistant->isLocationLegalToBuild(
+									&stickyPlacement, m_pendingPlaceType, stickyAngle, placementOptions,
+									builderObject, nullptr) == LBC_OK)
+						{
+							resolvedWorld = stickyPlacement;
+							resolvedAngle = stickyAngle;
+						}
+					}
+				}
+				else if (!resolvedLegal && stickyValid)
+				{
+					const Real rawDx = rawWorld.x - stickyPlacement.x;
+					const Real rawDy = rawWorld.y - stickyPlacement.y;
+					if (rawDx*rawDx + rawDy*rawDy <= sqr(stickyRelease) &&
+							TheBuildAssistant->isLocationLegalToBuild(
+								&stickyPlacement, m_pendingPlaceType, stickyAngle, placementOptions,
+								builderObject, nullptr) == LBC_OK)
+					{
+						resolvedLegal = TRUE;
+						resolvedWorld = stickyPlacement;
+						resolvedAngle = stickyAngle;
+					}
+				}
+
+				if (resolvedLegal)
+				{
+					stickyPlacement = resolvedWorld;
+					stickyAngle = resolvedAngle;
+					stickyValid = TRUE;
+				}
+				else
+				{
+					stickyValid = FALSE;
+				}
 			}
 
 			if (resolvedLegal)
@@ -3401,12 +3474,13 @@ void InGameUI::placeBuildAvailable( const ThingTemplate *build, Drawable *buildD
 				drawableStatus |= TheGlobalData->m_objectPlacementShadows ? DRAWABLE_STATUS_SHADOWS : 0;
 				draw = TheThingFactory->newDrawable( build, drawableStatus );
 			}
-			if (sourceObject)
+			Player *previewPlayer = sourceObject ? sourceObject->getControllingPlayer() : ThePlayerList->getLocalPlayer();
+			if (previewPlayer)
 			{
 				if (TheGlobalData->m_timeOfDay == TIME_OF_DAY_NIGHT)
-					draw->setIndicatorColor(sourceObject->getControllingPlayer()->getPlayerNightColor());
+					draw->setIndicatorColor(previewPlayer->getPlayerNightColor());
 				else
-					draw->setIndicatorColor(sourceObject->getControllingPlayer()->getPlayerColor());
+					draw->setIndicatorColor(previewPlayer->getPlayerColor());
 			}
 			DEBUG_ASSERTCRASH( draw, ("Unable to create icon at cursor for placement '%s'",
 												 build->getName().str()) );
@@ -3542,6 +3616,19 @@ Real InGameUI::getPlacementAngle()
 
 	return 0.0f;
 
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::getPlacementResolvedTransform( Coord3D *pos, Real *angle )
+{
+	if (m_placeIcon[0] == nullptr)
+		return FALSE;
+
+	if (pos)
+		*pos = *m_placeIcon[0]->getPosition();
+	if (angle)
+		*angle = m_placeIcon[0]->getOrientation();
+	return TRUE;
 }
 
 //-------------------------------------------------------------------------------------------------
