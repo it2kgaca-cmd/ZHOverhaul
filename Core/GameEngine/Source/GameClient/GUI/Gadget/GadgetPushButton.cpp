@@ -135,6 +135,9 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 			if( BitIsSet( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) == FALSE )
 				if( BitIsSet( instData->getState(), WIN_STATE_SELECTED ) )
 					BitClear( instData->m_state, WIN_STATE_SELECTED );
+			PushButtonData *rightData = (PushButtonData *)window->winGetUserData();
+			if( rightData )
+				rightData->rightClickArmed = FALSE;
 			//TheWindowManager->winSetFocus( nullptr );
 			if(window->winGetParent() && BitIsSet(window->winGetParent()->winGetStyle(),GWS_HORZ_SLIDER) )
 			{
@@ -244,44 +247,32 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 			else
 				buttonClick.setEventName("GUIClick");
 
-
 			if( BitIsSet( window->winGetStatus(), WIN_STATUS_RIGHT_CLICK ) )
 			{
-				// Need to be specially marked to care about right mouse events
 				if( TheAudio )
-				{
 					TheAudio->addAudioEvent( &buttonClick );
-				}
 
-				//
-				// for 'check-like' buttons we have "dual state", we flip the selected status
-				// in that case instead of just turning it on like normal ... also note
-				// that selected messages are sent immediately
-				//
 				if( BitIsSet( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) )
 				{
-
 					if( BitIsSet( instData->m_state, WIN_STATE_SELECTED ) )
 						BitClear( instData->m_state, WIN_STATE_SELECTED );
 					else
 						BitSet( instData->m_state, WIN_STATE_SELECTED );
 
 					TheWindowManager->winSendSystemMsg( instData->getOwner(), GBM_SELECTED_RIGHT,
-																							(WindowMsgData)window, mData1 );
-
+															(WindowMsgData)window, mData1 );
 				}
 				else
 				{
-
-					// just select as normal
+					// Do not use WIN_STATE_SELECTED as the gesture latch. Repeat-production
+					// UI legitimately repaints that bit every frame before mouse-up.
+					if( pData )
+						pData->rightClickArmed = TRUE;
 					BitSet( instData->m_state, WIN_STATE_SELECTED );
-
 				}
-
 			}
 			else
 			{
-				// Else I don't care about right events
 				return MSG_IGNORED;
 			}
 			break;
@@ -290,41 +281,33 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 		//-------------------------------------------------------------------------
 		case GWM_RIGHT_UP:
 		{
-
 			if( BitIsSet( window->winGetStatus(), WIN_STATUS_RIGHT_CLICK ) )
 			{
+				PushButtonData *pData = (PushButtonData *)window->winGetUserData();
+				const Bool rightClickArmed = pData ? pData->rightClickArmed :
+					BitIsSet( instData->getState(), WIN_STATE_SELECTED );
 
-				//
-				// note check like selected messages aren't sent here ... they are sent
-				// on the down press
-				//
-				if( BitIsSet( instData->getState(), WIN_STATE_SELECTED ) &&
+				if( rightClickArmed &&
 						BitIsSet( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) == FALSE )
 				{
-
 					TheWindowManager->winSendSystemMsg( instData->getOwner(), GBM_SELECTED_RIGHT,
-																							(WindowMsgData)window, mData1 );
+															(WindowMsgData)window, mData1 );
 
+					if( pData )
+						pData->rightClickArmed = FALSE;
 					BitClear( instData->m_state, WIN_STATE_SELECTED );
-
 				}
 				else
 				{
-
-					// this up click was not meant for this button
 					return MSG_IGNORED;
-
 				}
-
 			}
 			else
 			{
-				// Else I don't care about right events
 				return MSG_IGNORED;
 			}
 
 			break;
-
 		}
 
 		// ------------------------------------------------------------------------
@@ -601,6 +584,7 @@ PushButtonData * getNewPushButtonData()
 	p->drawBorder = FALSE;
 	p->drawClock = NO_CLOCK;
 	p->overlayImage = nullptr;
+	p->rightClickArmed = FALSE;
 	return p;
 }
 
