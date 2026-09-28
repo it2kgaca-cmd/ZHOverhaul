@@ -136,6 +136,7 @@ static const LookupListRec GameMessageMetaTypeNames[] =
 	{ "SELECT_PREV_WORKER",												GameMessage::MSG_META_SELECT_PREV_WORKER },
 	{ "SELECT_NEXT_IDLE_WORKER",											    GameMessage::MSG_META_SELECT_NEXT_IDLE_WORKER },
 	{ "RESUME_NEAREST_CONSTRUCTION",						GameMessage::MSG_META_RESUME_NEAREST_CONSTRUCTION },
+	{ "SMART_LOAD",										GameMessage::MSG_META_SMART_LOAD },
 	{ "SELECT_HERO",												      GameMessage::MSG_META_SELECT_HERO },
 	{ "SELECT_ALL",																GameMessage::MSG_META_SELECT_ALL },
 	{ "SELECT_ALL_AIRCRAFT",											GameMessage::MSG_META_SELECT_ALL_AIRCRAFT },
