@@ -523,9 +523,8 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 		containers.push_back(candidate);
 	}
 
-	if (containers.empty())
-		return FALSE;
-
+	// An empty container list is still valid: a pilot-only Smart Load may target
+	// ordinary vehicles through the pilot collide/entry path below.
 	std::sort(containers.begin(), containers.end(),
 		[](const SmartLoadContainerCandidate& a, const SmartLoadContainerCandidate& b)
 		{
