@@ -355,7 +355,7 @@ static Bool assignSelectedBuildersToNearestConstruction(AIGroup *selection, Play
 		}
 	}
 
-\treturn assignedAny;
+	return assignedAny;
 }
 
 // ------------------------------------------------------------------------------------------------
