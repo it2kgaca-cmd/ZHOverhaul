@@ -10536,6 +10536,14 @@ Bool Pathfinder::isAttackViewBlockedByObstacle(const Object* attacker, const Coo
 	}
 #endif
 
+	// Red Alert 2-style fortified firing: occupants of a firing garrison/bunker can shoot over
+	// intervening walls, buildings and stacked friendly fortifications. Terrain/cliff LOS above
+	// still applies; only the object/path-cell obstruction pass is bypassed.
+	const Object *firingContainer = attacker->getContainedBy();
+	ContainModuleInterface *firingContain = firingContainer ? firingContainer->getContain() : nullptr;
+	if (firingContain && firingContain->isGarrisonable() && firingContain->isPassengerAllowedToFire(attacker->getID()))
+		return false;
+
 	ViewAttackBlockedStruct info;
 	info.obj = attacker;
 	info.victim = victim;

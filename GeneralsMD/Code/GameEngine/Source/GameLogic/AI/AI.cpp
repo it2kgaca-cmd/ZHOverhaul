@@ -555,6 +555,11 @@ public:
 
 	virtual Bool allow(Object* objOther) override
 	{
+		const Object *container = m_obj->getContainedBy();
+		ContainModuleInterface *contain = container ? container->getContain() : nullptr;
+		const Bool firingFromGarrison = container && contain && contain->isPassengerAllowedToFire(m_obj->getID());
+		const Real containerRadius = firingFromGarrison ? container->getGeometryInfo().getBoundingCircleRadius() : 0.0f;
+
 		for (Int i = 0; i < WEAPONSLOT_COUNT;	i++ )
 		{
 			// ignore empty slots.
@@ -563,8 +568,15 @@ public:
 				continue;
 
 			if (w->isWithinAttackRange(m_obj, objOther))
-			{
 				return true;
+
+			// Contained infantry are normally centered inside the building until a firing point is chosen.
+			// Give the range filter the same edge-of-building allowance used by garrison acquisition.
+			if (firingFromGarrison)
+			{
+				const Real effectiveRange = w->getAttackRange(m_obj) + containerRadius;
+				if (ThePartitionManager->getDistanceSquared(m_obj, objOther, FROM_BOUNDINGSPHERE_2D) <= sqr(effectiveRange))
+					return true;
 			}
 		}
 		return false;

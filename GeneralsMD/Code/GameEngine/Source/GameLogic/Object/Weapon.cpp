@@ -685,6 +685,19 @@ Bool WeaponTemplate::shouldProjectileCollideWith(
 
  	}
 
+	// Friendly structures should not act as accidental projectile shields. This is deliberately
+	// after the intended-victim check above so Ctrl-force-attacking your own/allied building still works.
+	if (projectileLauncher && thingWeCollidedWith->isKindOf(KINDOF_STRUCTURE))
+	{
+		const Player *launcherPlayer = projectileLauncher->getControllingPlayer();
+		const Player *structurePlayer = thingWeCollidedWith->getControllingPlayer();
+		if ((launcherPlayer && launcherPlayer == structurePlayer) ||
+				projectileLauncher->getRelationship(thingWeCollidedWith) == ALLIES)
+		{
+			return false;
+		}
+	}
+
 	// never bother burning already-burned things. (srj)
 	if (getDamageType() == DAMAGE_FLAME || getDamageType() == DAMAGE_PARTICLE_BEAM)
 	{

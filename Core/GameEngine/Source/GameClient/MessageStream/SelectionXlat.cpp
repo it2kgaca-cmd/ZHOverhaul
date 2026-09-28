@@ -110,6 +110,16 @@ struct SFWRec
 }
 
 //-----------------------------------------------------------------------------
+static Bool isOwnedOccupiedGarrison(const Object *obj)
+{
+	if (obj == nullptr || !obj->isLocallyControlled() || !obj->isKindOf(KINDOF_STRUCTURE))
+		return FALSE;
+
+	ContainModuleInterface *contain = obj->getContain();
+	return contain && contain->isGarrisonable() && contain->getContainCount() > 0;
+}
+
+//-----------------------------------------------------------------------------
 /**
  * Returns true if the drawable can be selected under the current rules
  * of the system
@@ -133,7 +143,7 @@ Bool CanSelectDrawable( const Drawable *draw, Bool dragSelecting )
 	//I added the KINDOF_FORCEATTACKABLE to them, but unsure if it's possible to select
 	//something without the KINDOF_SELECTABLE -- so doing a LATE code change. My gut
 	//says we should simply have the KINDOF_SELECTABLE check only... but best to be safe.
-	if( !obj->isKindOf( KINDOF_SELECTABLE ) && obj->isKindOf( KINDOF_FORCEATTACKABLE ) )
+	if( !obj->isKindOf( KINDOF_SELECTABLE ) && obj->isKindOf( KINDOF_FORCEATTACKABLE ) && !isOwnedOccupiedGarrison(obj) )
 	{
 		return FALSE;
 	}
@@ -174,7 +184,7 @@ Bool CanSelectDrawable( const Drawable *draw, Bool dragSelecting )
 		return FALSE;
 	}
 
-	if (!obj->isSelectable())
+	if (!obj->isSelectable() && !isOwnedOccupiedGarrison(obj))
 	{
 		return false;
 	}

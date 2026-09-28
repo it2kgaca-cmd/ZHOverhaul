@@ -5399,20 +5399,32 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 		}
 	}
 
-	// Use Guard Outer, which typically corresponds to the total range
+	// Use Guard Outer, which typically corresponds to the total range.
 	Real rangeToFindWithin = TheAI->getAdjustedVisionRangeForObject(obj, AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
+
+	// A firing garrison uses the building as its firing platform. Retail only searched out to the
+	// passenger's vision range, which can be shorter than its weapon range; that is why a Technical
+	// can sometimes shoot a garrison without the occupants automatically answering. Search at least
+	// as far as the passenger's longest weapon plus the container radius.
+	const Object *container = obj->getContainedBy();
+	ContainModuleInterface *containerContain = container ? container->getContain() : nullptr;
+	if (container && containerContain && containerContain->isPassengerAllowedToFire(obj->getID()))
+	{
+		Real longestWeaponRange = 0.0f;
+		for (Int slot = 0; slot < WEAPONSLOT_COUNT; ++slot)
+		{
+			const Weapon *weapon = obj->getWeaponInWeaponSlot((WeaponSlotType)slot);
+			if (weapon)
+				longestWeaponRange = max(longestWeaponRange, weapon->getAttackRange(obj));
+		}
+		rangeToFindWithin = max(rangeToFindWithin, longestWeaponRange);
+	}
+
+	if (container)
+		rangeToFindWithin += container->getGeometryInfo().getBoundingCircleRadius();
 
 	if (rangeToFindWithin <= 0.0f)
 		return nullptr;
-
-	//If we are contained by an object, add it's bounding radius so that large buildings can auto acquire everything in
-	//outer ranges. Calculating this from the center is bad... although this code makes it possible to acquire a target
-	//outside of range, but in that case, it'll just fail and continue.
-	const Object *container = obj->getContainedBy();
-	if( container )
-	{
-		rangeToFindWithin += container->getGeometryInfo().getBoundingCircleRadius();
-	}
 
 	UnsignedInt moodMatrixVal = getMoodMatrixValue();
 	if ((moodMatrixVal & MM_Controller_AI) && (moodMatrixVal & MM_Mood_Passive))

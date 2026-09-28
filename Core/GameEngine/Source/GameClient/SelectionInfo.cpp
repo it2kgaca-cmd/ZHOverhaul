@@ -330,6 +330,17 @@ void translatePickTypesToKindof(UnsignedInt pickTypes, KindOfMaskType& outMask)
 }
 
 //-------------------------------------------------------------------------------------------------
+static Bool isOwnedOccupiedGarrisonDrawable(const Drawable *draw)
+{
+	const Object *obj = draw ? draw->getObject() : nullptr;
+	if (obj == nullptr || !obj->isLocallyControlled() || !obj->isKindOf(KINDOF_STRUCTURE))
+		return FALSE;
+
+	ContainModuleInterface *contain = obj->getContain();
+	return contain && contain->isGarrisonable() && contain->getContainCount() > 0;
+}
+
+//-------------------------------------------------------------------------------------------------
 // Given a drawable, add it to an stl list specified by userData.
 // Useful for iterateDrawablesInRegion.
 Bool addDrawableToList( Drawable *draw, void *userData )
@@ -357,10 +368,11 @@ Bool addDrawableToList( Drawable *draw, void *userData )
 		return FALSE;
 #endif
 
-	if (!draw->getTemplate()->isAnyKindOf(pds->kindofsToMatch))
+	const Bool occupiedOwnedGarrison = isOwnedOccupiedGarrisonDrawable(draw);
+	if (!draw->getTemplate()->isAnyKindOf(pds->kindofsToMatch) && !occupiedOwnedGarrison)
 		return FALSE;
 
-	if (!draw->isSelectable())
+	if (!draw->isSelectable() && !occupiedOwnedGarrison)
   {
     const Object *obj = draw->getObject();
     if ( obj && obj->getContainedBy() )//hmm, interesting... he is not selectable but he is contained
