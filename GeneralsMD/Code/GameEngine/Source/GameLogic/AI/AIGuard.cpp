@@ -122,46 +122,96 @@ static Bool hasAttackedMeAndICanReturnFire( State *thisState, void* /*userData*/
 {
 	Object *obj = thisState->getMachineOwner();
 	BodyModuleInterface *bmi = obj ? obj->getBodyModule() : nullptr;
-	if (!(obj && bmi))
+	AIUpdateInterface *ai = obj ? obj->getAIUpdateInterface() : nullptr;
+	AIGuardMachine *guardMachine = (AIGuardMachine *)thisState->getMachine();
+	if (!(obj && bmi && ai && guardMachine))
 		return FALSE;
 
 	// Do not tear down a valid guard attack just because another shell landed.
-	// Leave the clearable attacker intact so it can be reconsidered as soon as the
-	// current engagement ends.
+	// Both the body's direct attacker and any nearby-friend threat remain pending
+	// until the current engagement completes.
 	if (thisState->isAttack())
 		return FALSE;
 
-	const ObjectID attackerID = bmi->getClearableLastAttacker();
+	Bool sharedThreat = FALSE;
+	ObjectID attackerID = bmi->getClearableLastAttacker();
 	if (attackerID == INVALID_ID)
-		return FALSE;
+	{
+		attackerID = ai->friend_getGuardThreatID();
+		if (attackerID == INVALID_ID)
+			return FALSE;
+
+		sharedThreat = TRUE;
+		if (TheGameLogic->getFrame() >= ai->friend_getGuardThreatExpireFrame())
+		{
+			ai->friend_clearGuardThreat();
+			return FALSE;
+		}
+	}
 
 	Object *target = TheGameLogic->findObjectByID(attackerID);
 	if (target == nullptr || obj->getRelationship(target) != ENEMIES || target->isEffectivelyDead() ||
 			!obj->isAbleToAttack())
 	{
-		bmi->clearLastAttacker();
+		if (sharedThreat)
+			ai->friend_clearGuardThreat();
+		else
+			bmi->clearLastAttacker();
 		return FALSE;
 	}
 
 	CanAttackResult result = obj->getAbleToAttackSpecificObject(ATTACK_NEW_TARGET, target, CMD_FROM_AI);
 	if (result != ATTACKRESULT_POSSIBLE && result != ATTACKRESULT_POSSIBLE_AFTER_MOVING)
 	{
-		bmi->clearLastAttacker();
+		if (sharedThreat)
+			ai->friend_clearGuardThreat();
+		else
+			bmi->clearLastAttacker();
 		return FALSE;
 	}
 
-	// Emplaced artillery never abandons its firing position merely to retaliate.
-	// Keep the threat remembered until it enters our firing envelope.
-	if (isStationaryGuardArtillery(obj))
+	const Bool stationaryArtillery = isStationaryGuardArtillery(obj);
+	const Bool noPursuit = guardMachine->getGuardMode() == GUARDMODE_GUARD_WITHOUT_PURSUIT;
+
+	// Emplaced artillery and explicit no-pursuit guards never abandon the post
+	// to answer a threat. Keep the memory alive until it expires / becomes legal
+	// to counter-fire.
+	if (stationaryArtillery || noPursuit)
 	{
 		Weapon *weapon = obj->getCurrentWeapon();
 		if (weapon == nullptr || !weapon->isWithinAttackRange(obj, target))
 			return FALSE;
 	}
+	else
+	{
+		// Active aggressors may pull a mobile guard farther than an ordinary target,
+		// but never turn Guard into an unlimited Hunt.
+		Object *guardedObject = guardMachine->findTargetToGuardByID();
+		Coord3D center = guardedObject ? *guardedObject->getPosition() : *guardMachine->getPositionToGuard();
+		const PolygonTrigger *area = guardMachine->getAreaToGuard();
+		if (area)
+			area->getCenterPoint(&center);
 
-	AIGuardMachine *guardMachine = (AIGuardMachine *)thisState->getMachine();
+		const Real retaliationRange = AIGuardMachine::getStdGuardRange(obj) * 3.0f;
+		Coord3D delta;
+		delta.x = target->getPosition()->x - center.x;
+		delta.y = target->getPosition()->y - center.y;
+		delta.z = 0.0f;
+		if (delta.lengthSqr() > sqr(retaliationRange))
+		{
+			if (sharedThreat)
+				ai->friend_clearGuardThreat();
+			else
+				bmi->clearLastAttacker();
+			return FALSE;
+		}
+	}
+
 	guardMachine->setNemesisID(attackerID);
-	bmi->clearLastAttacker();
+	if (sharedThreat)
+		ai->friend_clearGuardThreat();
+	else
+		bmi->clearLastAttacker();
 	return TRUE;
 }
 
