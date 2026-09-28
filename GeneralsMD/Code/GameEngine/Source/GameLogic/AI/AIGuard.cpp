@@ -135,6 +135,12 @@ static Bool hasAttackedMeAndICanReturnFire( State *thisState, void* /*userData*/
 
 	Bool sharedThreat = FALSE;
 	ObjectID attackerID = bmi->getClearableLastAttacker();
+	if (attackerID != INVALID_ID &&
+			TheGameLogic->getFrame() >= bmi->getLastDamageTimestamp() + TheAI->getAiData()->m_guardChaseUnitFrames)
+	{
+		bmi->clearLastAttacker();
+		attackerID = INVALID_ID;
+	}
 	if (attackerID == INVALID_ID)
 	{
 		attackerID = ai->friend_getGuardThreatID();
