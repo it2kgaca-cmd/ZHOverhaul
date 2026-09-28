@@ -890,7 +890,7 @@ static void showReleaseCrashDialog(
 }
 
 // ----------------------------------------------------------------------------
-void ReleaseCrashWithLocation(const char *reason, const char *sourceFile, Int sourceLine, const char *functionName)
+void ReleaseCrashWithLocation(const char *reason, const char *sourceFile, int sourceLine, const char *functionName)
 {
 	if (!DX8Wrapper_IsWindowed && ApplicationHWnd)
 		ShowWindow(ApplicationHWnd, SW_HIDE);
