@@ -60,6 +60,16 @@ endif()
 # This disables a lot of warnings steering developers to use windows only functions/function names.
 if(MSVC)
     target_compile_definitions(core_config INTERFACE _CRT_NONSTDC_NO_WARNINGS _CRT_SECURE_NO_WARNINGS $<$<CONFIG:DEBUG>:_DEBUG_CRT>)
+
+    if(NOT IS_VS6_BUILD)
+        # Keep modern development builds quiet without hiding genuinely new diagnostics.
+        # These warning classes are pervasive, understood legacy compatibility noise:
+        #   C4018 - signed/unsigned comparisons in the 2003 codebase
+        #   C4996 - deliberately retained deprecated Win32 APIs used for compatibility
+        #   C5055 - C++20 enum/floating arithmetic deprecations in legacy game math
+        # Everything else is an error so a new warning cannot be buried in build output.
+        target_compile_options(core_config INTERFACE /W3 /WX /wd4018 /wd4996 /wd5055)
+    endif()
 endif()
 
 if(UNIX)
