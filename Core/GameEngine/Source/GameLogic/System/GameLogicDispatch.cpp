@@ -586,15 +586,19 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 			const Int finalLevel = vehicleLevel + levelsGained;
 			const Int selectedPriority = vehicleSelected ? 0 : 1;
 
-			if (bestVehicle == nullptr ||
-					selectedPriority < bestSelectedPriority ||
-					(selectedPriority == bestSelectedPriority &&
-						(wastedLevels < bestWastedLevels ||
-						(wastedLevels == bestWastedLevels &&
-							(finalLevel > bestFinalLevel ||
-							(finalLevel == bestFinalLevel &&
-								(distSqr < bestDistSqr ||
-								(distSqr == bestDistSqr && vehicle->getID() < bestVehicle->getID()))))))))
+			Bool betterVehicle = (bestVehicle == nullptr);
+			if (!betterVehicle && selectedPriority != bestSelectedPriority)
+				betterVehicle = selectedPriority < bestSelectedPriority;
+			else if (!betterVehicle && wastedLevels != bestWastedLevels)
+				betterVehicle = wastedLevels < bestWastedLevels;
+			else if (!betterVehicle && finalLevel != bestFinalLevel)
+				betterVehicle = finalLevel > bestFinalLevel;
+			else if (!betterVehicle && distSqr != bestDistSqr)
+				betterVehicle = distSqr < bestDistSqr;
+			else if (!betterVehicle)
+				betterVehicle = vehicle->getID() < bestVehicle->getID();
+
+			if (betterVehicle)
 			{
 				bestVehicle = vehicle;
 				bestSelectedPriority = selectedPriority;
