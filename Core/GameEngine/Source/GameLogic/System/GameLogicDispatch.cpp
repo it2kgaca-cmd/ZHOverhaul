@@ -560,7 +560,8 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 					continue;
 
 				ContainModuleInterface *contain = containerObj->getContain();
-				if (contain == nullptr || !contain->isValidContainerFor(passenger, FALSE))
+				if (contain == nullptr ||
+						!TheActionManager->canEnterObject(passenger, containerObj, CMD_FROM_PLAYER, DONT_CHECK_CAPACITY))
 					continue;
 
 				const Int slotsRequired = smartLoadSlotsRequired(passenger, contain);
