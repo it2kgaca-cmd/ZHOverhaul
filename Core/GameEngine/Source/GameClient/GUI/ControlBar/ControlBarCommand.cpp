@@ -873,6 +873,15 @@ void ControlBar::updateContextCommand()
 				break;
 		}
 
+		// Unit-build buttons must remain input-capable for standing-recipe RMB edits.
+		// LMB still runs canMakeUnit() in processCommandUI, so unaffordable immediate
+		// production remains blocked even though the window accepts right-clicks.
+		if (command->getCommandType() == GUI_COMMAND_UNIT_BUILD && pu &&
+				(availability == COMMAND_CANT_AFFORD || repeatActive))
+		{
+			win->winEnable(TRUE);
+		}
+
 		//Determine by the production type of this button, whether or not the created object
 		//will have a veterancy rank
 		if( command->getCommandType() != GUI_COMMAND_EXIT_CONTAINER )
@@ -905,11 +914,13 @@ void ControlBar::updateContextCommand()
 		// buttons look pressed, while the next recipe entry gets a scheme-colored border.
 		if( command->getCommandType() == GUI_COMMAND_UNIT_BUILD && pu )
 		{
-			if( repeatActive )
+			WinInstanceData *instData = win->winGetInstanceData();
+			if( instData )
 			{
-				WinInstanceData *instData = win->winGetInstanceData();
-				if( instData )
+				if( repeatActive )
 					BitSet( instData->m_state, WIN_STATE_SELECTED );
+				else
+					BitClear( instData->m_state, WIN_STATE_SELECTED );
 			}
 
 			setCommandBarBorder( win, command->getCommandButtonMappedBorderType() );
