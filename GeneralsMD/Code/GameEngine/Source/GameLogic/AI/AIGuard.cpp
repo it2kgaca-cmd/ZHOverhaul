@@ -117,7 +117,13 @@ static void prepareGuardWeapon(Object *obj)
 	}
 
 	if (preAimTarget)
-		ai->setTurretTargetObject(turret, preAimTarget, FALSE);
+	{
+		Coord3D intercept;
+		if (weapon->computePredictiveIntercept(obj, preAimTarget, &intercept))
+			ai->setTurretTargetPosition(turret, &intercept);
+		else
+			ai->setTurretTargetObject(turret, preAimTarget, FALSE);
+	}
 }
 
 
