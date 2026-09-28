@@ -1355,6 +1355,12 @@ void AIUpdateInterface::receiveTrafficPush(const Object *pusher)
 	if (!isIdle() || obj->isKindOf(KINDOF_IMMOBILE) || !isDoingGroundMovement())
 		return;
 
+	// A deployed weapon is an emplacement, not soft local traffic. Other mobile
+	// friendlies must route/yield around it until an explicit command causes it
+	// to pack and become mobile again.
+	if (obj->testStatus(OBJECT_STATUS_DEPLOYED))
+		return;
+
 	if (obj->testStatus(OBJECT_STATUS_IS_USING_ABILITY) || isBusy())
 		return;
 
@@ -1465,6 +1471,16 @@ Bool AIUpdateInterface::applyIdleTrafficDisplacement()
 	}
 
 	Object *obj = getObject();
+	if (obj && obj->testStatus(OBJECT_STATUS_DEPLOYED))
+	{
+		// If deployment happened after a traffic push was already accepted, cancel
+		// that displacement immediately rather than sliding the emplacement.
+		m_trafficDisplaced = FALSE;
+		m_trafficPushUntil = 0;
+		m_trafficReturnAfter = 0;
+		return FALSE;
+	}
+
 	const UnsignedInt now = TheGameLogic->getFrame();
 	Coord3D target;
 	Bool returning = FALSE;
