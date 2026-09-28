@@ -1956,7 +1956,7 @@ void Weapon::setClipPercentFull(Real percent, Bool allowReduction)
 		return;
 
 	Int ammo = REAL_TO_INT_FLOOR(m_template->getClipSize() * percent);
-	if (ammo > m_ammoInClip || (allowReduction && ammo < m_ammoInClip))
+	if (ammo > static_cast<Int>(m_ammoInClip) || (allowReduction && ammo < static_cast<Int>(m_ammoInClip)))
 	{
 		m_ammoInClip = ammo;
 		m_status = m_ammoInClip ? OUT_OF_AMMO : READY_TO_FIRE;
@@ -2389,7 +2389,7 @@ Bool Weapon::computePredictiveIntercept(const Object *source, const Object *targ
 
 	// Refuse pathological long-horizon solutions. Guard artillery should predict
 	// the next shot, not aim several seconds into speculative future motion.
-	if (t <= 0.0f || t > LOGICFRAMES_PER_SECOND * 4.0f)
+	if (t <= 0.0f || t > static_cast<Real>(LOGICFRAMES_PER_SECOND) * 4.0f)
 		return FALSE;
 
 	*outPos = *targetPos;
@@ -3017,7 +3017,8 @@ Int Weapon::getPreAttackDelay( const Object *source, const Object *victim ) cons
 	WeaponPrefireType type = m_template->getPrefireType();
 	if( type == PREFIRE_PER_CLIP )
 	{
-		if( m_template->getClipSize() > 0  &&  m_ammoInClip < m_template->getClipSize() )
+		if( m_template->getClipSize() > 0 &&
+				m_ammoInClip < static_cast<UnsignedInt>(m_template->getClipSize()) )
 			return 0;// I only delay once a clip, and this is not the first shot
 	}
 	else if( type == PREFIRE_PER_ATTACK )
@@ -3468,7 +3469,9 @@ void Weapon::crc( Xfer *xfer )
 #endif // DEBUG_CRC
 
 	// scatter targets unused
-	UnsignedShort scatterCount = m_scatterTargetsUnused.size();
+	DEBUG_ASSERTCRASH(m_scatterTargetsUnused.size() <= 0xffffu,
+		("Too many weapon scatter targets to serialize: %u", (UnsignedInt)m_scatterTargetsUnused.size()));
+	UnsignedShort scatterCount = static_cast<UnsignedShort>(m_scatterTargetsUnused.size());
 	xfer->xferUnsignedShort( &scatterCount );
 #ifdef DEBUG_CRC
 	if (doLogging)
@@ -3595,7 +3598,9 @@ void Weapon::xfer( Xfer *xfer )
 	xfer->xferInt( &m_numShotsForCurBarrel );
 
 	// scatter targets unused
-	UnsignedShort scatterCount = m_scatterTargetsUnused.size();
+	DEBUG_ASSERTCRASH(m_scatterTargetsUnused.size() <= 0xffffu,
+		("Too many weapon scatter targets to serialize: %u", (UnsignedInt)m_scatterTargetsUnused.size()));
+	UnsignedShort scatterCount = static_cast<UnsignedShort>(m_scatterTargetsUnused.size());
 	xfer->xferUnsignedShort( &scatterCount );
 	Int intData;
 	if( xfer->getXferMode() == XFER_SAVE )

@@ -231,7 +231,7 @@ ProductionUpdate::~ProductionUpdate()
 //-------------------------------------------------------------------------------------------------
 CanMakeType ProductionUpdate::canQueueUpgrade( const UpgradeTemplate *upgrade ) const
 {
-	if (m_productionCount >= getProductionUpdateModuleData()->m_maxQueueEntries)
+	if (m_productionCount >= static_cast<UnsignedInt>(getProductionUpdateModuleData()->m_maxQueueEntries))
 		return CANMAKE_QUEUE_FULL;
 
 	return CANMAKE_OK;
@@ -254,7 +254,7 @@ CanMakeType ProductionUpdate::canQueueCreateUnit( const ThingTemplate *unitType 
 		}
 	}
 
-	if (m_productionCount >= getProductionUpdateModuleData()->m_maxQueueEntries)
+	if (m_productionCount >= static_cast<UnsignedInt>(getProductionUpdateModuleData()->m_maxQueueEntries))
 		return CANMAKE_QUEUE_FULL;
 
 	return CANMAKE_OK;
@@ -383,7 +383,7 @@ Bool ProductionUpdate::queueUpgrade( const UpgradeTemplate *upgrade )
       (player->hasUpgradeComplete( upgrade ) || player->hasUpgradeInProduction( upgrade )) )
 		return FALSE;
 
-	if (m_productionCount >= getProductionUpdateModuleData()->m_maxQueueEntries)
+	if (m_productionCount >= static_cast<UnsignedInt>(getProductionUpdateModuleData()->m_maxQueueEntries))
 	{
 		DEBUG_CRASH(("Production Queue is full... how did we get here?"));
 		return FALSE;
@@ -479,7 +479,7 @@ Bool ProductionUpdate::queueCreateUnit( const ThingTemplate *unitType, Productio
 		}
 	}
 
-	if (m_productionCount >= getProductionUpdateModuleData()->m_maxQueueEntries)
+	if (m_productionCount >= static_cast<UnsignedInt>(getProductionUpdateModuleData()->m_maxQueueEntries))
 	{
 		DEBUG_CRASH(("Production Queue is full... how did we get here?"));
 		return FALSE;

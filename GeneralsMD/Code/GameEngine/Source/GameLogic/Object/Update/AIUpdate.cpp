@@ -1123,7 +1123,7 @@ UpdateSleepTime AIUpdateInterface::update()
 		else
 		{
 			UnsignedInt sleepForPathDelta = m_queueForPathFrame - now;
-			if (sleepForPathDelta < subMachineSleep)
+			if (sleepForPathDelta < static_cast<UnsignedInt>(subMachineSleep))
 				subMachineSleep = UPDATE_SLEEP(sleepForPathDelta);
 		}
 	}
@@ -3051,8 +3051,9 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 							{
 								Real dist = sqrtf(dSqr);
 								if (dist<1) dist = 1;
-								pos.x += 2*PATHFIND_CELL_SIZE_F*dx/(dist*LOGICFRAMES_PER_SECOND);
-								pos.y += 2*PATHFIND_CELL_SIZE_F*dy/(dist*LOGICFRAMES_PER_SECOND);
+								const Real logicFPS = static_cast<Real>(LOGICFRAMES_PER_SECOND);
+								pos.x += 2.0f * PATHFIND_CELL_SIZE_F * dx / (dist * logicFPS);
+								pos.y += 2.0f * PATHFIND_CELL_SIZE_F * dy / (dist * logicFPS);
 								if (onGround)
 									pos.z = TheTerrainLogic->getGroundHeight( pos.x, pos.y );
 								getObject()->setPosition(&pos);
