@@ -912,70 +912,40 @@ void ReleaseCrash(const char *reason)
 	ReleaseCrashWithLocation(reason, nullptr, 0, nullptr);
 }
 
-void ReleaseCrashLocalized(const AsciiString& p, const AsciiString& m)
+static void buildLocalizedCrashReason(const AsciiString& promptKey, const AsciiString& messageKey, AsciiString& outReason)
 {
-	if (!TheGameText) {
-		ReleaseCrash(m.str());
-		// This won't ever return
+	if (!TheGameText)
+	{
+		outReason.format("Localized fatal error. Prompt key: %s; Message key: %s",
+			promptKey.str(), messageKey.str());
 		return;
 	}
 
-	TriggerMiniDump();
+	UnicodeString prompt = TheGameText->fetch(promptKey);
+	UnicodeString message = TheGameText->fetch(messageKey);
+	AsciiString promptAscii;
+	AsciiString messageAscii;
+	promptAscii.translate(prompt);
+	messageAscii.translate(message);
 
-	UnicodeString prompt = TheGameText->fetch(p);
-	UnicodeString mesg = TheGameText->fetch(m);
+	outReason.format(
+		"Localized fatal error.\nPrompt: %s\nMessage: %s\nPrompt key: %s\nMessage key: %s",
+		promptAscii.str(), messageAscii.str(), promptKey.str(), messageKey.str());
+}
 
+void ReleaseCrashLocalizedWithLocation(
+	const AsciiString& p,
+	const AsciiString& m,
+	const char* sourceFile,
+	int sourceLine,
+	const char* functionName)
+{
+	AsciiString reason;
+	buildLocalizedCrashReason(p, m, reason);
+	ReleaseCrashWithLocation(reason.str(), sourceFile, sourceLine, functionName);
+}
 
-	/// do additional reporting on the crash, if possible
-
-	if (!DX8Wrapper_IsWindowed) {
-		if (ApplicationHWnd) {
-			ShowWindow(ApplicationHWnd, SW_HIDE);
-		}
-	}
-
-	if (!(TheGlobalData && TheGlobalData->m_headless))
-	{
-		::MessageBoxW(nullptr, mesg.str(), prompt.str(), MB_OK | MB_SYSTEMMODAL | MB_ICONERROR);
-	}
-
-	char prevbuf[ _MAX_PATH ];
-	char curbuf[ _MAX_PATH ];
-
-	strlcpy(prevbuf, TheGlobalData->getPath_UserData().str(), ARRAY_SIZE(prevbuf));
-	strlcat(prevbuf, RELEASECRASH_FILE_NAME_PREV, ARRAY_SIZE(prevbuf));
-	strlcpy(curbuf, TheGlobalData->getPath_UserData().str(), ARRAY_SIZE(curbuf));
-	strlcat(curbuf, RELEASECRASH_FILE_NAME, ARRAY_SIZE(curbuf));
-
- 	remove(prevbuf);
-	if (rename(curbuf, prevbuf) != 0)
-	{
-#ifdef DEBUG_LOGGING
-		DebugLog("Warning: Could not rename buffer file '%s' to '%s'. Will remove instead", curbuf, prevbuf);
-#endif
-		if (remove(curbuf) != 0)
-		{
-#ifdef DEBUG_LOGGING
-			DebugLog("Warning: Failed to remove file '%s'", curbuf);
-#endif
-		}
-	}
-
-	theReleaseCrashLogFile = fopen(curbuf, "w");
-	if (theReleaseCrashLogFile)
-	{
-		fprintf(theReleaseCrashLogFile, "Release Crash at %s; Reason %ls\n", getCurrentTimeString(), mesg.str());
-
-		const int STACKTRACE_SIZE	= 12;
-		const int STACKTRACE_SKIP = 6;
-		void* stacktrace[STACKTRACE_SIZE];
-		::FillStackAddresses(stacktrace, STACKTRACE_SIZE, STACKTRACE_SKIP);
-		::StackDumpFromAddresses(stacktrace, STACKTRACE_SIZE, releaseCrashLogOutput);
-
-		fflush(theReleaseCrashLogFile);
-		fclose(theReleaseCrashLogFile);
-		theReleaseCrashLogFile = nullptr;
-	}
-
-	_exit(1);
+void ReleaseCrashLocalized(const AsciiString& p, const AsciiString& m)
+{
+	ReleaseCrashLocalizedWithLocation(p, m, nullptr, 0, nullptr);
 }
