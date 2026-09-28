@@ -685,10 +685,20 @@ Bool WeaponTemplate::shouldProjectileCollideWith(
 
  	}
 
-	// Friendly structures should not act as accidental projectile shields. This is deliberately
-	// after the intended-victim check above so Ctrl-force-attacking your own/allied building still works.
+	// Red Alert 2-style garrison fire: a projectile launched by an occupant should clear the
+	// surrounding fortification/building clutter just like the garrison LOS check does. The intended
+	// victim check above still wins, so a structure that is actually being targeted is hit normally.
 	if (projectileLauncher && thingWeCollidedWith->isKindOf(KINDOF_STRUCTURE))
 	{
+		const Object *launcherContainer = projectileLauncher->getContainedBy();
+		ContainModuleInterface *launcherContain = launcherContainer ? launcherContainer->getContain() : nullptr;
+		if (launcherContain && launcherContain->isGarrisonable() &&
+				launcherContain->isPassengerAllowedToFire(projectileLauncher->getID()))
+		{
+			return false;
+		}
+
+		// Friendly structures should not act as accidental projectile shields for anyone else either.
 		const Player *launcherPlayer = projectileLauncher->getControllingPlayer();
 		const Player *structurePlayer = thingWeCollidedWith->getControllingPlayer();
 		if ((launcherPlayer && launcherPlayer == structurePlayer) ||
