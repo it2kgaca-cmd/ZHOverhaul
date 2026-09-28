@@ -604,6 +604,13 @@ public:
 
 	Bool canAutoAcquire() const { return getAIUpdateModuleData()->m_autoAcquireEnemiesWhenIdle; }
 
+	// Guard-specific threat handoff. Nearby-friend retaliation uses this instead
+	// of destroying an explicit Guard order with the legacy GuardRetaliate state.
+	void friend_setGuardThreat(ObjectID threatID, UnsignedInt expireFrame);
+	ObjectID friend_getGuardThreatID() const { return m_guardThreatID; }
+	UnsignedInt friend_getGuardThreatExpireFrame() const { return m_guardThreatExpireFrame; }
+	void friend_clearGuardThreat() { m_guardThreatID = INVALID_ID; m_guardThreatExpireFrame = 0; }
+
   Bool canAutoAcquireWhileStealthed() const ;
 
 
@@ -725,6 +732,8 @@ private:
 	Coord3D								m_locationToGuard;
 	ObjectID							m_objectToGuard;
 	const PolygonTrigger*	m_areaToGuard;
+	ObjectID							m_guardThreatID;
+	UnsignedInt					m_guardThreatExpireFrame;
 
 	// Attack Info --------------------------------------------------------------------------------------------
 	const AttackPriorityInfo*	m_attackInfo;
