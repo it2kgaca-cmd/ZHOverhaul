@@ -243,28 +243,38 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 					break;
 				}
 
-				// Resolve the same local magnetic transform used by the live ghost.
-				// The authoritative placement therefore lands exactly where the green
-				// preview showed it, rather than falling back to the raw mouse anchor.
+				// Place exactly the transform the player is looking at. The preview owns
+				// sticky/hysteresis state, so rerunning a stateless search here could pick
+				// the other side of an obstruction on the click frame.
 				if (!isLineBuild)
 				{
-					const UnsignedInt magneticOptions =
-						BuildAssistant::USE_QUICK_PATHFIND |
-						BuildAssistant::TERRAIN_RESTRICTIONS |
-						BuildAssistant::CLEAR_PATH |
-						BuildAssistant::NO_OBJECT_OVERLAP |
-						BuildAssistant::SHROUD_REVEALED |
-						BuildAssistant::IGNORE_STEALTHED |
-						BuildAssistant::FAIL_STEALTHED_WITHOUT_FEEDBACK;
-
-					Coord3D resolvedWorld = worldStart;
-					Real resolvedAngle = angle;
-					if (TheBuildAssistant->findNearestLegalPlacement(
-							&worldStart, build, angle, magneticOptions, builderObj, nullptr,
-							&resolvedWorld, &resolvedAngle))
+					Coord3D previewWorld;
+					Real previewAngle = angle;
+					if (TheInGameUI->getPlacementResolvedTransform(&previewWorld, &previewAngle))
 					{
-						worldStart = resolvedWorld;
-						angle = resolvedAngle;
+						worldStart = previewWorld;
+						angle = previewAngle;
+					}
+					else
+					{
+						const UnsignedInt magneticOptions =
+							BuildAssistant::USE_QUICK_PATHFIND |
+							BuildAssistant::TERRAIN_RESTRICTIONS |
+							BuildAssistant::CLEAR_PATH |
+							BuildAssistant::NO_OBJECT_OVERLAP |
+							BuildAssistant::SHROUD_REVEALED |
+							BuildAssistant::IGNORE_STEALTHED |
+							BuildAssistant::FAIL_STEALTHED_WITHOUT_FEEDBACK;
+
+						Coord3D resolvedWorld = worldStart;
+						Real resolvedAngle = angle;
+						if (TheBuildAssistant->findNearestLegalPlacement(
+								&worldStart, build, angle, magneticOptions, builderObj, nullptr,
+								&resolvedWorld, &resolvedAngle))
+						{
+							worldStart = resolvedWorld;
+							angle = resolvedAngle;
+						}
 					}
 				}
 
