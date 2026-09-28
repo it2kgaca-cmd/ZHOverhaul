@@ -67,7 +67,7 @@
 // DEFINES ////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 enum{
-	commandBarSizeOffset = 0
+	COMMAND_BAR_SIZE_OFFSET = 0
 };
 
 const FieldParse ControlBarSchemeManager::m_controlBarSchemeFieldParseTable[] =
