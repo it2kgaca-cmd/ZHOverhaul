@@ -223,6 +223,16 @@ static Bool hasAttackedMeAndICanReturnFire( State *thisState, void* /*userData*/
 	}
 
 	guardMachine->setNemesisID(attackerID);
+#if defined(RTS_PROFILE_TRACY)
+	{
+		AsciiString message;
+		message.format("GuardThreatEngage frame=%u guard=%u:%s threat=%u:%s shared=%d stationary=%d noPursuit=%d",
+			TheGameLogic->getFrame(), obj->getID(), obj->getTemplate()->getName().str(),
+			attackerID, target->getTemplate()->getName().str(), sharedThreat ? 1 : 0,
+			stationaryArtillery ? 1 : 0, noPursuit ? 1 : 0);
+		PROFILER_MSG(message.str(), message.getLength());
+	}
+#endif
 	if (sharedThreat)
 		ai->friend_clearGuardThreat();
 	else
