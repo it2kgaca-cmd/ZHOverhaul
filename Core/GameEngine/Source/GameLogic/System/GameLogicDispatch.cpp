@@ -2023,8 +2023,10 @@ bool GameLogic::onToggleRepeatUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupP
 	VecObjectID selectedObjects = selection->getAllIDs();
 	std::sort(selectedObjects.begin(), selectedObjects.end());
 
-	Bool anyActive = FALSE;
-	Bool anyAddable = FALSE;
+	// Group toggle semantics: mixed state converges to ON. Only when every
+	// eligible selected producer already has this recipe does RMB remove it.
+	Bool foundEligible = FALSE;
+	Bool shouldAdd = FALSE;
 	for (VecObjectID::const_iterator it = selectedObjects.begin(); it != selectedObjects.end(); ++it)
 	{
 		Object *producer = TheGameLogic->findObjectByID(*it);
@@ -2035,14 +2037,18 @@ bool GameLogic::onToggleRepeatUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupP
 		if (pu == nullptr)
 			continue;
 
-		if (pu->isUnitInRepeatQueue(whatToCreate))
-			anyActive = TRUE;
-		else if (TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate) &&
-				pu->getRepeatProductionCount() < MAX_REPEAT_PRODUCTION_ENTRIES)
-			anyAddable = TRUE;
+		const Bool hasRecipe = pu->isUnitInRepeatQueue(whatToCreate);
+		const Bool canAdd = TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate) &&
+				pu->getRepeatProductionCount() < MAX_REPEAT_PRODUCTION_ENTRIES;
+		if (!hasRecipe && !canAdd)
+			continue;
+
+		foundEligible = TRUE;
+		if (!hasRecipe && canAdd)
+			shouldAdd = TRUE;
 	}
 
-	if (!anyActive && !anyAddable)
+	if (!foundEligible)
 		return false;
 
 	Bool changedAny = FALSE;
@@ -2057,16 +2063,17 @@ bool GameLogic::onToggleRepeatUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupP
 			continue;
 
 		const Bool hasRecipe = pu->isUnitInRepeatQueue(whatToCreate);
-		if (anyActive)
+		const Bool canAdd = TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate) &&
+				pu->getRepeatProductionCount() < MAX_REPEAT_PRODUCTION_ENTRIES;
+
+		if (shouldAdd)
 		{
-			// Group check-like semantics: a latched group button always means RMB
-			// removes this recipe everywhere it is armed, regardless of money/prereqs.
-			if (hasRecipe)
+			if (!hasRecipe && canAdd)
 				changedAny |= pu->toggleRepeatUnit(whatToCreate);
 		}
-		else if (TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate) &&
-				pu->getRepeatProductionCount() < MAX_REPEAT_PRODUCTION_ENTRIES)
+		else if (hasRecipe)
 		{
+			// Removal stays legal even if money/prerequisites changed after arming.
 			changedAny |= pu->toggleRepeatUnit(whatToCreate);
 		}
 	}
