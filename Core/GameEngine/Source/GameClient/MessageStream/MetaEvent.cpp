@@ -931,6 +931,17 @@ void MetaMap::generateMetaMap()
 		}
 	}
 	{
+		// Keep Smart Load usable even when an older runtime CommandMap is staged next to the executable.
+		// Explicit INI/user mappings still win because this only fills an unmapped action.
+		MetaMapRec *map = getMetaMapRec(GameMessage::MSG_META_SMART_LOAD);
+		if (map->m_key == MK_NONE) {
+			map->m_key = MK_V;
+			map->m_transition = DOWN;
+			map->m_modState = CTRL;
+			map->m_usableIn = COMMANDUSABLE_GAME;
+		}
+	}
+	{
 		MetaMapRec *map = getMetaMapRec(GameMessage::MSG_META_ALT_CAMERA_ROTATE_LEFT);
 		if (map->m_key == MK_NONE) {
 			map->m_key = MK_KP4;

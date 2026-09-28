@@ -421,8 +421,25 @@ static Bool smartLoadIsPilot(Object *obj)
 
 static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *issuingPlayer)
 {
+#if defined(RTS_PROFILE_TRACY)
+	{
+		const UnsignedInt selectedCount = selection ? static_cast<UnsignedInt>(selection->getAllIDs().size()) : 0;
+		AsciiString message;
+		message.format("SmartLoadInvoke frame=%u player=%d selected=%u",
+			TheGameLogic->getFrame(), issuingPlayer ? issuingPlayer->getPlayerIndex() : -1, selectedCount);
+		PROFILER_MSG(message.str(), message.getLength());
+	}
+#endif
+
 	if (selection == nullptr || issuingPlayer == nullptr || selection->isEmpty())
+	{
+#if defined(RTS_PROFILE_TRACY)
+		AsciiString message;
+		message.format("SmartLoadResult frame=%u assigned=0 reason=INVALID_SELECTION", TheGameLogic->getFrame());
+		PROFILER_MSG(message.str(), message.getLength());
+#endif
 		return FALSE;
+	}
 
 	VecObjectID selected = selection->getAllIDs();
 	std::sort(selected.begin(), selected.end());
@@ -462,7 +479,15 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 	}
 
 	if (passengerIDs.empty())
+	{
+#if defined(RTS_PROFILE_TRACY)
+		AsciiString message;
+		message.format("SmartLoadResult frame=%u assigned=0 reason=NO_PASSENGERS selected=%u",
+			TheGameLogic->getFrame(), static_cast<UnsignedInt>(selected.size()));
+		PROFILER_MSG(message.str(), message.getLength());
+#endif
 		return FALSE;
+	}
 
 	// Add nearby compatible container candidates. Selected destinations always outrank these.
 	// This intentionally scans only on explicit hotkey use, not every frame.
@@ -539,6 +564,10 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 	// Reserve that shared capacity once per player rather than independently per entrance.
 	std::map<Int, Int> reservedTunnelSlotsByPlayer;
 	Bool assignedAny = FALSE;
+	Int containPairsChecked = 0;
+	Int enterRejected = 0;
+	Int slotRejected = 0;
+	Int capacityRejected = 0;
 
 	// Pilots are special: their valid "enter" target can be a normal ground vehicle
 	// with no Contain module at all. Match them first so a valuable pilot is not
@@ -671,13 +700,22 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 					continue;
 
 				ContainModuleInterface *contain = containerObj->getContain();
-				if (contain == nullptr ||
-						!TheActionManager->canEnterObject(passenger, containerObj, CMD_FROM_PLAYER, DONT_CHECK_CAPACITY))
+				if (contain == nullptr)
 					continue;
+
+				++containPairsChecked;
+				if (!TheActionManager->canEnterObject(passenger, containerObj, CMD_FROM_PLAYER, DONT_CHECK_CAPACITY))
+				{
+					++enterRejected;
+					continue;
+				}
 
 				const Int slotsRequired = smartLoadSlotsRequired(passenger, contain);
 				if (slotsRequired <= 0)
+				{
+					++slotRejected;
 					continue;
+				}
 
 				Int availableCapacity = candidate.remainingCapacity;
 				if (contain->isTunnelContain())
@@ -688,7 +726,10 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 					availableCapacity -= reservedTunnelSlotsByPlayer[tunnelOwner->getPlayerIndex()];
 				}
 				if (availableCapacity < slotsRequired)
+				{
+					++capacityRejected;
 					continue;
+				}
 
 				// Selected destination first; then our nearby transports/tunnels; then legal
 				// nearby garrisons. Distance and object ID provide deterministic tie breaks.
@@ -743,6 +784,17 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 			}
 		}
 	}
+
+#if defined(RTS_PROFILE_TRACY)
+	{
+		AsciiString message;
+		message.format("SmartLoadResult frame=%u assigned=%d passengers=%u containers=%u pairs=%d enterRejected=%d slotRejected=%d capacityRejected=%d",
+			TheGameLogic->getFrame(), assignedAny ? 1 : 0,
+			static_cast<UnsignedInt>(passengerIDs.size()), static_cast<UnsignedInt>(containers.size()),
+			containPairsChecked, enterRejected, slotRejected, capacityRejected);
+		PROFILER_MSG(message.str(), message.getLength());
+	}
+#endif
 
 	return assignedAny;
 }
