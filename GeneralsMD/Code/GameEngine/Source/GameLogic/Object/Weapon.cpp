@@ -61,6 +61,7 @@
 #include "GameLogic/Module/BehaviorModule.h"
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/ContainModule.h"
+#include "GameLogic/Module/DumbProjectileBehavior.h"
 #include "GameLogic/Module/LaserUpdate.h"
 #include "GameLogic/Module/UpdateModule.h"
 #include "GameLogic/Module/SpecialPowerCompletionDie.h"
@@ -2312,6 +2313,90 @@ Bool Weapon::isWithinAttackRange(const Object *source, const Object *target) con
 		return true;
 	}
 	return false;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool Weapon::computePredictiveIntercept(const Object *source, const Object *target, Coord3D *outPos) const
+{
+	if (source == nullptr || target == nullptr || outPos == nullptr || m_template == nullptr)
+		return FALSE;
+
+	const ThingTemplate *projectileTemplate = m_template->getProjectileTemplate();
+	const Real projectileSpeed = m_template->getWeaponSpeed();
+	if (projectileTemplate == nullptr || projectileSpeed <= 0.0f)
+		return FALSE;
+
+	// Only lead projectiles that explicitly use DumbProjectileBehavior and have
+	// no in-flight path correction. Tracking/homing projectiles keep their native
+	// target-object behavior and must not be double-led.
+	const ModuleInfo& modules = projectileTemplate->getBehaviorModuleInfo();
+	const DumbProjectileBehaviorModuleData *dumbData = nullptr;
+	for (Int i = 0; i < modules.getCount(); ++i)
+	{
+		if (modules.getNthName(i).compareNoCase("DumbProjectileBehavior") == 0)
+		{
+			dumbData = static_cast<const DumbProjectileBehaviorModuleData *>(modules.getNthData(i));
+			break;
+		}
+	}
+	if (dumbData == nullptr || dumbData->m_flightPathAdjustDistPerFrame > 0.0f)
+		return FALSE;
+
+	const PhysicsBehavior *physics = target->getPhysics();
+	if (physics == nullptr)
+		return FALSE;
+
+	const Coord3D *targetVelocity = physics->getVelocity();
+	if (targetVelocity == nullptr)
+		return FALSE;
+
+	const Coord3D *sourcePos = source->getPosition();
+	const Coord3D *targetPos = target->getPosition();
+	const Real rx = targetPos->x - sourcePos->x;
+	const Real ry = targetPos->y - sourcePos->y;
+	const Real vx = targetVelocity->x;
+	const Real vy = targetVelocity->y;
+
+	// Solve |R + Vt| = projectileSpeed * t in the horizontal plane.
+	const Real a = vx * vx + vy * vy - projectileSpeed * projectileSpeed;
+	const Real b = 2.0f * (rx * vx + ry * vy);
+	const Real cc = rx * rx + ry * ry;
+	const Real EPSILON = 0.000001f;
+	Real t = -1.0f;
+
+	if (fabsf(a) < EPSILON)
+	{
+		if (fabsf(b) < EPSILON)
+			return FALSE;
+		t = -cc / b;
+	}
+	else
+	{
+		const Real disc = b * b - 4.0f * a * cc;
+		if (disc < 0.0f)
+			return FALSE;
+
+		const Real root = sqrtf(disc);
+		const Real t1 = (-b - root) / (2.0f * a);
+		const Real t2 = (-b + root) / (2.0f * a);
+		if (t1 > 0.0f && t2 > 0.0f)
+			t = min(t1, t2);
+		else if (t1 > 0.0f)
+			t = t1;
+		else if (t2 > 0.0f)
+			t = t2;
+	}
+
+	// Refuse pathological long-horizon solutions. Guard artillery should predict
+	// the next shot, not aim several seconds into speculative future motion.
+	if (t <= 0.0f || t > LOGICFRAMES_PER_SECOND * 4.0f)
+		return FALSE;
+
+	*outPos = *targetPos;
+	outPos->x += targetVelocity->x * t;
+	outPos->y += targetVelocity->y * t;
+	outPos->z += targetVelocity->z * t;
+	return TRUE;
 }
 
 //-------------------------------------------------------------------------------------------------
