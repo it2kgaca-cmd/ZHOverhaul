@@ -610,6 +610,7 @@ public:
 		MSG_TOGGLE_REPEAT_UNIT_CREATE,						///< Toggle a unit in the selected factory's standing repeat recipe.
 		MSG_RESUME_NEAREST_CONSTRUCTION,					///< selected free dozers claim nearest resumable construction sites
 		MSG_SMART_LOAD,										///< selected units deterministically enter compatible transports/garrisons
+		MSG_FORCE_ATTACK_TARGET_SET,						///< distribute selected attackers across an explicit set of force-attack targets
 
 		MSG_BEGIN_DEBUG_NETWORK_MESSAGES = 1900,		///< network messages that exist only in debug/internal builds. all grouped separately.
 

@@ -360,6 +360,177 @@ static Bool assignSelectedBuildersToNearestConstruction(AIGroup *selection, Play
 }
 
 // ------------------------------------------------------------------------------------------------
+// Ctrl-box force attack. The target rectangle is resolved on the client into explicit object IDs;
+// assignment is performed here from synchronized world state so replay/network behavior is stable.
+// ------------------------------------------------------------------------------------------------
+static Bool forceAttackMemberCanAttackTarget(Object *member, Object *target)
+{
+	if (member == nullptr || target == nullptr || member->isEffectivelyDead() || target->isEffectivelyDead())
+		return FALSE;
+
+	CanAttackResult direct = member->getAbleToAttackSpecificObject(ATTACK_NEW_TARGET_FORCED, target, CMD_FROM_PLAYER);
+	if (direct == ATTACKRESULT_POSSIBLE || direct == ATTACKRESULT_POSSIBLE_AFTER_MOVING)
+		return TRUE;
+
+	// Selected firing structures (civilian garrisons, bunkers, firebases, etc.) delegate attacks
+	// to their contained passengers rather than carrying the passengers in the selected AIGroup.
+	ContainModuleInterface *contain = member->getContain();
+	if (contain == nullptr || !contain->isPassengerAllowedToFire())
+		return FALSE;
+
+	const ContainedItemsList *items = contain->getContainedItemsList();
+	if (items == nullptr)
+		return FALSE;
+
+	for (ContainedItemsList::const_iterator it = items->begin(); it != items->end(); ++it)
+	{
+		Object *passenger = *it;
+		if (passenger == nullptr || passenger->isEffectivelyDead())
+			continue;
+		CanAttackResult result = passenger->getAbleToAttackSpecificObject(ATTACK_NEW_TARGET_FORCED, target, CMD_FROM_PLAYER);
+		if (result == ATTACKRESULT_POSSIBLE || result == ATTACKRESULT_POSSIBLE_AFTER_MOVING)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static Bool assignSelectedUnitsToForceAttackTargets(AIGroup *selection, const GameMessage *msg)
+{
+	if (selection == nullptr || selection->isEmpty() || msg == nullptr || msg->getArgumentCount() == 0)
+		return FALSE;
+
+	VecObjectID attackerIDs = selection->getAllIDs();
+	std::sort(attackerIDs.begin(), attackerIDs.end());
+
+	std::vector<ObjectID> targetIDs;
+	for (Int arg = 0; arg < msg->getArgumentCount(); ++arg)
+	{
+		if (msg->getArgumentDataType(arg) != ARGUMENTDATATYPE_OBJECTID)
+			continue;
+		const ObjectID id = msg->getArgument(arg)->objectID;
+		if (id == INVALID_ID || std::binary_search(attackerIDs.begin(), attackerIDs.end(), id))
+			continue;
+		Object *target = TheGameLogic->findObjectByID(id);
+		if (target == nullptr || target->isEffectivelyDead() || target->isOffMap() || target->isContained())
+			continue;
+		targetIDs.push_back(id);
+	}
+
+	std::sort(targetIDs.begin(), targetIDs.end());
+	targetIDs.erase(std::unique(targetIDs.begin(), targetIDs.end()), targetIDs.end());
+	if (targetIDs.empty())
+		return FALSE;
+
+	std::vector<Int> attackerTarget(attackerIDs.size(), -1);
+	std::vector<Bool> attackerUsed(attackerIDs.size(), FALSE);
+
+	// First give as many targets as possible at least one capable attacker. Target/object IDs and
+	// distance tie-breaks make the assignment deterministic on every peer.
+	for (Int targetIndex = 0; targetIndex < (Int)targetIDs.size(); ++targetIndex)
+	{
+		Object *target = TheGameLogic->findObjectByID(targetIDs[targetIndex]);
+		Int bestAttacker = -1;
+		Real bestDistance = 1.0e30f;
+		ObjectID bestID = INVALID_ID;
+		for (Int attackerIndex = 0; attackerIndex < (Int)attackerIDs.size(); ++attackerIndex)
+		{
+			if (attackerUsed[attackerIndex])
+				continue;
+			Object *member = TheGameLogic->findObjectByID(attackerIDs[attackerIndex]);
+			if (!forceAttackMemberCanAttackTarget(member, target))
+				continue;
+			const Real distance = ThePartitionManager->getDistanceSquared(member, target, FROM_CENTER_2D);
+			if (bestAttacker < 0 || distance < bestDistance ||
+					(distance == bestDistance && member->getID() < bestID))
+			{
+				bestAttacker = attackerIndex;
+				bestDistance = distance;
+				bestID = member->getID();
+			}
+		}
+		if (bestAttacker >= 0)
+		{
+			attackerUsed[bestAttacker] = TRUE;
+			attackerTarget[bestAttacker] = targetIndex;
+		}
+	}
+
+	// Remaining attackers reinforce their nearest target that they can actually force-attack.
+	for (Int attackerIndex = 0; attackerIndex < (Int)attackerIDs.size(); ++attackerIndex)
+	{
+		if (attackerUsed[attackerIndex])
+			continue;
+		Object *member = TheGameLogic->findObjectByID(attackerIDs[attackerIndex]);
+		Int bestTarget = -1;
+		Real bestDistance = 1.0e30f;
+		ObjectID bestID = INVALID_ID;
+		for (Int targetIndex = 0; targetIndex < (Int)targetIDs.size(); ++targetIndex)
+		{
+			Object *target = TheGameLogic->findObjectByID(targetIDs[targetIndex]);
+			if (!forceAttackMemberCanAttackTarget(member, target))
+				continue;
+			const Real distance = ThePartitionManager->getDistanceSquared(member, target, FROM_CENTER_2D);
+			if (bestTarget < 0 || distance < bestDistance ||
+					(distance == bestDistance && target->getID() < bestID))
+			{
+				bestTarget = targetIndex;
+				bestDistance = distance;
+				bestID = target->getID();
+			}
+		}
+		attackerTarget[attackerIndex] = bestTarget;
+	}
+
+	Bool assignedAny = FALSE;
+	for (Int targetIndex = 0; targetIndex < (Int)targetIDs.size(); ++targetIndex)
+	{
+#if RETAIL_COMPATIBLE_AIGROUP
+		AIGroup *targetGroup = TheAI->createGroup();
+#else
+		AIGroupPtr targetGroup = TheAI->createGroup();
+#endif
+		for (Int attackerIndex = 0; attackerIndex < (Int)attackerIDs.size(); ++attackerIndex)
+		{
+			if (attackerTarget[attackerIndex] != targetIndex)
+				continue;
+			Object *member = TheGameLogic->findObjectByID(attackerIDs[attackerIndex]);
+			if (member)
+				targetGroup->add(member);
+		}
+
+		if (!targetGroup->isEmpty())
+		{
+			Object *target = TheGameLogic->findObjectByID(targetIDs[targetIndex]);
+			if (target)
+			{
+				targetGroup->releaseWeaponLockForGroup(LOCKED_TEMPORARILY);
+				targetGroup->groupForceAttackObject(target, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER);
+				assignedAny = TRUE;
+			}
+		}
+#if RETAIL_COMPATIBLE_AIGROUP
+		TheAI->destroyGroup(targetGroup);
+#endif
+	}
+
+#if defined(RTS_PROFILE_TRACY)
+	{
+		Int assignmentCount = 0;
+		for (std::vector<Int>::const_iterator it = attackerTarget.begin(); it != attackerTarget.end(); ++it)
+			if (*it >= 0)
+				++assignmentCount;
+		AsciiString message;
+		message.format("ForceAttackTargetSet frame=%u attackers=%u targets=%u assignments=%d",
+			TheGameLogic->getFrame(), static_cast<UnsignedInt>(attackerIDs.size()),
+			static_cast<UnsignedInt>(targetIDs.size()), assignmentCount);
+		PROFILER_MSG(message.str(), message.getLength());
+	}
+#endif
+
+	return assignedAny;
+}
+
+// ------------------------------------------------------------------------------------------------
 // Smart Load / Auto Garrison.
 // The command is synchronized and derives every assignment deterministically from the selected
 // group plus current world state. Capacity is reserved here before issuing any enter orders so
@@ -1271,6 +1442,15 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			assignSelectedUnitsToSmartContainers(currentlySelectedGroup, msgPlayer);
 #else
 			assignSelectedUnitsToSmartContainers(currentlySelectedGroup.Peek(), msgPlayer);
+#endif
+			break;
+		}
+		case GameMessage::MSG_FORCE_ATTACK_TARGET_SET:
+		{
+#if RETAIL_COMPATIBLE_AIGROUP
+			assignSelectedUnitsToForceAttackTargets(currentlySelectedGroup, msg);
+#else
+			assignSelectedUnitsToForceAttackTargets(currentlySelectedGroup.Peek(), msg);
 #endif
 			break;
 		}

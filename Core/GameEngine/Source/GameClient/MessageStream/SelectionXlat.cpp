@@ -201,6 +201,33 @@ Bool CanSelectDrawable( const Drawable *draw, Bool dragSelecting )
 }
 
 //-----------------------------------------------------------------------------
+static Bool addForceAttackBoxTarget(Drawable *draw, void *userData)
+{
+	std::vector<ObjectID> *targets = static_cast<std::vector<ObjectID>*>(userData);
+	Object *obj = draw ? draw->getObject() : nullptr;
+	if (targets == nullptr || obj == nullptr)
+		return FALSE;
+
+	// Ctrl-box is a targeting gesture, not a detection exploit.
+	if (draw->getFullyObscuredByShroud() || draw->isDrawableEffectivelyHidden())
+		return FALSE;
+	if (obj->isEffectivelyDead() || obj->isOffMap() || obj->isContained())
+		return FALSE;
+	if (obj->testStatus(OBJECT_STATUS_MASKED))
+		return FALSE;
+
+	// Do not make the selected attackers target themselves when the target rectangle overlaps them.
+	if (draw->isSelected())
+		return FALSE;
+
+	if (!obj->isKindOf(KINDOF_SELECTABLE) && !obj->isKindOf(KINDOF_FORCEATTACKABLE))
+		return FALSE;
+
+	targets->push_back(obj->getID());
+	return TRUE;
+}
+
+//-----------------------------------------------------------------------------
 static Bool canSelectWrapper( Drawable *draw, void *userData )
 {
 	Bool dragSelecting = *((Bool *)userData);
@@ -730,6 +757,33 @@ GameMessageDisposition SelectionTranslator::onMouseLeftClick(MAYBE_UNUSED const 
 	// If there aren't then this click should move forward.
 	IRegion2D selectionRegion = msg->getArgument(0)->pixelRegion;
 	Bool isPoint = (selectionRegion.height() == 0 && selectionRegion.width() == 0);
+
+	// Ctrl-click retains the normal force-attack command. Ctrl-drag, however, treats the
+	// rectangle as an explicit target set for the units that were already selected.
+	if (!isPoint && TheInGameUI->isInForceAttackMode() &&
+			TheInGameUI->getSelectCount() > 0 && TheInGameUI->areSelectedObjectsControllable())
+	{
+		std::vector<ObjectID> targetIDs;
+		TheTacticalView->iterateDrawablesInRegion(&selectionRegion, addForceAttackBoxTarget, &targetIDs);
+		std::sort(targetIDs.begin(), targetIDs.end());
+		targetIDs.erase(std::unique(targetIDs.begin(), targetIDs.end()), targetIDs.end());
+
+		// Keep one command comfortably below the legacy network packet size. A 64-object target
+		// box is already far beyond practical screen density in ordinary Zero Hour play.
+		const size_t MAX_FORCE_ATTACK_BOX_TARGETS = 64;
+		if (targetIDs.size() > MAX_FORCE_ATTACK_BOX_TARGETS)
+			targetIDs.resize(MAX_FORCE_ATTACK_BOX_TARGETS);
+
+		if (!targetIDs.empty())
+		{
+			GameMessage *attackSet = TheMessageStream->appendMessage(GameMessage::MSG_FORCE_ATTACK_TARGET_SET);
+			for (std::vector<ObjectID>::const_iterator it = targetIDs.begin(); it != targetIDs.end(); ++it)
+				attackSet->appendObjectIDArgument(*it);
+		}
+
+		// Even an empty Ctrl-box is consumed so the current army selection remains untouched.
+		return DESTROY_MESSAGE;
+	}
 
 	DrawableList drawablesThatWillSelect;
 	PickDrawableStruct pds;
