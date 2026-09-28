@@ -8549,7 +8549,8 @@ static void xferListAsciiString( Xfer *xfer, ListAsciiString *list )
 	xfer->xferVersion( &version, currentVersion );
 
 	// size of list
-	UnsignedShort count = list->size();
+	DEBUG_ASSERTCRASH(list->size() <= 0xffffu, ("Script list exceeds 16-bit save format capacity"));
+	UnsignedShort count = static_cast<UnsignedShort>(list->size());
 	xfer->xferUnsignedShort( &count );
 
 	// list data
@@ -8612,7 +8613,8 @@ static void xferListAsciiStringUINT( Xfer *xfer, ListAsciiStringUINT *list )
 	xfer->xferVersion( &version, currentVersion );
 
 	// size of list
-	UnsignedShort count = list->size();
+	DEBUG_ASSERTCRASH(list->size() <= 0xffffu, ("Script list exceeds 16-bit save format capacity"));
+	UnsignedShort count = static_cast<UnsignedShort>(list->size());
 	xfer->xferUnsignedShort( &count );
 
 	// list data
@@ -8687,7 +8689,8 @@ static void xferListAsciiStringObjectID( Xfer *xfer, ListAsciiStringObjectID *li
 	xfer->xferVersion( &version, currentVersion );
 
 	// size of list
-	UnsignedShort count = list->size();
+	DEBUG_ASSERTCRASH(list->size() <= 0xffffu, ("Script list exceeds 16-bit save format capacity"));
+	UnsignedShort count = static_cast<UnsignedShort>(list->size());
 	xfer->xferUnsignedShort( &count );
 
 	// list data
@@ -8762,7 +8765,8 @@ static void xferListAsciiStringCoord3D( Xfer *xfer, ListAsciiStringCoord3D *list
 	xfer->xferVersion( &version, currentVersion );
 
 	// size of list
-	UnsignedShort count = list->size();
+	DEBUG_ASSERTCRASH(list->size() <= 0xffffu, ("Script list exceeds 16-bit save format capacity"));
+	UnsignedShort count = static_cast<UnsignedShort>(list->size());
 	xfer->xferUnsignedShort( &count );
 
 	// list data
@@ -8849,7 +8853,8 @@ void ScriptEngine::xfer( Xfer *xfer )
 	xfer->xferVersion( &version, currentVersion );
 
 	// sequential script count and data
-	UnsignedShort sequentialScriptCount = m_sequentialScripts.size();
+	DEBUG_ASSERTCRASH(m_sequentialScripts.size() <= 0xffffu, ("Sequential script list exceeds 16-bit save format capacity"));
+	UnsignedShort sequentialScriptCount = static_cast<UnsignedShort>(m_sequentialScripts.size());
 	xfer->xferUnsignedShort( &sequentialScriptCount );
 	SequentialScript *sequentialScript;
 	if( xfer->getXferMode() == XFER_SAVE )
@@ -8975,7 +8980,8 @@ void ScriptEngine::xfer( Xfer *xfer )
 	xfer->xferInt( &m_closeWindowTimer );
 
 	// named objects
-	UnsignedShort namedObjectsCount = m_namedObjects.size();
+	DEBUG_ASSERTCRASH(m_namedObjects.size() <= 0xffffu, ("Named object list exceeds 16-bit save format capacity"));
+	UnsignedShort namedObjectsCount = static_cast<UnsignedShort>(m_namedObjects.size());
 	xfer->xferUnsignedShort( &namedObjectsCount );
 	AsciiString namedObjectName;
 	Object *obj;
@@ -9165,7 +9171,8 @@ void ScriptEngine::xfer( Xfer *xfer )
 	{
 
 		// number of entries in named reveals
-		UnsignedShort namedRevealCount = m_namedReveals.size();
+		DEBUG_ASSERTCRASH(m_namedReveals.size() <= 0xffffu, ("Named reveal list exceeds 16-bit save format capacity"));
+	UnsignedShort namedRevealCount = static_cast<UnsignedShort>(m_namedReveals.size());
 		xfer->xferUnsignedShort( &namedRevealCount );
 
 		// named reveal data
@@ -9229,7 +9236,8 @@ void ScriptEngine::xfer( Xfer *xfer )
 		}
 
 		// all object type lists size
-		UnsignedShort allObjectTypesCount = m_allObjectTypeLists.size();
+		DEBUG_ASSERTCRASH(m_allObjectTypeLists.size() <= 0xffffu, ("Object type list exceeds 16-bit save format capacity"));
+	UnsignedShort allObjectTypesCount = static_cast<UnsignedShort>(m_allObjectTypeLists.size());
 		xfer->xferUnsignedShort( &allObjectTypesCount );
 
 		// all object type lists data
