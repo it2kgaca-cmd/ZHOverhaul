@@ -214,9 +214,10 @@ class AsciiString;
 DEBUG_EXTERN_C void ReleaseCrash(const char* reason);
 DEBUG_EXTERN_C void ReleaseCrashWithLocation(const char* reason, const char* sourceFile, int sourceLine, const char* functionName);
 DEBUG_EXTERN_C void ReleaseCrashLocalized(const AsciiString& p, const AsciiString& m);
+DEBUG_EXTERN_C void ReleaseCrashLocalizedWithLocation(const AsciiString& p, const AsciiString& m, const char* sourceFile, int sourceLine, const char* functionName);
 
 #define RELEASE_CRASH(m)				do { ReleaseCrashWithLocation((m), __FILE__, __LINE__, __FUNCTION__); } while (0)
-#define RELEASE_CRASHLOCALIZED(p, m)		do { ReleaseCrashLocalized(p, m); } while (0)
+#define RELEASE_CRASHLOCALIZED(p, m)		do { ReleaseCrashLocalizedWithLocation((p), (m), __FILE__, __LINE__, __FUNCTION__); } while (0)
 
 
 #ifdef DEBUG_PROFILE
