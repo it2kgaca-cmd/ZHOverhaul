@@ -469,8 +469,7 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 		}
 		else if (isGarrison)
 		{
-			if (obj->getRelationship(passengerIDs.empty() ? nullptr :
-				TheGameLogic->findObjectByID(passengerIDs[0])) == ENEMIES)
+			if (issuingPlayer->getRelationship(obj->getTeam()) == ENEMIES)
 				continue;
 		}
 		else if (obj->getControllingPlayer() != issuingPlayer)
