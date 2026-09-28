@@ -91,7 +91,7 @@ protected:
 	AsciiString m_unnamedUnit;
 
 protected: // helper functions
-	Bool shouldSuppressSkippedCinematicAction(const ScriptAction *action) const;
+	Bool shouldSuppressSkippedCinematicAction(ScriptAction *action) const;
 	void changeObjectPanelFlagForSingleObject(Object *obj, const AsciiString& flagToChange, Bool newVal );
 
 protected:
