@@ -39,6 +39,7 @@
 #include "GameClient/GameWindow.h"
 #include "GameClient/InGameUI.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/Module/ProductionUpdate.h"
 
 
 
