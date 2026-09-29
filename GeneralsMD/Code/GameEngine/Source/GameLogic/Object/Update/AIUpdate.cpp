@@ -5217,6 +5217,22 @@ AIStateType AIUpdateInterface::getAIStateType() const
 }
 
 //-------------------------------------------------------------------------------------------------
+Bool AIUpdateInterface::isFixedPostGuardArtillery() const
+{
+	Object *obj = getObject();
+	if (obj == nullptr || getAIStateType() != AI_GUARD || getGuardTargetType() != GUARDTARGET_LOCATION)
+		return FALSE;
+
+	const Real longestWeaponRange = obj->getLargestWeaponRange();
+	if (longestWeaponRange <= 0.0f)
+		return FALSE;
+
+	const Real visionRange = TheAI->getAdjustedVisionRangeForObject(obj,
+		AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
+	return longestWeaponRange > visionRange * 1.10f;
+}
+
+//-------------------------------------------------------------------------------------------------
 void AIUpdateInterface::ignoreObstacle( const Object *obj )
 {
 	m_ignoreObstacleID = obj ? obj->getID() : INVALID_ID;
