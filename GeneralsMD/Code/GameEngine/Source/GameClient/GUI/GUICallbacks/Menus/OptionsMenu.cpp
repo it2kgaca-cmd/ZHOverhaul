@@ -334,7 +334,8 @@ static void initGameSpeedControl()
 	staticTextGameSpeed = legacyLabel;
 	legacyLabel->winHide(FALSE);
 	legacyEntry->winHide(TRUE);
-	GadgetStaticTextSetText(staticTextGameSpeed, UnicodeString(L"Game Speed"));
+	GadgetStaticTextSetText(staticTextGameSpeed,
+		TheGameText->FETCH_OR_SUBSTITUTE("GUI:GameSpeed", L"Game Speed"));
 
 	Int x = 0, y = 0, width = 0, height = 0;
 	legacyEntry->winGetPosition(&x, &y);
@@ -352,7 +353,12 @@ static void initGameSpeedControl()
 	Int valueWidth = 42;
 	if (width < 100)
 		valueWidth = width / 4;
-	Int sliderWidth = width - valueWidth - valueGap;
+
+	const Int availableSliderWidth = width - valueWidth - valueGap;
+	Int sliderWidth = availableSliderWidth;
+	if (donorWidth > 0 && donorWidth < sliderWidth)
+		sliderWidth = donorWidth;
+
 	if (sliderWidth < HORIZONTAL_SLIDER_THUMB_WIDTH * 2)
 	{
 		sliderWidth = width;
