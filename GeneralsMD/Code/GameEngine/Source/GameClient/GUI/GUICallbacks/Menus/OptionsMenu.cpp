@@ -113,6 +113,7 @@ static GameWindow *		sliderScrollSpeed		= nullptr;
 static NameKeyType		sliderGameSpeedID	= NAMEKEY_INVALID;
 static GameWindow *		sliderGameSpeed		= nullptr;
 static GameWindow *		staticTextGameSpeed	= nullptr;
+static GameWindow *		staticTextGameSpeedValue = nullptr;
 
 static NameKeyType    checkLanguageFilterID = NAMEKEY_INVALID;
 static GameWindow *   checkLanguageFilter   = nullptr;
@@ -237,22 +238,92 @@ static Int clampGameSpeed(Int speed)
 
 static void updateGameSpeedLabel(Int speed)
 {
-	if (!staticTextGameSpeed)
+	UnicodeString valueText;
+	valueText.format(L"%d", clampGameSpeed(speed));
+
+	if (staticTextGameSpeedValue)
+	{
+		GadgetStaticTextSetText(staticTextGameSpeedValue, valueText);
+	}
+	else if (staticTextGameSpeed)
+	{
+		// Fallback for layouts where a separate value label cannot be created.
+		UnicodeString fallback;
+		fallback.format(L"Game Speed: %d", clampGameSpeed(speed));
+		GadgetStaticTextSetText(staticTextGameSpeed, fallback);
+	}
+}
+
+static void copySliderVisuals(GameWindow *dest, GameWindow *source)
+{
+	if (!dest || !source)
 		return;
 
-	UnicodeString text;
-	text.format(L"Game Speed: %d", clampGameSpeed(speed));
-	GadgetStaticTextSetText(staticTextGameSpeed, text);
+	GadgetSliderSetEnabledImages(dest,
+		GadgetSliderGetEnabledImageLeft(source),
+		GadgetSliderGetEnabledImageRight(source),
+		GadgetSliderGetEnabledImageCenter(source),
+		GadgetSliderGetEnabledImageSmallCenter(source));
+	GadgetSliderSetDisabledImages(dest,
+		GadgetSliderGetDisabledImageLeft(source),
+		GadgetSliderGetDisabledImageRight(source),
+		GadgetSliderGetDisabledImageCenter(source),
+		GadgetSliderGetDisabledImageSmallCenter(source));
+	GadgetSliderSetHiliteImages(dest,
+		GadgetSliderGetHiliteImageLeft(source),
+		GadgetSliderGetHiliteImageRight(source),
+		GadgetSliderGetHiliteImageCenter(source),
+		GadgetSliderGetHiliteImageSmallCenter(source));
+
+	GadgetSliderSetEnabledColor(dest, GadgetSliderGetEnabledColor(source));
+	GadgetSliderSetEnabledBorderColor(dest, GadgetSliderGetEnabledBorderColor(source));
+	GadgetSliderSetDisabledColor(dest, GadgetSliderGetDisabledColor(source));
+	GadgetSliderSetDisabledBorderColor(dest, GadgetSliderGetDisabledBorderColor(source));
+	GadgetSliderSetHiliteColor(dest, GadgetSliderGetHiliteColor(source));
+	GadgetSliderSetHiliteBorderColor(dest, GadgetSliderGetHiliteBorderColor(source));
+
+	GadgetSliderSetEnabledThumbImage(dest, GadgetSliderGetEnabledThumbImage(source));
+	GadgetSliderSetEnabledThumbColor(dest, GadgetSliderGetEnabledThumbColor(source));
+	GadgetSliderSetEnabledThumbBorderColor(dest, GadgetSliderGetEnabledThumbBorderColor(source));
+	GadgetSliderSetEnabledSelectedThumbImage(dest, GadgetSliderGetEnabledSelectedThumbImage(source));
+	GadgetSliderSetEnabledSelectedThumbColor(dest, GadgetSliderGetEnabledSelectedThumbColor(source));
+	GadgetSliderSetEnabledSelectedThumbBorderColor(dest, GadgetSliderGetEnabledSelectedThumbBorderColor(source));
+
+	GadgetSliderSetDisabledThumbImage(dest, GadgetSliderGetDisabledThumbImage(source));
+	GadgetSliderSetDisabledThumbColor(dest, GadgetSliderGetDisabledThumbColor(source));
+	GadgetSliderSetDisabledThumbBorderColor(dest, GadgetSliderGetDisabledThumbBorderColor(source));
+	GadgetSliderSetDisabledSelectedThumbImage(dest, GadgetSliderGetDisabledSelectedThumbImage(source));
+	GadgetSliderSetDisabledSelectedThumbColor(dest, GadgetSliderGetDisabledSelectedThumbColor(source));
+	GadgetSliderSetDisabledSelectedThumbBorderColor(dest, GadgetSliderGetDisabledSelectedThumbBorderColor(source));
+
+	GadgetSliderSetHiliteThumbImage(dest, GadgetSliderGetHiliteThumbImage(source));
+	GadgetSliderSetHiliteThumbColor(dest, GadgetSliderGetHiliteThumbColor(source));
+	GadgetSliderSetHiliteThumbBorderColor(dest, GadgetSliderGetHiliteThumbBorderColor(source));
+	GadgetSliderSetHiliteSelectedThumbImage(dest, GadgetSliderGetHiliteSelectedThumbImage(source));
+	GadgetSliderSetHiliteSelectedThumbColor(dest, GadgetSliderGetHiliteSelectedThumbColor(source));
+	GadgetSliderSetHiliteSelectedThumbBorderColor(dest, GadgetSliderGetHiliteSelectedThumbBorderColor(source));
+
+	// Switch draw functions only after the image data is populated. This avoids the null-art crash
+	// that the first runtime slider implementation caused.
+	dest->winSetStatus(WIN_STATUS_IMAGE);
+	dest->winSetDrawFunc(TheWindowManager->getHorizontalSliderImageDrawFunc());
+	GameWindow *thumb = GadgetSliderGetThumb(dest);
+	if (thumb)
+	{
+		thumb->winSetStatus(WIN_STATUS_IMAGE);
+		thumb->winSetDrawFunc(TheWindowManager->getPushButtonImageDrawFunc());
+	}
 }
 
 static void initGameSpeedControl()
 {
 	sliderGameSpeed = nullptr;
 	staticTextGameSpeed = nullptr;
+	staticTextGameSpeedValue = nullptr;
 	sliderGameSpeedID = TheNameKeyGenerator->nameToKey("OptionsMenu.wnd:SliderGameSpeedRuntime");
 
-	// The stock layout has an obsolete HTTP-proxy row. Reuse that exact row so the new control
-	// fits the shipped OptionsMenu.wnd without requiring a replacement layout asset.
+	// The stock layout has an obsolete HTTP-proxy row. Use it only as geometry; hide its entry
+	// control and populate the row with a native-looking slider/value pair.
 	GameWindow *legacyLabel = TheWindowManager->winGetWindowFromId(
 		nullptr, TheNameKeyGenerator->nameToKey("OptionsMenu.wnd:StaticTextHTTPProxy"));
 	GameWindow *legacyEntry = TheWindowManager->winGetWindowFromId(
@@ -263,10 +334,32 @@ static void initGameSpeedControl()
 	staticTextGameSpeed = legacyLabel;
 	legacyLabel->winHide(FALSE);
 	legacyEntry->winHide(TRUE);
+	GadgetStaticTextSetText(staticTextGameSpeed, UnicodeString(L"Game Speed"));
 
 	Int x = 0, y = 0, width = 0, height = 0;
 	legacyEntry->winGetPosition(&x, &y);
 	legacyEntry->winGetSize(&width, &height);
+
+	Int donorWidth = 0;
+	Int donorHeight = height;
+	if (sliderScrollSpeed)
+		sliderScrollSpeed->winGetSize(&donorWidth, &donorHeight);
+
+	if (donorHeight <= 0)
+		donorHeight = height;
+
+	const Int valueGap = 6;
+	Int valueWidth = 42;
+	if (width < 100)
+		valueWidth = width / 4;
+	Int sliderWidth = width - valueWidth - valueGap;
+	if (sliderWidth < HORIZONTAL_SLIDER_THUMB_WIDTH * 2)
+	{
+		sliderWidth = width;
+		valueWidth = 0;
+	}
+
+	const Int sliderY = y + (height - donorHeight) / 2;
 
 	SliderData sliderData;
 	memset(&sliderData, 0, sizeof(sliderData));
@@ -276,18 +369,56 @@ static void initGameSpeedControl()
 
 	WinInstanceData instData;
 	instData.init();
-	instData.m_style = GWS_HORZ_SLIDER | GWS_MOUSE_TRACK;
+	instData.m_style = sliderScrollSpeed ?
+		(sliderScrollSpeed->winGetStyle() | GWS_MOUSE_TRACK) :
+		(GWS_HORZ_SLIDER | GWS_MOUSE_TRACK);
 
 	sliderGameSpeed = TheWindowManager->gogoGadgetSlider(
 		legacyEntry->winGetParent(),
 		WIN_STATUS_ENABLED,
-		x, y, width, height,
-		&instData, &sliderData, legacyEntry->winGetFont(), TRUE);
+		x, sliderY, sliderWidth, donorHeight,
+		&instData, &sliderData,
+		sliderScrollSpeed ? sliderScrollSpeed->winGetFont() : legacyEntry->winGetFont(), TRUE);
 
 	if (!sliderGameSpeed)
 		return;
 
 	sliderGameSpeed->winSetWindowId(sliderGameSpeedID);
+	if (sliderScrollSpeed)
+		copySliderVisuals(sliderGameSpeed, sliderScrollSpeed);
+
+	// A small, separate numeric readout keeps the left-hand label stable and matches the rest
+	// of the menu better than embedding a changing number in the label.
+	if (valueWidth > 0)
+	{
+		TextData textData;
+		memset(&textData, 0, sizeof(textData));
+		textData.centered = TRUE;
+		textData.centeredVertically = TRUE;
+
+		WinInstanceData valueInstData;
+		valueInstData.init();
+		valueInstData.m_style = GWS_STATIC_TEXT;
+
+		staticTextGameSpeedValue = TheWindowManager->gogoGadgetStaticText(
+			legacyEntry->winGetParent(),
+			WIN_STATUS_ENABLED,
+			x + sliderWidth + valueGap, y, valueWidth, height,
+			&valueInstData, &textData, legacyLabel->winGetFont(), FALSE);
+
+		if (staticTextGameSpeedValue)
+		{
+			staticTextGameSpeedValue->winSetEnabledTextColors(
+				legacyLabel->winGetEnabledTextColor(),
+				legacyLabel->winGetEnabledTextBorderColor());
+			staticTextGameSpeedValue->winSetDisabledTextColors(
+				legacyLabel->winGetDisabledTextColor(),
+				legacyLabel->winGetDisabledTextBorderColor());
+			staticTextGameSpeedValue->winSetHiliteTextColors(
+				legacyLabel->winGetHiliteTextColor(),
+				legacyLabel->winGetHiliteTextBorderColor());
+		}
+	}
 
 	Int initialSpeed = GAME_SPEED_MIN_FPS;
 	if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame())
@@ -307,7 +438,11 @@ static void initGameSpeedControl()
 	updateGameSpeedLabel(initialSpeed);
 
 	if (TheGameLogic->isInMultiplayerGame())
+	{
 		sliderGameSpeed->winEnable(FALSE);
+		if (staticTextGameSpeedValue)
+			staticTextGameSpeedValue->winEnable(FALSE);
+	}
 }
 
 static void setDefaults()
