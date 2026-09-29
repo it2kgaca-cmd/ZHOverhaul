@@ -40,6 +40,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file in the GameEngine
 
 #include "Common/PerfTimer.h"
+#include "Common/Player.h"
 #include "Common/Team.h"
 #include "Common/Xfer.h"
 #include "Common/ThingTemplate.h"
@@ -87,23 +88,8 @@ static Weapon *getLongestRangeGuardWeapon(Object *obj, WeaponSlotType *outSlot =
 
 static Bool isStationaryGuardArtillery(Object *obj)
 {
-	if (obj == nullptr)
-		return FALSE;
-
-	AIUpdateInterface *ai = obj->getAIUpdateInterface();
-	if (ai == nullptr || ai->getGuardTargetType() != GUARDTARGET_LOCATION)
-		return FALSE;
-
-	Weapon *weapon = getLongestRangeGuardWeapon(obj);
-	if (weapon == nullptr)
-		return FALSE;
-
-	// Classify against ordinary perception, not Guard's expanded inner scan radius.
-	// Long-range weapons ordered to guard a fixed point are treated as emplaced
-	// artillery even if their currently-selected weapon/turret is disabled while packed.
-	const Real visionRange = TheAI->getAdjustedVisionRangeForObject(obj,
-		AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
-	return weapon->getAttackRange(obj) > visionRange * 1.10f;
+	AIUpdateInterface *ai = obj ? obj->getAIUpdateInterface() : nullptr;
+	return ai && ai->isFixedPostGuardArtillery();
 }
 
 static Bool isGuardTargetVisibleToOwner(const Object *owner, const Object *target)
