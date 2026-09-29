@@ -123,13 +123,14 @@ void ControlBar::addCommonCommands( Drawable *draw, Bool firstDrawable )
 			// get command
 			command = commandSet->getCommandButton(i);
 
-			// Structures can expose a small, deliberately safe set of commands in a
-			// same-type mass selection. Destructive/single-owner commands such as Sell
-			// remain excluded until they receive explicit group semantics.
+			// Structures can expose commands that have meaningful group semantics. Selling a
+			// multi-selection is intentional: one click should sell every selected structure
+			// that exposes the common Sell command.
 			const Bool structureGroupCommand = command && obj->isKindOf(KINDOF_STRUCTURE) &&
 				(command->getCommandType() == GUI_COMMAND_UNIT_BUILD ||
 				 command->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE ||
-				 command->getCommandType() == GUI_COMMAND_TOGGLE_OVERCHARGE);
+				 command->getCommandType() == GUI_COMMAND_TOGGLE_OVERCHARGE ||
+				 command->getCommandType() == GUI_COMMAND_SELL);
 
 			// add if present and can be used in a multi select
 			if( command && (BitIsSet( command->getOptions(), OK_FOR_MULTI_SELECT ) == TRUE ||
@@ -169,6 +170,8 @@ void ControlBar::addCommonCommands( Drawable *draw, Bool firstDrawable )
 												(m_commonCommands[ i ] && m_commonCommands[ i ]->getCommandType() == GUI_COMMAND_ATTACK_MOVE);
 			Bool objectUpgrade = (command && command->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE) ||
 												(m_commonCommands[ i ] && m_commonCommands[ i ]->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE);
+			Bool sellCommand = (command && command->getCommandType() == GUI_COMMAND_SELL) ||
+											(m_commonCommands[ i ] && m_commonCommands[ i ]->getCommandType() == GUI_COMMAND_SELL);
 
 			Bool dozerConstruct = (command && command->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT) ||
 									(m_commonCommands[ i ] && m_commonCommands[ i ]->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT);
@@ -208,6 +211,25 @@ void ControlBar::addCommonCommands( Drawable *draw, Bool firstDrawable )
 					m_commandWindows[i]->winHide(FALSE);
 					m_commandWindows[i]->winEnable(TRUE);
 					setControlCommand(m_commandWindows[i], upgradeCommand);
+				}
+			}
+			else if (sellCommand)
+			{
+				// Sell is common as long as every object participating in this multi-select slot
+				// is a structure exposing Sell. Different structure command sets may still share it.
+				if (command && command->getCommandType() == GUI_COMMAND_SELL &&
+						obj->isKindOf(KINDOF_STRUCTURE))
+				{
+					if (m_commonCommands[i] == nullptr)
+						m_commonCommands[i] = command;
+					m_commandWindows[i]->winHide(FALSE);
+					m_commandWindows[i]->winEnable(TRUE);
+					setControlCommand(m_commandWindows[i], m_commonCommands[i]);
+				}
+				else
+				{
+					m_commonCommands[i] = nullptr;
+					m_commandWindows[i]->winHide(TRUE);
 				}
 			}
 			// Kris: When any units have attack move, they all get it. This is to allow

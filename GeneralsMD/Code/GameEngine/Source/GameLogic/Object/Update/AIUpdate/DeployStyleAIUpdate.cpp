@@ -49,12 +49,33 @@
 
 
 //-------------------------------------------------------------------------------------------------
+// Nuke Cannons are authored deploy weapons whose intended player contract is stronger than the
+// generic artillery heuristic: once planted, they stay planted until the player explicitly relocates
+// them. Match the base and general-prefixed templates without depending on weapon/vision tuning.
+static Bool isHardPlantedDeployWeapon(const Object *self)
+{
+	if (self == nullptr || self->getTemplate() == nullptr)
+		return FALSE;
+
+	const char *name = self->getTemplate()->getName().str();
+	return name != nullptr && strstr(name, "ChinaVehicleNukeLauncher") != nullptr;
+}
+
+//-------------------------------------------------------------------------------------------------
 // Fixed-location Guard turns a long-range deploy unit into a siege emplacement.
-// Classification is based on its longest weapon, not the currently active weapon,
-// because deploy units such as the Nuke Cannon disable their turret while packed.
+// Nuke Cannons are explicitly included even if a future INI/range change makes them fail the
+// generic long-range classifier.
 static Bool isFixedPostDeployArtillery(AIUpdateInterface *ai, Object *self)
 {
-	return self && ai && ai->isFixedPostGuardArtillery();
+	if (self == nullptr || ai == nullptr)
+		return FALSE;
+
+	if (ai->isFixedPostGuardArtillery())
+		return TRUE;
+
+	return isHardPlantedDeployWeapon(self) &&
+		ai->getAIStateType() == AI_GUARD &&
+		ai->getGuardTargetType() == GUARDTARGET_LOCATION;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -98,8 +119,9 @@ Bool DeployStyleAIUpdate::isLocomotionLocked() const
 	const Bool plantedState = self &&
 		(self->testStatus(OBJECT_STATUS_DEPLOYED) || m_state == DEPLOY ||
 		 m_state == READY_TO_ATTACK || m_state == ALIGNING_TURRETS);
+	const Bool hardPlantWeapon = isHardPlantedDeployWeapon(self) || isLongRangeArtillery();
 	return self && owner && owner->getPlayerType() == PLAYER_HUMAN &&
-		plantedState && isLongRangeArtillery();
+		plantedState && hardPlantWeapon;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -148,7 +170,7 @@ void DeployStyleAIUpdate::aiDoCommand( const AICommandParms* parms )
 		}
 	}
 
-	if (playerRelocation && isLongRangeArtillery())
+	if (playerRelocation && (isHardPlantedDeployWeapon(getObject()) || isLongRangeArtillery()))
 	{
 		// Begin pack immediately so the command cannot get one rogue locomotor frame before the
 		// deploy-state update notices the new path.
@@ -406,7 +428,7 @@ void DeployStyleAIUpdate::setMyState( DeployStateTypes stateID, Bool reverseDepl
 			m_state == ALIGNING_TURRETS;
 
 		if (owner && owner->getPlayerType() == PLAYER_HUMAN &&
-			plantedState && isLongRangeArtillery())
+			plantedState && (isHardPlantedDeployWeapon(self) || isLongRangeArtillery()))
 		{
 			destroyPath();
 			setQueueForPathTime(0);
