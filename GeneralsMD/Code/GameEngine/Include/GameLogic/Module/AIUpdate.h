@@ -458,6 +458,7 @@ public:
 private:
 	Bool computePath( PathfindServicesInterface *pathfinder, Coord3D *destination );	///< computes path to destination, returns false if no path
 	Bool computeAttackPath(PathfindServicesInterface *pathfinder,  const Object *victim, const Coord3D* victimPos );	///< computes path to attack the current target, returns false if no path
+	Object *findNearestPersistentForceAttackTarget(ObjectID skipTargetID, Bool *anyLiveTarget, Bool *anyLiveHiddenTarget);
 	void updatePersistentForceAttackTargetSet(UpdateSleepTime& sleepTime);
 #ifdef ALLOW_SURRENDER
 	void doSurrenderUpdateStuff();
@@ -545,9 +546,11 @@ public:
 	void transferAttack(ObjectID fromID, ObjectID toID);
 
 	// Ctrl-box force attack target set. The set survives each individual target and is
-	// consumed until no valid visible/attackable targets remain or the player gives a new order.
+	// consumed nearest-first from each unit's current position until no valid visible/attackable
+	// targets remain or the player gives a new order.
 	void setPersistentForceAttackTargetSet(const std::vector<ObjectID>& orderedTargets, ObjectID currentTargetID);
 	void clearPersistentForceAttackTargetSet();
+	Bool hasPersistentForceAttackTargetSet() const { return !m_persistentForceAttackTargets.empty(); }
 
 	void setCurrentVictim( const Object *nemesis );			///<  Current victim.
 	Object *getCurrentVictim() const;
@@ -729,8 +732,8 @@ private:
 	AIStateMachine*			m_stateMachine;							///< the state machine
 	UnsignedInt					m_nextEnemyScanTime;				///< how long until the next enemy scan
 	ObjectID						m_currentVictimID;					///< if not INVALID_ID, this agent's current victim.
-	std::vector<ObjectID>	m_persistentForceAttackTargets;	///< ordered target set from Ctrl-box force attack
-	UnsignedInt				m_persistentForceAttackCursor;	///< next target index to consider
+	std::vector<ObjectID>	m_persistentForceAttackTargets;	///< target set from Ctrl-box force attack
+	UnsignedInt				m_persistentForceAttackCursor;	///< legacy serialized cursor; nearest-first selection no longer depends on list order
 	ObjectID						m_persistentForceAttackCurrentID;	///< target currently being worked by this set
 	Real								m_desiredSpeed;							///< the desired speed of the tank
 	CommandSourceType		m_lastCommandSource;			/**< Keep track of the source of the last command we got.

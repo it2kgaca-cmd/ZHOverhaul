@@ -267,6 +267,21 @@ static Bool isFixedPostGuardArtillery(Object *obj, AIUpdateInterface *ai)
 }
 
 //----------------------------------------------------------------------------------------------------------
+static void stopPersistentForceSweepAtFiringOpportunity(Object *source, AIUpdateInterface *ai)
+{
+	if (!source || !ai || !ai->hasPersistentForceAttackTargetSet())
+		return;
+
+	// Ctrl-box demolition should feel like attack-move engagement: as soon as the chosen weapon
+	// has a legal shot, stop advancing. Do not consume the rest of an approach path and walk into
+	// the victim before firing.
+	ai->destroyPath();
+	ai->setQueueForPathTime(0);
+	ai->setLocomotorGoalNone();
+	source->clearModelConditionState(MODELCONDITION_MOVING);
+}
+
+//----------------------------------------------------------------------------------------------------------
 /**
  * Create an AI state machine. Define all of the states the machine
  * can possibly be in, and set the initial (default) state.
@@ -2537,7 +2552,9 @@ Bool AIAttackApproachTargetState::computePath()
 
 		CRCDEBUG_LOG(("AIAttackApproachTargetState::computePath - requestAttackPath() for object %d", getMachineOwner()->getID()));
 		ai->requestAttackPath(victim->getID(), &pos );
-		m_stopIfInRange = false; // we have calculated a position to shoot from, so go there.
+		// Persistent Ctrl-box attacks stop at the first legal firing point instead of consuming
+		// the entire precomputed attack-approach path.
+		m_stopIfInRange = ai->hasPersistentForceAttackTargetSet();
 
 		CRCDEBUG_LOG(("AIAttackApproachTargetState::computePath - bailing after repathing for object %d", getMachineOwner()->getID()));
 		return true;
@@ -2652,6 +2669,7 @@ StateReturnType AIAttackApproachTargetState::onEnter()
 			}
 			if (!viewBlocked)
 			{
+				stopPersistentForceSweepAtFiringOpportunity(source, ai);
 				return STATE_SUCCESS;
 			}
 		}
@@ -2728,7 +2746,7 @@ StateReturnType AIAttackApproachTargetState::updateInternal()
 		ai->setCurrentVictim(nullptr);
 		return STATE_FAILURE;
 	}
-	m_stopIfInRange = !ai->isAttackPath();
+	m_stopIfInRange = !ai->isAttackPath() || ai->hasPersistentForceAttackTargetSet();
 
 	StateReturnType code = STATE_FAILURE;
  	Object* source = getMachineOwner();
@@ -2774,6 +2792,7 @@ StateReturnType AIAttackApproachTargetState::updateInternal()
 			}
 			if (!viewBlocked)
 			{
+				stopPersistentForceSweepAtFiringOpportunity(source, ai);
 				return STATE_SUCCESS;
 			}
 		}
@@ -2963,7 +2982,7 @@ Bool AIAttackPursueTargetState::computePath()
 		m_goalPosition = m_prevVictimPos;
 		m_waitingForPath = true;
 		ai->requestPath(&m_goalPosition, false);
-		m_stopIfInRange = false; // we have calculated a position to shoot from, so go there.
+		m_stopIfInRange = ai->hasPersistentForceAttackTargetSet();
 		return true;
 	}
 
@@ -3105,7 +3124,7 @@ StateReturnType AIAttackPursueTargetState::updateInternal()
 		ai->setCurrentVictim(nullptr);
 		return STATE_FAILURE;
 	}
-	m_stopIfInRange = false;
+	m_stopIfInRange = ai->hasPersistentForceAttackTargetSet();
 
 	Object* source = getMachineOwner();
 	StateReturnType code = STATE_FAILURE;
@@ -3145,6 +3164,13 @@ StateReturnType AIAttackPursueTargetState::updateInternal()
 			viewBlocked = TheAI->pathfinder()->isAttackViewBlockedByObstacle(source, *source->getPosition(), victim, *victim->getPosition());
 		}
 		if (!viewBlocked && victim->getPhysics() && weapon->isWithinAttackRange(source, victim)) {
+			if (ai->hasPersistentForceAttackTargetSet())
+			{
+				stopPersistentForceSweepAtFiringOpportunity(source, ai);
+				m_isInitialApproach = false;
+				return STATE_SUCCESS;
+			}
+
 			// If we have a turret, start aiming.
 			ai->setTurretTargetObject(tur, victim, m_isForceAttacking);
 			//  match speeds;

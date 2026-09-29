@@ -4988,22 +4988,97 @@ void AIUpdateInterface::clearPersistentForceAttackTargetSet()
 }
 
 //----------------------------------------------------------------------------------------------------------
+Object *AIUpdateInterface::findNearestPersistentForceAttackTarget(
+	ObjectID skipTargetID, Bool *anyLiveTarget, Bool *anyLiveHiddenTarget)
+{
+	if (anyLiveTarget)
+		*anyLiveTarget = FALSE;
+	if (anyLiveHiddenTarget)
+		*anyLiveHiddenTarget = FALSE;
+
+	Object *self = getObject();
+	Player *owner = self ? self->getControllingPlayer() : nullptr;
+	if (self == nullptr || owner == nullptr)
+		return nullptr;
+
+	const Int playerIndex = owner->getPlayerIndex();
+	const Real selfRadius = self->getGeometryInfo().getBoundingCircleRadius();
+	Object *bestTarget = nullptr;
+	Real bestEdgeDistance = 1.0e30f;
+	ObjectID bestTargetID = INVALID_ID;
+
+	for (std::vector<ObjectID>::const_iterator it = m_persistentForceAttackTargets.begin();
+		 it != m_persistentForceAttackTargets.end(); ++it)
+	{
+		const ObjectID targetID = *it;
+		if (targetID == INVALID_ID || targetID == skipTargetID)
+			continue;
+
+		Object *target = TheGameLogic->findObjectByID(targetID);
+		if (target == nullptr || target->isEffectivelyDead() || target->isOffMap() || target->isContained())
+			continue;
+
+		if (anyLiveTarget)
+			*anyLiveTarget = TRUE;
+
+		if (target->getShroudedStatus(playerIndex) != OBJECTSHROUD_CLEAR)
+		{
+			if (anyLiveHiddenTarget)
+				*anyLiveHiddenTarget = TRUE;
+			continue;
+		}
+
+		const CanAttackResult result =
+			self->getAbleToAttackSpecificObject(ATTACK_NEW_TARGET_FORCED, target, CMD_FROM_PLAYER);
+		if (result != ATTACKRESULT_POSSIBLE && result != ATTACKRESULT_POSSIBLE_AFTER_MOVING)
+			continue;
+
+		const Real dx = target->getPosition()->x - self->getPosition()->x;
+		const Real dy = target->getPosition()->y - self->getPosition()->y;
+		Real edgeDistance = sqrtf(dx * dx + dy * dy) -
+			selfRadius - target->getGeometryInfo().getBoundingCircleRadius();
+		if (edgeDistance < 0.0f)
+			edgeDistance = 0.0f;
+
+		// Each unit independently attacks the nearest boxed survivor from its current position.
+		// ObjectID is the deterministic tiebreaker for replay/network stability.
+		if (bestTarget == nullptr ||
+			edgeDistance < bestEdgeDistance - 0.001f ||
+			(fabs(edgeDistance - bestEdgeDistance) <= 0.001f && targetID < bestTargetID))
+		{
+			bestTarget = target;
+			bestEdgeDistance = edgeDistance;
+			bestTargetID = targetID;
+		}
+	}
+
+	return bestTarget;
+}
+
+//----------------------------------------------------------------------------------------------------------
 void AIUpdateInterface::setPersistentForceAttackTargetSet(const std::vector<ObjectID>& orderedTargets, ObjectID currentTargetID)
 {
 	m_persistentForceAttackTargets = orderedTargets;
-	m_persistentForceAttackCursor = 0;
-	m_persistentForceAttackCurrentID = currentTargetID;
+	m_persistentForceAttackCursor = 0; // retained only for save compatibility
+	m_persistentForceAttackCurrentID = INVALID_ID;
+	(void)currentTargetID; // Initial list assignment no longer overrides nearest-first tactical choice.
 
-	if (!m_persistentForceAttackTargets.empty())
+	Bool anyLiveTarget = FALSE;
+	Bool anyLiveHiddenTarget = FALSE;
+	Object *nearest = findNearestPersistentForceAttackTarget(
+		INVALID_ID, &anyLiveTarget, &anyLiveHiddenTarget);
+
+	if (nearest)
 	{
-		for (UnsignedInt i = 0; i < static_cast<UnsignedInt>(m_persistentForceAttackTargets.size()); ++i)
-		{
-			if (m_persistentForceAttackTargets[i] == currentTargetID)
-			{
-				m_persistentForceAttackCursor = (i + 1) % static_cast<UnsignedInt>(m_persistentForceAttackTargets.size());
-				break;
-			}
-		}
+		m_persistentForceAttackCurrentID = nearest->getID();
+		if (!isAttacking() || getStateMachine()->getGoalObject() != nearest)
+			privateForceAttackObject(nearest, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER);
+	}
+	else if (isAttacking())
+	{
+		// A boxed order with no currently valid visible target must not continue blind-firing
+		// whatever target happened to be assigned before the persistent set was installed.
+		privateIdle(CMD_FROM_AI);
 	}
 
 	wakeUpNow();
@@ -5030,8 +5105,8 @@ void AIUpdateInterface::updatePersistentForceAttackTargetSet(UpdateSleepTime& sl
 	const Bool currentVisible = currentLive && current->getShroudedStatus(playerIndex) == OBJECTSHROUD_CLEAR;
 	const Bool currentIsOurGoal = current && getStateMachine()->getGoalObject() == current;
 
-	// Keep working the current target while it remains visible. Allied/shared sight is sufficient;
-	// the attacker's own vision radius is intentionally irrelevant.
+	// Finish the target we already committed to. Nearest-first is reconsidered only between targets,
+	// so units do not ping-pong when two boxed targets trade places by a few world units.
 	if (currentLive && currentVisible && currentIsOurGoal && isAttacking())
 		return;
 
@@ -5047,38 +5122,13 @@ void AIUpdateInterface::updatePersistentForceAttackTargetSet(UpdateSleepTime& sl
 
 	Bool anyLiveTarget = FALSE;
 	Bool anyLiveHiddenTarget = FALSE;
-	const UnsignedInt count = static_cast<UnsignedInt>(m_persistentForceAttackTargets.size());
-	if (count == 0)
+	Object *nearest = findNearestPersistentForceAttackTarget(
+		failedVisibleTarget, &anyLiveTarget, &anyLiveHiddenTarget);
+
+	if (nearest)
 	{
-		clearPersistentForceAttackTargetSet();
-		return;
-	}
-
-	for (UnsignedInt offset = 0; offset < count; ++offset)
-	{
-		const UnsignedInt index = (m_persistentForceAttackCursor + offset) % count;
-		const ObjectID targetID = m_persistentForceAttackTargets[index];
-		if (targetID == INVALID_ID || targetID == failedVisibleTarget)
-			continue;
-
-		Object *target = TheGameLogic->findObjectByID(targetID);
-		if (target == nullptr || target->isEffectivelyDead() || target->isOffMap() || target->isContained())
-			continue;
-
-		anyLiveTarget = TRUE;
-		if (target->getShroudedStatus(playerIndex) != OBJECTSHROUD_CLEAR)
-		{
-			anyLiveHiddenTarget = TRUE;
-			continue;
-		}
-
-		CanAttackResult result = self->getAbleToAttackSpecificObject(ATTACK_NEW_TARGET_FORCED, target, CMD_FROM_PLAYER);
-		if (result != ATTACKRESULT_POSSIBLE && result != ATTACKRESULT_POSSIBLE_AFTER_MOVING)
-			continue;
-
-		m_persistentForceAttackCursor = (index + 1) % count;
-		m_persistentForceAttackCurrentID = targetID;
-		privateForceAttackObject(target, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER);
+		m_persistentForceAttackCurrentID = nearest->getID();
+		privateForceAttackObject(nearest, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER);
 		sleepTime = UPDATE_SLEEP_NONE;
 		return;
 	}
