@@ -162,6 +162,7 @@ public:
 											 UnsignedInt options,
 											 const Object *builderObject,
 											 Player *player,
+											 Bool allowAutoRotation,
 											 Coord3D *resolvedPos,
 											 Real *resolvedAngle );
 

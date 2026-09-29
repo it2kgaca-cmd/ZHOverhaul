@@ -1083,6 +1083,7 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 																 UnsignedInt options,
 																 const Object *builderObject,
 																 Player *player,
+																 Bool allowAutoRotation,
 																 Coord3D *resolvedPos,
 																 Real *resolvedAngle )
 {
@@ -1100,25 +1101,37 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 	if (initial == LBC_SHROUD)
 		return FALSE;
 
-	Real captureRadius = build->getTemplateGeometryInfo().getMajorRadius() * 0.80f;
-	if (captureRadius < PATHFIND_CELL_SIZE_F * 3.0f)
-		captureRadius = PATHFIND_CELL_SIZE_F * 3.0f;
+	// The old prototype brute-forced as many as ~17 angles * 65 positions every render frame.
+	// A legality test is expensive (footprint terrain, overlap and path checks), so choose the
+	// contextual facing ONCE, then perform only a tiny bounded positional search.
+	const Real buildRadius = build->getTemplateGeometryInfo().getMajorRadius();
+	Real captureRadius = buildRadius * 0.65f;
+	if (captureRadius < PATHFIND_CELL_SIZE_F * 2.0f)
+		captureRadius = PATHFIND_CELL_SIZE_F * 2.0f;
 
-	// Nearby structures influence orientation. In open ground there is deliberately no
-	// environmental suggestion: preserve the player's preferred angle exactly.
-	Object *nearestStructure = nullptr;
-	Real nearestStructureDistSqr = 1.0e30f;
-	Real influenceRadius = captureRadius * 2.50f;
-	if (influenceRadius < PATHFIND_CELL_SIZE_F * 6.0f)
-		influenceRadius = PATHFIND_CELL_SIZE_F * 6.0f;
+	Real influenceRadius = buildRadius * 4.0f;
+	if (influenceRadius < PATHFIND_CELL_SIZE_F * 8.0f)
+		influenceRadius = PATHFIND_CELL_SIZE_F * 8.0f;
+
+	Object *nearestSameType = nullptr;
+	Real nearestSameTypeDistSqr = 1.0e30f;
+
+	// "Broad obstruction" is intentionally based on accumulated nearby structure mass rather
+	// than a single nearest object's center. Multiple wall pieces/buildings on one side reinforce
+	// the same direction; one large structure can qualify on its own.
+	Real obstructionVectorX = 0.0f;
+	Real obstructionVectorY = 0.0f;
+	Real obstructionWeight = 0.0f;
+	Int obstructionCount = 0;
+	Real largestObstructionRadius = 0.0f;
 
 	PartitionFilterAcceptByKindOf structureFilter(MAKE_KINDOF_MASK(KINDOF_STRUCTURE), KINDOFMASK_NONE);
-	PartitionFilter *filters[] = { &structureFilter, nullptr };
-	ObjectIterator *nearby = ThePartitionManager->iterateObjectsInRange(
-		desiredPos, influenceRadius, FROM_BOUNDINGSPHERE_2D, filters);
-	MemoryPoolObjectHolder nearbyHolder(nearby);
+	PartitionFilter *structureFilters[] = { &structureFilter, nullptr };
+	ObjectIterator *nearbyStructures = ThePartitionManager->iterateObjectsInRange(
+		desiredPos, influenceRadius, FROM_BOUNDINGSPHERE_2D, structureFilters);
+	MemoryPoolObjectHolder nearbyStructuresHolder(nearbyStructures);
 
-	for (Object *other = nearby->first(); other; other = nearby->next())
+	for (Object *other = nearbyStructures->first(); other; other = nearbyStructures->next())
 	{
 		if (other == builderObject || other->isEffectivelyDead() || other->isContained())
 			continue;
@@ -1126,155 +1139,172 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 		const Real dx = other->getPosition()->x - desiredPos->x;
 		const Real dy = other->getPosition()->y - desiredPos->y;
 		const Real distSqr = dx*dx + dy*dy;
-		if (nearestStructure == nullptr || distSqr < nearestStructureDistSqr ||
-			(distSqr == nearestStructureDistSqr && other->getID() < nearestStructure->getID()))
+		if (distSqr <= 0.001f)
+			continue;
+
+		if (other->getTemplate() && other->getTemplate()->isEquivalentTo(build))
 		{
-			nearestStructure = other;
-			nearestStructureDistSqr = distSqr;
+			if (nearestSameType == nullptr || distSqr < nearestSameTypeDistSqr ||
+				(fabs(distSqr - nearestSameTypeDistSqr) <= 0.001f && other->getID() < nearestSameType->getID()))
+			{
+				nearestSameType = other;
+				nearestSameTypeDistSqr = distSqr;
+			}
+			continue;
+		}
+
+		const Real dist = sqrtf(distSqr);
+		const Real otherRadius = other->getGeometryInfo().getBoundingCircleRadius();
+		Real edgeDistance = dist - otherRadius - buildRadius;
+		if (edgeDistance < 0.0f)
+			edgeDistance = 0.0f;
+
+		// Nearby and broad objects contribute more strongly; distant little objects contribute very
+		// little. Normalize direction first so a faraway object's raw coordinate does not dominate.
+		const Real denom = edgeDistance + PATHFIND_CELL_SIZE_F;
+		const Real weight = (otherRadius + PATHFIND_CELL_SIZE_F) / denom;
+		obstructionVectorX += (dx / dist) * weight;
+		obstructionVectorY += (dy / dist) * weight;
+		obstructionWeight += weight;
+		++obstructionCount;
+		if (otherRadius > largestObstructionRadius)
+			largestObstructionRadius = otherRadius;
+	}
+
+	Bool haveContextAngle = FALSE;
+	Real contextAngle = desiredAngle;
+
+	// Supply structures are the deliberate exception to the general "back to obstruction" rule.
+	// Their useful face should point toward the nearest supply source so collectors get the sensible
+	// working side by default.
+	if (allowAutoRotation && build->isKindOf(KINDOF_FS_SUPPLY_CENTER))
+	{
+		Object *nearestSupply = nullptr;
+		Real nearestSupplyDistSqr = 1.0e30f;
+		Real supplySearchRadius = 700.0f;
+		if (supplySearchRadius < influenceRadius * 2.0f)
+			supplySearchRadius = influenceRadius * 2.0f;
+
+		PartitionFilterAcceptByKindOf supplyFilter(MAKE_KINDOF_MASK(KINDOF_SUPPLY_SOURCE), KINDOFMASK_NONE);
+		PartitionFilter *supplyFilters[] = { &supplyFilter, nullptr };
+		ObjectIterator *supplies = ThePartitionManager->iterateObjectsInRange(
+			desiredPos, supplySearchRadius, FROM_BOUNDINGSPHERE_2D, supplyFilters);
+		MemoryPoolObjectHolder suppliesHolder(supplies);
+
+		for (Object *source = supplies->first(); source; source = supplies->next())
+		{
+			if (source->isEffectivelyDead() || source->isContained())
+				continue;
+
+			const Real dx = source->getPosition()->x - desiredPos->x;
+			const Real dy = source->getPosition()->y - desiredPos->y;
+			const Real distSqr = dx*dx + dy*dy;
+			if (distSqr <= 0.001f)
+				continue;
+
+			if (nearestSupply == nullptr || distSqr < nearestSupplyDistSqr ||
+				(fabs(distSqr - nearestSupplyDistSqr) <= 0.001f && source->getID() < nearestSupply->getID()))
+			{
+				nearestSupply = source;
+				nearestSupplyDistSqr = distSqr;
+			}
+		}
+
+		if (nearestSupply)
+		{
+			const Real dx = nearestSupply->getPosition()->x - desiredPos->x;
+			const Real dy = nearestSupply->getPosition()->y - desiredPos->y;
+			contextAngle = atan2(dy, dx);
+			haveContextAngle = TRUE;
 		}
 	}
 
-	if (initial == LBC_OK && nearestStructure == nullptr)
+	// Repeated copies of the same building should read as one coherent row/cluster, not turn their
+	// backs toward each other. Copy the nearest equivalent building's exact facing.
+	if (allowAutoRotation && !haveContextAngle && nearestSameType)
+	{
+		contextAngle = nearestSameType->getOrientation();
+		haveContextAngle = TRUE;
+	}
+
+	// Otherwise put the rear of the building toward a genuinely broad obstruction. A single
+	// substantial building qualifies; several smaller wall/building pieces can combine into one.
+	if (allowAutoRotation && !haveContextAngle && obstructionWeight > 0.0f)
+	{
+		const Real vectorLenSqr =
+			obstructionVectorX*obstructionVectorX + obstructionVectorY*obstructionVectorY;
+		const Bool broadEnough =
+			largestObstructionRadius >= buildRadius * 0.75f ||
+			obstructionCount >= 2;
+
+		if (broadEnough && vectorLenSqr > 0.04f)
+		{
+			const Real obstructionAngle = atan2(obstructionVectorY, obstructionVectorX);
+			contextAngle = obstructionAngle + PI; // front faces away; rear faces the obstruction
+			haveContextAngle = TRUE;
+		}
+	}
+
+	if (!haveContextAngle && initial == LBC_OK)
 		return TRUE;
 
-	// Deterministic local candidate set. The raw player angle always participates. Near another
-	// structure, also try matching its axis and the perpendicular axis; blocked placements get
-	// quarter-turn alternatives before the small fallback angle sweep.
-	Real candidateAngles[20];
-	Int angleCount = 0;
-	candidateAngles[angleCount++] = desiredAngle;
-
-	Bool haveObstructionDirection = FALSE;
-	Real obstructionAngle = 0.0f;
-	if (nearestStructure)
+	// Two small rings, eight directions: 17 positions per angle including the exact cursor.
+	// Context facing gets first refusal. If it cannot fit locally, fall back to the player's angle
+	// rather than dragging the building or trying dozens of arbitrary rotations.
+	static const Real dirs[8][2] =
 	{
-		const Real structureAngle = nearestStructure->getOrientation();
-		for (Int quarter = 0; quarter < 4; ++quarter)
-			candidateAngles[angleCount++] = structureAngle + quarter * (PI * 0.5f);
-
-		// The structure is the constrained side of the local placement. A useful additional
-		// candidate points the new building's front away from it, which naturally leaves the
-		// back/service side toward the obstruction while still competing against parallel alignment.
-		const Real obstacleDx = nearestStructure->getPosition()->x - desiredPos->x;
-		const Real obstacleDy = nearestStructure->getPosition()->y - desiredPos->y;
-		if (fabs(obstacleDx) > 0.001f || fabs(obstacleDy) > 0.001f)
-		{
-			obstructionAngle = atan2(obstacleDy, obstacleDx);
-			haveObstructionDirection = TRUE;
-			candidateAngles[angleCount++] = obstructionAngle + PI;
-		}
-	}
-
-	candidateAngles[angleCount++] = desiredAngle + PI * 0.5f;
-	candidateAngles[angleCount++] = desiredAngle - PI * 0.5f;
-	candidateAngles[angleCount++] = desiredAngle + PI;
-
-	if (initial != LBC_OK)
-	{
-		const Real angleStep = DEG_TO_RADF(5.0f);
-		for (Int step = 1; step <= 4 && angleCount + 1 < 20; ++step)
-		{
-			candidateAngles[angleCount++] = desiredAngle + angleStep * step;
-			candidateAngles[angleCount++] = desiredAngle - angleStep * step;
-		}
-	}
-
-	static const Real dirs[16][2] =
-	{
-		{ 1.000000f,  0.000000f}, { 0.923880f,  0.382683f},
-		{ 0.707107f,  0.707107f}, { 0.382683f,  0.923880f},
-		{ 0.000000f,  1.000000f}, {-0.382683f,  0.923880f},
-		{-0.707107f,  0.707107f}, {-0.923880f,  0.382683f},
-		{-1.000000f,  0.000000f}, {-0.923880f, -0.382683f},
-		{-0.707107f, -0.707107f}, {-0.382683f, -0.923880f},
-		{ 0.000000f, -1.000000f}, { 0.382683f, -0.923880f},
-		{ 0.707107f, -0.707107f}, { 0.923880f, -0.382683f}
+		{ 1.000000f,  0.000000f},
+		{ 0.707107f,  0.707107f},
+		{ 0.000000f,  1.000000f},
+		{-0.707107f,  0.707107f},
+		{-1.000000f,  0.000000f},
+		{-0.707107f, -0.707107f},
+		{ 0.000000f, -1.000000f},
+		{ 0.707107f, -0.707107f}
 	};
 
-	Bool found = FALSE;
-	Real bestScore = 1.0e30f;
-	Coord3D bestPos = *desiredPos;
-	Real bestAngle = desiredAngle;
+	Real candidateAngles[2];
+	Int angleCount = 0;
+	if (haveContextAngle)
+		candidateAngles[angleCount++] = contextAngle;
+
+	if (!haveContextAngle || fabs(stdAngleDiff(contextAngle, desiredAngle)) > DEG_TO_RADF(1.0f))
+		candidateAngles[angleCount++] = desiredAngle;
 
 	for (Int a = 0; a < angleCount; ++a)
 	{
 		const Real candidateAngle = candidateAngles[a];
 
-		// sample=-1 is the exact cursor position. Remaining samples are four local rings.
-		for (Int sample = -1; sample < 64; ++sample)
+		if (isLocationLegalToBuild(
+				desiredPos, build, candidateAngle, options, builderObject, player) == LBC_OK)
 		{
-			Coord3D candidate = *desiredPos;
-			if (sample >= 0)
+			*resolvedPos = *desiredPos;
+			*resolvedAngle = candidateAngle;
+			return TRUE;
+		}
+
+		for (Int ring = 1; ring <= 2; ++ring)
+		{
+			const Real radius = captureRadius * (ring == 1 ? 0.45f : 1.0f);
+			for (Int dir = 0; dir < 8; ++dir)
 			{
-				const Int ring = sample / 16 + 1;
-				const Int dir = sample % 16;
-				const Real radius = captureRadius * (INT_TO_REAL(ring) / 4.0f);
+				Coord3D candidate = *desiredPos;
 				candidate.x += dirs[dir][0] * radius;
 				candidate.y += dirs[dir][1] * radius;
 				candidate.z = TheTerrainLogic->getGroundHeight(candidate.x, candidate.y);
-			}
 
-			if (isLocationLegalToBuild(
-					&candidate, build, candidateAngle, options, builderObject, player) != LBC_OK)
-			{
-				continue;
-			}
-
-			const Real dx = candidate.x - desiredPos->x;
-			const Real dy = candidate.y - desiredPos->y;
-			Real score = dx*dx + dy*dy;
-
-			// Preserve deliberate player rotation unless environmental alignment buys a meaningfully
-			// cleaner fit. Express angular cost as an equivalent local displacement.
-			const Real angleDelta = fabs(stdAngleDiff(candidateAngle, desiredAngle));
-			const Real angleDistance = captureRadius * 0.35f * (angleDelta / PI);
-			score += angleDistance * angleDistance;
-
-			if (nearestStructure)
-			{
-				Real alignmentError = PI;
-				const Real structureAngle = nearestStructure->getOrientation();
-				for (Int quarter = 0; quarter < 4; ++quarter)
+				if (isLocationLegalToBuild(
+						&candidate, build, candidateAngle, options, builderObject, player) == LBC_OK)
 				{
-					const Real err = fabs(stdAngleDiff(candidateAngle,
-						structureAngle + quarter * (PI * 0.5f)));
-					if (err < alignmentError)
-						alignmentError = err;
+					*resolvedPos = candidate;
+					*resolvedAngle = candidateAngle;
+					return TRUE;
 				}
-
-				const Real alignmentDistance =
-					captureRadius * 0.50f * (alignmentError / (PI * 0.5f));
-				score += alignmentDistance * alignmentDistance;
-
-				if (haveObstructionDirection)
-				{
-					// Prefer the building's rear axis toward the constrained side. This is a soft
-					// preference, not a command: legality and cursor proximity still dominate.
-					const Real backDirection = candidateAngle + PI;
-					const Real backError = fabs(stdAngleDiff(backDirection, obstructionAngle));
-					const Real backDistance =
-						captureRadius * 0.30f * (backError / PI);
-					score += backDistance * backDistance;
-				}
-			}
-
-			if (!found || score < bestScore - 0.001f ||
-				(fabs(score - bestScore) <= 0.001f && candidateAngle < bestAngle))
-			{
-				found = TRUE;
-				bestScore = score;
-				bestPos = candidate;
-				bestAngle = candidateAngle;
 			}
 		}
 	}
 
-	if (!found)
-		return FALSE;
-
-	*resolvedPos = bestPos;
-	*resolvedAngle = bestAngle;
-	return TRUE;
+	return FALSE;
 }
 
 //-------------------------------------------------------------------------------------------------

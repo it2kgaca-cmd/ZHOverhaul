@@ -1704,6 +1704,7 @@ void InGameUI::handleBuildPlacements()
 			playerPreferredAngleValid = TRUE;
 		}
 		Real angle = playerPreferredAngle;
+		Bool manualRotation = FALSE;
 
 		// update the angle of the icon to match any placement angle and pick the
 		// location the icon will be at (anchored is the start, otherwise it's the mouse)
@@ -1741,6 +1742,7 @@ void InGameUI::handleBuildPlacements()
 		{
 			const MouseIO *mouseIO = TheMouse->getMouseStatus();
 			const Bool shiftRotate = isInPreferSelectionMode();
+			manualRotation = shiftRotate;
 
 			if (shiftRotate)
 			{
@@ -1795,7 +1797,7 @@ void InGameUI::handleBuildPlacements()
 				{
 					resolvedLegal = TheBuildAssistant->findNearestLegalPlacement(
 						&world, m_pendingPlaceType, playerPreferredAngle, placementOptions,
-						builderObject, nullptr, &resolvedWorld, &resolvedAngle);
+						builderObject, nullptr, !manualRotation, &resolvedWorld, &resolvedAngle);
 				}
 				else
 				{
@@ -1808,40 +1810,9 @@ void InGameUI::handleBuildPlacements()
 						builderObject, nullptr) == LBC_OK;
 				}
 
-				Real stickyRelease = m_pendingPlaceType->getTemplateGeometryInfo().getMajorRadius() * 1.10f;
-				if (stickyRelease < PATHFIND_CELL_SIZE_F * 2.0f)
-					stickyRelease = PATHFIND_CELL_SIZE_F * 2.0f;
+				// The context solver is deterministic now; keep only the last resolved transform as
+				// lightweight memory. Avoid interpolating through extra legality tests every render frame.
 
-				if (smartPlacementEnabled && resolvedLegal && stickyValid)
-				{
-					// Smooth small legal movements of the snap solution. If interpolation
-					// would cross the obstruction, retain the previous legal transform
-					// until the new solution becomes cleanly reachable.
-					Coord3D smoothed = stickyPlacement;
-					smoothed.x += (resolvedWorld.x - stickyPlacement.x) * 0.45f;
-					smoothed.y += (resolvedWorld.y - stickyPlacement.y) * 0.45f;
-					smoothed.z = TheTerrainLogic->getGroundHeight(smoothed.x, smoothed.y);
-
-					if (TheBuildAssistant->isLocationLegalToBuild(
-							&smoothed, m_pendingPlaceType, resolvedAngle, placementOptions,
-							builderObject, nullptr) == LBC_OK)
-					{
-						resolvedWorld = smoothed;
-					}
-					else
-					{
-						const Real rawDx = rawWorld.x - stickyPlacement.x;
-						const Real rawDy = rawWorld.y - stickyPlacement.y;
-						if (rawDx*rawDx + rawDy*rawDy <= sqr(stickyRelease) &&
-								TheBuildAssistant->isLocationLegalToBuild(
-									&stickyPlacement, m_pendingPlaceType, stickyAngle, placementOptions,
-									builderObject, nullptr) == LBC_OK)
-						{
-							resolvedWorld = stickyPlacement;
-							resolvedAngle = stickyAngle;
-						}
-					}
-				}
 				if (resolvedLegal)
 				{
 					stickyPlacement = resolvedWorld;
