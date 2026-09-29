@@ -240,6 +240,8 @@ static Bool hasAttackedMeAndICanReturnFire( State *thisState, void* /*userData*/
 
 	const Bool stationaryArtillery = isStationaryGuardArtillery(obj);
 	const Bool noPursuit = guardMachine->getGuardMode() == GUARDMODE_GUARD_WITHOUT_PURSUIT;
+	if ((stationaryArtillery || noPursuit) && result != ATTACKRESULT_POSSIBLE)
+		return FALSE;
 
 	// A fixed-post artillery Guard order is an emplacement contract: reach the post first.
 	if (stationaryArtillery && thisState->getID() == AI_GUARD_RETURN)
@@ -408,7 +410,8 @@ AIGuardMachine::~AIGuardMachine()
 Bool AIGuardMachine::lookForInnerTarget()
 {
 	Object* owner = getOwner();
-	if (!owner->isAbleToAttack())
+	Player *controllingPlayer = owner ? owner->getControllingPlayer() : nullptr;
+	if (!owner || !controllingPlayer || !owner->isAbleToAttack())
 	{
 		return false;	// my, that was easy
 	}
@@ -420,8 +423,11 @@ Bool AIGuardMachine::lookForInnerTarget()
 		teamVictim = owner->getTeam()->getTeamTargetObject();
 		if (teamVictim && isStationaryGuardArtillery(owner))
 		{
+			const CanAttackResult result = owner->getAbleToAttackSpecificObject(
+				ATTACK_NEW_TARGET, teamVictim, CMD_FROM_AI);
 			if (!isGuardTargetVisibleToOwner(owner, teamVictim) ||
-					!isWithinAnyGuardWeaponRange(owner, teamVictim))
+					!isWithinAnyGuardWeaponRange(owner, teamVictim) ||
+					result != ATTACKRESULT_POSSIBLE)
 				teamVictim = nullptr;
 		}
 		if (teamVictim)
@@ -443,7 +449,7 @@ Bool AIGuardMachine::lookForInnerTarget()
 	PartitionFilterRelationship					f5(owner, PartitionFilterRelationship::ALLOW_NEUTRAL);
 	PartitionFilterPossibleToEnter			f6(owner, CMD_FROM_AI);
 	PartitionFilterPossibleToHijack			f7(owner, CMD_FROM_AI);
-	PartitionFilterFreeOfFog					f8(owner->getControllingPlayer()->getPlayerIndex());
+	PartitionFilterFreeOfFog					f8(controllingPlayer->getPlayerIndex());
 
 	PartitionFilter *filters[16];
 	Int count = 0;
@@ -513,7 +519,10 @@ Bool AIGuardMachine::lookForInnerTarget()
 		for (Object *candidate = iter ? iter->first() : nullptr;
 			 candidate != nullptr; candidate = iter->next())
 		{
-			if (isWithinAnyGuardWeaponRange(owner, candidate))
+			const CanAttackResult result = owner->getAbleToAttackSpecificObject(
+				ATTACK_NEW_TARGET, candidate, CMD_FROM_AI);
+			if (isWithinAnyGuardWeaponRange(owner, candidate) &&
+					result == ATTACKRESULT_POSSIBLE)
 			{
 				target = candidate;
 				break;
