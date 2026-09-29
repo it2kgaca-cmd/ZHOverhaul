@@ -1140,15 +1140,29 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 	// Deterministic local candidate set. The raw player angle always participates. Near another
 	// structure, also try matching its axis and the perpendicular axis; blocked placements get
 	// quarter-turn alternatives before the small fallback angle sweep.
-	Real candidateAngles[16];
+	Real candidateAngles[20];
 	Int angleCount = 0;
 	candidateAngles[angleCount++] = desiredAngle;
 
+	Bool haveObstructionDirection = FALSE;
+	Real obstructionAngle = 0.0f;
 	if (nearestStructure)
 	{
 		const Real structureAngle = nearestStructure->getOrientation();
 		for (Int quarter = 0; quarter < 4; ++quarter)
 			candidateAngles[angleCount++] = structureAngle + quarter * (PI * 0.5f);
+
+		// The structure is the constrained side of the local placement. A useful additional
+		// candidate points the new building's front away from it, which naturally leaves the
+		// back/service side toward the obstruction while still competing against parallel alignment.
+		const Real obstacleDx = nearestStructure->getPosition()->x - desiredPos->x;
+		const Real obstacleDy = nearestStructure->getPosition()->y - desiredPos->y;
+		if (fabs(obstacleDx) > 0.001f || fabs(obstacleDy) > 0.001f)
+		{
+			obstructionAngle = atan2(obstacleDy, obstacleDx);
+			haveObstructionDirection = TRUE;
+			candidateAngles[angleCount++] = obstructionAngle + PI;
+		}
 	}
 
 	candidateAngles[angleCount++] = desiredAngle + PI * 0.5f;
@@ -1158,7 +1172,7 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 	if (initial != LBC_OK)
 	{
 		const Real angleStep = DEG_TO_RADF(5.0f);
-		for (Int step = 1; step <= 4 && angleCount + 1 < 16; ++step)
+		for (Int step = 1; step <= 4 && angleCount + 1 < 20; ++step)
 		{
 			candidateAngles[angleCount++] = desiredAngle + angleStep * step;
 			candidateAngles[angleCount++] = desiredAngle - angleStep * step;
@@ -1231,6 +1245,17 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 				const Real alignmentDistance =
 					captureRadius * 0.50f * (alignmentError / (PI * 0.5f));
 				score += alignmentDistance * alignmentDistance;
+
+				if (haveObstructionDirection)
+				{
+					// Prefer the building's rear axis toward the constrained side. This is a soft
+					// preference, not a command: legality and cursor proximity still dominate.
+					const Real backDirection = candidateAngle + PI;
+					const Real backError = fabs(stdAngleDiff(backDirection, obstructionAngle));
+					const Real backDistance =
+						captureRadius * 0.30f * (backError / PI);
+					score += backDistance * backDistance;
+				}
 			}
 
 			if (!found || score < bestScore - 0.001f ||
