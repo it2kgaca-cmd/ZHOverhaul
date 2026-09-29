@@ -1344,8 +1344,8 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 		if (haveCursorBias && ambiguousObstruction && combinedWeight > 0.0f)
 		{
 			const Real cursorWeight = combinedWeight * 0.35f;
-			combinedX += Cos(cursorMoveAngle) * cursorWeight;
-			combinedY += Sin(cursorMoveAngle) * cursorWeight;
+			combinedX += cosf(cursorMoveAngle) * cursorWeight;
+			combinedY += sinf(cursorMoveAngle) * cursorWeight;
 		}
 
 		const Real vectorLenSqr = combinedX*combinedX + combinedY*combinedY;
