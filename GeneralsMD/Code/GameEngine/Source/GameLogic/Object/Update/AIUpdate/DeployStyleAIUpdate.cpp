@@ -54,25 +54,7 @@
 // because deploy units such as the Nuke Cannon disable their turret while packed.
 static Bool isFixedPostDeployArtillery(AIUpdateInterface *ai, Object *self)
 {
-	if (ai == nullptr || self == nullptr ||
-			ai->getAIStateType() != AI_GUARD ||
-			ai->getGuardTargetType() != GUARDTARGET_LOCATION)
-		return FALSE;
-
-	Real longestWeaponRange = 0.0f;
-	for (Int slotIndex = 0; slotIndex < WEAPONSLOT_COUNT; ++slotIndex)
-	{
-		Weapon *weapon = self->getWeaponInWeaponSlot(static_cast<WeaponSlotType>(slotIndex));
-		if (weapon)
-			longestWeaponRange = max(longestWeaponRange, weapon->getAttackRange(self));
-	}
-
-	if (longestWeaponRange <= 0.0f)
-		return FALSE;
-
-	const Real visionRange = TheAI->getAdjustedVisionRangeForObject(self,
-		AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
-	return longestWeaponRange > visionRange * 1.10f;
+	return self && ai && ai->isFixedPostGuardArtillery();
 }
 
 //-------------------------------------------------------------------------------------------------
