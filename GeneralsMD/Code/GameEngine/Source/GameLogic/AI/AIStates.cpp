@@ -258,6 +258,33 @@ void AttackStateMachine::loadPostProcess()
 static Bool inWeaponRangeObject(State *thisState, void* userData);
 
 //----------------------------------------------------------------------------------------------------------
+// A fixed-location Guard order turns long-range artillery into an emplacement.
+// This check deliberately uses ordinary perception only for classification;
+// actual targeting remains governed by player shroud visibility and weapon legality.
+static Bool isFixedPostGuardArtillery(Object *obj, AIUpdateInterface *ai)
+{
+	if (obj == nullptr || ai == nullptr ||
+			ai->getAIStateType() != AI_GUARD ||
+			ai->getGuardTargetType() != GUARDTARGET_LOCATION)
+		return FALSE;
+
+	Real longestWeaponRange = 0.0f;
+	for (Int slotIndex = 0; slotIndex < WEAPONSLOT_COUNT; ++slotIndex)
+	{
+		Weapon *weapon = obj->getWeaponInWeaponSlot(static_cast<WeaponSlotType>(slotIndex));
+		if (weapon)
+			longestWeaponRange = max(longestWeaponRange, weapon->getAttackRange(obj));
+	}
+
+	if (longestWeaponRange <= 0.0f)
+		return FALSE;
+
+	const Real visionRange = TheAI->getAdjustedVisionRangeForObject(obj,
+		AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
+	return longestWeaponRange > visionRange * 1.10f;
+}
+
+//----------------------------------------------------------------------------------------------------------
 /**
  * Create an AI state machine. Define all of the states the machine
  * can possibly be in, and set the initial (default) state.
@@ -2647,6 +2674,11 @@ StateReturnType AIAttackApproachTargetState::onEnter()
 			}
 		}
 
+		// Fixed-post artillery never walks forward, sideways, or around an obstruction to improve
+		// an auto-acquired Guard shot. If it cannot shoot from the post, drop this engagement.
+		if (isFixedPostGuardArtillery(source, ai))
+			return STATE_FAILURE;
+
 		// Check here:  If we are a player, and we got to this state via an ai command (ie we auto-acquired),
 		// we don't want to chase the unit. isAllowedToChase is set when we are in a deploy and attack state (troop crawler).
 		// Kris (July 2003): If we are retaliating... don't fail out!
@@ -2763,6 +2795,8 @@ StateReturnType AIAttackApproachTargetState::updateInternal()
 				return STATE_SUCCESS;
 			}
 		}
+		if (isFixedPostGuardArtillery(source, ai))
+			return STATE_FAILURE;
 		// find a good spot to shoot from
 		//CRCDEBUG_LOG(("AIAttackApproachTargetState::updateInternal() - calling computePath() to victim for object %d", getMachineOwner()->getID()));
 		if (computePath() == false)
@@ -3018,6 +3052,11 @@ StateReturnType AIAttackPursueTargetState::onEnter()
 	}
 
 	setAdjustsDestination(false);
+
+	// Fixed-post artillery does not pursue. Let the attack machine fall through to Approach,
+	// where the same emplacement contract prevents any repositioning path from being created.
+	if (isFixedPostGuardArtillery(source, ai))
+		return STATE_SUCCESS;
 
 	// Check here:  If we are a player, and we got to this state via an ai command (ie we auto-acquired),
 	// we don't want to chase the unit.
