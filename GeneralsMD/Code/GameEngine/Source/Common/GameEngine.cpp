@@ -854,35 +854,32 @@ Bool GameEngine::canUpdateRegularGameLogic(UnsignedInt logicTimeQueryFlags)
 	const Int logicTimeScaleFps = TheFramePacer->getActualLogicTimeScaleFps(logicTimeQueryFlags);
 
 	if (logicTimeScaleFps <= 0)
-	{
 		return false;
-	}
-
-	const Int maxRenderFps = TheFramePacer->getActualFramesPerSecondLimit();
 
 #if defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
 	const Bool useFastMode = TheGlobalData->m_TiVOFastMode;
-#else	//always allow this cheat key if we're in a replay game.
+#else
 	const Bool useFastMode = TheGlobalData->m_TiVOFastMode && TheGameLogic->isInReplayGame();
 #endif
 
-	if (useFastMode || logicTimeScaleFps >= maxRenderFps)
+	// Logic-time scaling disabled means retail behavior: one logic step per render update.
+	if (useFastMode || !TheFramePacer->isLogicTimeScaleEnabled())
 	{
-		// Logic time scale is uncapped or larger equal Render FPS. Update straight away.
+		m_logicTimeAccumulator = 0.0f;
 		return true;
 	}
-	else
-	{
-		// TheSuperHackers @tweak xezon 06/08/2025
-		// The logic time step is now decoupled from the render update.
-		const Real targetFrameTime = 1.0f / logicTimeScaleFps;
-		m_logicTimeAccumulator += min(TheFramePacer->getUpdateTime(), targetFrameTime);
 
-		if (m_logicTimeAccumulator >= targetFrameTime)
-		{
-			m_logicTimeAccumulator -= targetFrameTime;
-			return true;
-		}
+	// Accumulate real render time against the requested logic frequency. Unlike the old
+	// implementation this also retains debt when logic FPS is above render FPS; update()
+	// consumes that debt with additional deterministic logic ticks.
+	const Real targetFrameTime = 1.0f / logicTimeScaleFps;
+	const Real frameDelta = min(TheFramePacer->getUpdateTime(), 0.25f);
+	m_logicTimeAccumulator += frameDelta;
+
+	if (m_logicTimeAccumulator >= targetFrameTime)
+	{
+		m_logicTimeAccumulator -= targetFrameTime;
+		return true;
 	}
 
 	return false;
@@ -924,6 +921,31 @@ void GameEngine::update()
 			if (!TheFramePacer->isTimeFrozen())
 			{
 				TheGameClient->step();
+			}
+
+			// ZHOverhaul: a requested logic rate may exceed the render rate. Consume the
+			// remaining accumulated logic debt now so 60 Hz rendering can still run a 120 Hz
+			// simulation. Bound catch-up work per render to avoid pathological stalls.
+			if (TheNetwork == nullptr && TheFramePacer->isLogicTimeScaleEnabled())
+			{
+				const Int logicTimeScaleFps =
+					TheFramePacer->getActualLogicTimeScaleFps(FramePacer::IgnoreFrozenTime);
+				if (logicTimeScaleFps > 0)
+				{
+					const Real targetFrameTime = 1.0f / logicTimeScaleFps;
+					static const Int MAX_EXTRA_LOGIC_TICKS_PER_RENDER = 7;
+					Int extraLogicTicks = 0;
+
+					while (m_logicTimeAccumulator >= targetFrameTime &&
+						extraLogicTicks < MAX_EXTRA_LOGIC_TICKS_PER_RENDER)
+					{
+						m_logicTimeAccumulator -= targetFrameTime;
+						TheGameLogic->UPDATE();
+						if (!TheFramePacer->isTimeFrozen())
+							TheGameClient->step();
+						++extraLogicTicks;
+					}
+				}
 			}
 
 #if defined(RTS_ZEROHOUR)

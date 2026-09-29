@@ -34,6 +34,7 @@
 #include "Common/BattleHonors.h"
 #include "Common/FileSystem.h"
 #include "Common/GameEngine.h"
+#include "Common/FramePacer.h"
 #include "Common/PlayerTemplate.h"
 #include "Common/QuotedPrintable.h"
 #include "Common/RandomValue.h"
@@ -149,7 +150,11 @@ static Bool buttonPushed = FALSE;
 static Bool stillNeedsToSetOptions = FALSE;
 void skirmishUpdateSlotList();
 static void populateSkirmishBattleHonors();
-enum{ GREATER_NO_FPS_LIMIT = 60};
+enum
+{
+	GAME_SPEED_MIN_FPS = 30,
+	GAME_SPEED_MAX_FPS = 120
+};
 Bool doUpdateSlotList = TRUE;
 
 static Int getNextSelectablePlayer(Int start)
@@ -397,21 +402,15 @@ void setFPSTextBox( Int sliderPos )
 {
 	if(!staticTextGameSpeed)
 		return;
+
+	if (sliderPos < GAME_SPEED_MIN_FPS)
+		sliderPos = GAME_SPEED_MIN_FPS;
+	else if (sliderPos > GAME_SPEED_MAX_FPS)
+		sliderPos = GAME_SPEED_MAX_FPS;
+
 	UnicodeString text;
 	staticTextGameSpeed->winEnable(TRUE);
-	if(sliderPos > GREATER_NO_FPS_LIMIT)
-	{
-		// set static text to --
-		text.set(L"--");
-		GadgetStaticTextSetText(staticTextGameSpeed, text);
-		return;
-	}
-	else if( sliderPos == TheGlobalData->m_framesPerSecondLimit )
-	{
-		// set different color
-		staticTextGameSpeed->winEnable(FALSE);
-	}
-	text.format(L"%2d", sliderPos);
+	text.format(L"%3d", sliderPos);
 	GadgetStaticTextSetText(staticTextGameSpeed, text);
 }
 
@@ -424,10 +423,11 @@ void reallyDoStart()
 	GameWindow *sliderGameSpeed = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, sliderGameSpeedID );
 	Int maxFPS = GadgetSliderGetPosition( sliderGameSpeed );
 	DEBUG_LOG(("GameSpeedSlider was at %d", maxFPS));
-	if (maxFPS > GREATER_NO_FPS_LIMIT)
-		maxFPS = 1000;
-	if (maxFPS < 15)
-		maxFPS = 15;
+	maxFPS = max(GAME_SPEED_MIN_FPS, min(GAME_SPEED_MAX_FPS, maxFPS));
+
+	TheFramePacer->setLogicTimeScaleFps(maxFPS);
+	TheFramePacer->enableLogicTimeScale(TRUE);
+	TheFramePacer->reset();
 
   TheWritableGlobalData->m_mapName = TheSkirmishGameInfo->getMap();
   TheSkirmishGameInfo->startGame(0);
@@ -1347,7 +1347,20 @@ void SkirmishGameOptionsMenuInit( WindowLayout *layout, void *userData )
 	// set up the game speed slider
 //	NameKeyType sliderGameSpeedID = TheNameKeyGenerator->nameToKey( "SkirmishGameOptionsMenu.wnd:SliderGameSpeed" );
 	GameWindow *sliderGameSpeed = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, sliderGameSpeedID );
-	Int sliderPos = max(15,min(61,prefs.getInt("FPS", TheGlobalData->m_framesPerSecondLimit)));
+	SliderData *speedData = sliderGameSpeed ? (SliderData *)sliderGameSpeed->winGetUserData() : nullptr;
+	if (speedData)
+	{
+		Int sliderWidth = 0;
+		Int sliderHeight = 0;
+		sliderGameSpeed->winGetSize(&sliderWidth, &sliderHeight);
+		speedData->minVal = GAME_SPEED_MIN_FPS;
+		speedData->maxVal = GAME_SPEED_MAX_FPS;
+		speedData->numTicks = (Real)(sliderWidth - HORIZONTAL_SLIDER_THUMB_WIDTH) /
+			(Real)(GAME_SPEED_MAX_FPS - GAME_SPEED_MIN_FPS);
+	}
+
+	Int sliderPos = max(GAME_SPEED_MIN_FPS,
+		min(GAME_SPEED_MAX_FPS, prefs.getInt("FPS", LOGICFRAMES_PER_SECOND)));
 	GadgetSliderSetPosition( sliderGameSpeed, sliderPos );
 	setFPSTextBox(sliderPos);
 	buttonStart->winSetText(TheGameText->fetch("GUI:Start"));

@@ -36,6 +36,7 @@
 #include "Common/AudioSettings.h"
 #include "Common/GameAudio.h"
 #include "Common/GameEngine.h"
+#include "Common/FramePacer.h"
 #include "Common/OptionPreferences.h"
 #include "Common/GameLOD.h"
 #include "Common/Recorder.h"
@@ -108,6 +109,10 @@ static GameWindow *		checkDoubleClickAttackMove		= nullptr;
 
 static NameKeyType		sliderScrollSpeedID	= NAMEKEY_INVALID;
 static GameWindow *		sliderScrollSpeed		= nullptr;
+
+static NameKeyType		sliderGameSpeedID	= NAMEKEY_INVALID;
+static GameWindow *		sliderGameSpeed		= nullptr;
+static GameWindow *		staticTextGameSpeed	= nullptr;
 
 static NameKeyType    checkLanguageFilterID = NAMEKEY_INVALID;
 static GameWindow *   checkLanguageFilter   = nullptr;
@@ -215,6 +220,96 @@ WindowLayout *OptionsLayout = nullptr;
 
 static OptionPreferences *pref = nullptr;
 
+enum
+{
+	GAME_SPEED_MIN_FPS = 30,
+	GAME_SPEED_MAX_FPS = 120
+};
+
+static Int clampGameSpeed(Int speed)
+{
+	if (speed < GAME_SPEED_MIN_FPS)
+		return GAME_SPEED_MIN_FPS;
+	if (speed > GAME_SPEED_MAX_FPS)
+		return GAME_SPEED_MAX_FPS;
+	return speed;
+}
+
+static void updateGameSpeedLabel(Int speed)
+{
+	if (!staticTextGameSpeed)
+		return;
+
+	UnicodeString text;
+	text.format(L"Game Speed: %d", clampGameSpeed(speed));
+	GadgetStaticTextSetText(staticTextGameSpeed, text);
+}
+
+static void initGameSpeedControl()
+{
+	sliderGameSpeed = nullptr;
+	staticTextGameSpeed = nullptr;
+	sliderGameSpeedID = TheNameKeyGenerator->nameToKey("OptionsMenu.wnd:SliderGameSpeedRuntime");
+
+	// The stock layout has an obsolete HTTP-proxy row. Reuse that exact row so the new control
+	// fits the shipped OptionsMenu.wnd without requiring a replacement layout asset.
+	GameWindow *legacyLabel = TheWindowManager->winGetWindowFromId(
+		nullptr, TheNameKeyGenerator->nameToKey("OptionsMenu.wnd:StaticTextHTTPProxy"));
+	GameWindow *legacyEntry = TheWindowManager->winGetWindowFromId(
+		nullptr, TheNameKeyGenerator->nameToKey("OptionsMenu.wnd:TextEntryHTTPProxy"));
+	if (!legacyLabel || !legacyEntry)
+		return;
+
+	staticTextGameSpeed = legacyLabel;
+	legacyLabel->winHide(FALSE);
+	legacyEntry->winHide(TRUE);
+
+	Int x = 0, y = 0, width = 0, height = 0;
+	legacyEntry->winGetPosition(&x, &y);
+	legacyEntry->winGetSize(&width, &height);
+
+	SliderData sliderData;
+	memset(&sliderData, 0, sizeof(sliderData));
+	sliderData.minVal = GAME_SPEED_MIN_FPS;
+	sliderData.maxVal = GAME_SPEED_MAX_FPS;
+	sliderData.position = GAME_SPEED_MIN_FPS;
+
+	WinInstanceData instData;
+	instData.init();
+	instData.m_style = GWS_HORZ_SLIDER | GWS_MOUSE_TRACK;
+
+	sliderGameSpeed = TheWindowManager->gogoGadgetSlider(
+		legacyEntry->winGetParent(),
+		WIN_STATUS_ENABLED | WIN_STATUS_IMAGE,
+		x, y, width, height,
+		&instData, &sliderData, legacyEntry->winGetFont(), TRUE);
+
+	if (!sliderGameSpeed)
+		return;
+
+	sliderGameSpeed->winSetWindowId(sliderGameSpeedID);
+
+	Int initialSpeed = GAME_SPEED_MIN_FPS;
+	if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame())
+	{
+		if (TheFramePacer->isLogicTimeScaleEnabled())
+			initialSpeed = TheFramePacer->getLogicTimeScaleFps();
+	}
+	else if (pref)
+	{
+		AsciiString savedSpeed = (*pref)["GameSpeedFPS"];
+		if (!savedSpeed.isEmpty())
+			initialSpeed = atoi(savedSpeed.str());
+	}
+
+	initialSpeed = clampGameSpeed(initialSpeed);
+	GadgetSliderSetPosition(sliderGameSpeed, initialSpeed);
+	updateGameSpeedLabel(initialSpeed);
+
+	if (TheGameLogic->isInMultiplayerGame())
+		sliderGameSpeed->winEnable(FALSE);
+}
+
 static void setDefaults()
 {
 	constexpr const Bool ModifyDisplaySettings = FALSE;
@@ -268,6 +363,12 @@ static void setDefaults()
 //	// scroll speed val
 	Int scrollPos = (Int)(TheGlobalData->m_keyboardDefaultScrollFactor*100.0f);
 	GadgetSliderSetPosition( sliderScrollSpeed, scrollPos );
+
+	if (sliderGameSpeed)
+	{
+		GadgetSliderSetPosition(sliderGameSpeed, GAME_SPEED_MIN_FPS);
+		updateGameSpeedLabel(GAME_SPEED_MIN_FPS);
+	}
 
 
 	Int valMin, valMax;
@@ -623,6 +724,27 @@ static void saveOptions()
 		AsciiString prefString;
 		prefString.format("%d", val);
 		(*pref)["ScrollFactor"] = prefString;
+	}
+
+	//-------------------------------------------------------------------------------------------------
+	// game speed (logic time scale)
+	if (sliderGameSpeed)
+	{
+		val = clampGameSpeed(GadgetSliderGetPosition(sliderGameSpeed));
+		AsciiString speedPref;
+		speedPref.format("%d", val);
+		(*pref)["GameSpeedFPS"] = speedPref;
+
+		if (TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() &&
+			!TheGameLogic->isInMultiplayerGame())
+		{
+			TheFramePacer->setLogicTimeScaleFps(val);
+			TheFramePacer->enableLogicTimeScale(TRUE);
+
+			// Logic can now run above render FPS, but reset the render timing anchor so time spent
+			// in the Options menu does not become catch-up debt on close.
+			TheFramePacer->reset();
+		}
 	}
 
 	//-------------------------------------------------------------------------------------------------
@@ -1134,19 +1256,8 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 		}
 	}
 
-#if ENABLE_GUI_HACKS
-	// TheSuperHackers @tweak 26/07/2026 The http proxy feature was obsoleted because it did nothing for the UDP game traffic or match sockets.
-	// Hide the relevant obsoleted UI elements accordingly.
-	NameKeyType textEntryHTTPProxyID = TheNameKeyGenerator->nameToKey("OptionsMenu.wnd:TextEntryHTTPProxy");
-	GameWindow *textEntryHTTPProxy = TheWindowManager->winGetWindowFromId(nullptr, textEntryHTTPProxyID);
-	if (textEntryHTTPProxy)
-		textEntryHTTPProxy->winHide(TRUE);
-
-	NameKeyType staticTextHTTPProxyID = TheNameKeyGenerator->nameToKey("OptionsMenu.wnd:StaticTextHTTPProxy");
-	GameWindow *staticTextHTTPProxy = TheWindowManager->winGetWindowFromId(nullptr, staticTextHTTPProxyID);
-	if (staticTextHTTPProxy)
-		staticTextHTTPProxy->winHide(TRUE);
-#endif
+	// Replace the obsolete HTTP-proxy row with the runtime game-speed control.
+	initGameSpeedControl();
 
 	// Firewall Port Override
 	GameWindow *textEntryFirewallPortOverride = TheWindowManager->winGetWindowFromId(nullptr, NAMEKEY("OptionsMenu.wnd:TextEntryFirewallPortOverride"));
@@ -1575,6 +1686,18 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 
 					showAdvancedOptions();
 				}
+			break;
+		}
+
+		//---------------------------------------------------------------------------------------------
+		case GSM_SLIDER_TRACK:
+		{
+			GameWindow *control = (GameWindow *)mData1;
+			if (control && control->winGetWindowId() == sliderGameSpeedID)
+			{
+				updateGameSpeedLabel((Int)mData2);
+				return MSG_HANDLED;
+			}
 			break;
 		}
 

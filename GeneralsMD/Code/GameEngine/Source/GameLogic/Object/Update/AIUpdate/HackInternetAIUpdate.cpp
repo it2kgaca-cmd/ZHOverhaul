@@ -84,8 +84,8 @@ Bool HackInternetAIUpdate::isIdle() const
 //-------------------------------------------------------------------------------------------------
 Bool HackInternetAIUpdate::isHacking() const
 {
-	// Income is passive now; there is no dedicated "hack internet" mode.
-	return true;
+	// Passive income is not an active command-mode state.
+	return false;
 }
 
 //-------------------------------------------------------------------------------------------------
