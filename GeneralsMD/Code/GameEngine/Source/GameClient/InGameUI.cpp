@@ -1665,12 +1665,8 @@ static Object *findClosestSelectedBuilderForPlacementPreview(const ThingTemplate
 //-------------------------------------------------------------------------------------------------
 void InGameUI::handleBuildPlacements()
 {
-	// Magnetic placement keeps a little temporal memory so equally-good legal
-	// samples do not alternate every rendered frame.
+	// Track placement type only so a newly selected building starts from its own preferred angle.
 	static const ThingTemplate *stickyBuildType = nullptr;
-	static Coord3D stickyPlacement;
-	static Real stickyAngle = 0.0f;
-	static Bool stickyValid = FALSE;
 
 	// Environmental suggestions never become the player's preferred rotation. When the cursor
 	// leaves nearby obstructions, the ghost therefore returns to the player's/default angle.
@@ -1685,7 +1681,6 @@ void InGameUI::handleBuildPlacements()
 	if (stickyBuildType != m_pendingPlaceType)
 	{
 		stickyBuildType = m_pendingPlaceType;
-		stickyValid = FALSE;
 		playerPreferredAngleValid = FALSE;
 		shiftRotateActive = FALSE;
 	}
@@ -1786,7 +1781,6 @@ void InGameUI::handleBuildPlacements()
 				BuildAssistant::SHROUD_REVEALED |
 				BuildAssistant::IGNORE_STEALTHED;
 
-			Coord3D rawWorld = world;
 			Coord3D resolvedWorld = world;
 			Real resolvedAngle = angle;
 			Bool resolvedLegal = FALSE;
@@ -1810,19 +1804,6 @@ void InGameUI::handleBuildPlacements()
 						builderObject, nullptr) == LBC_OK;
 				}
 
-				// The context solver is deterministic now; keep only the last resolved transform as
-				// lightweight memory. Avoid interpolating through extra legality tests every render frame.
-
-				if (resolvedLegal)
-				{
-					stickyPlacement = resolvedWorld;
-					stickyAngle = resolvedAngle;
-					stickyValid = TRUE;
-				}
-				else
-				{
-					stickyValid = FALSE;
-				}
 			}
 
 			if (resolvedLegal)
@@ -1834,8 +1815,8 @@ void InGameUI::handleBuildPlacements()
 			m_placeIcon[0]->setPosition(&world);
 			m_placeIcon[0]->setOrientation(angle);
 
-			// Validity feedback is immediate and authoritative. Hysteresis may choose between legal
-			// suggestions, but it may never retain a stale legal ghost after the current pose fails.
+			// Validity feedback is immediate and authoritative; smart placement never retains a stale
+			// legal transform after the current pose fails.
 			TheTerrainVisual->removeAllBibs();
 
 			LegalBuildCode lbc = LBC_GENERIC_FAILURE;
