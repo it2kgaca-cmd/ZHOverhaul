@@ -55,6 +55,7 @@
 #include "GameLogic/ObjectTypes.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/PolygonTrigger.h"
+#include "GameLogic/ScriptActions.h"
 #include "GameLogic/ScriptConditions.h"
 #include "GameLogic/ScriptEngine.h"
 #include "GameLogic/Scripts.h"
@@ -2741,6 +2742,11 @@ Bool ScriptConditions::evaluateCondition( Condition *pCondition )
 		case Condition::TEAM_HAS_UNITS:
 			return evaluateHasUnits(pCondition->getParameter(0));
 		case Condition::CAMERA_MOVEMENT_FINISHED:
+			if (TheScriptActions && TheScriptActions->isCinematicSkipFastForwarding())
+			{
+				TheTacticalView->finishScriptedCameraImmediately();
+				return TRUE;
+			}
 			return TheTacticalView->isCameraMovementFinished();
 		case Condition::TEAM_STATE_IS:
 			return evaluateTeamStateIs(pCondition->getParameter(0), pCondition->getParameter(1));

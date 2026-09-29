@@ -3419,6 +3419,72 @@ void W3DView::stopDoingScriptedCamera()
 }
 
 // ------------------------------------------------------------------------------------------------
+/** Resolve every active scripted camera component to the state it would have at completion. */
+// ------------------------------------------------------------------------------------------------
+void W3DView::finishScriptedCameraImmediately()
+{
+	// Move-path and rotate are normally mutually exclusive, but keep these independent for defensive
+	// robustness. Camera modifiers such as final look/pitch/zoom have already written their endpoint
+	// into these state records by the time this is called.
+	if (hasScriptedState(Scripted_MoveOnWaypointPath))
+	{
+		const Int finalIndex = m_mcwpInfo.numWaypoints;
+		if (finalIndex >= 0 && finalIndex < MAX_WAYPOINTS + 2)
+		{
+			const Coord3D finalPos = m_mcwpInfo.waypoints[finalIndex];
+			setPosition(finalPos);
+			View::setAngle(m_mcwpInfo.cameraAngle[finalIndex]);
+
+			// Match normal moveAlongWaypointPath completion: scripted cameras may finish outside the
+			// ordinary user-camera constraint rectangle.
+			m_cameraAreaConstraints.lo.x = minf(m_cameraAreaConstraints.lo.x, finalPos.x);
+			m_cameraAreaConstraints.hi.x = maxf(m_cameraAreaConstraints.hi.x, finalPos.x);
+			m_cameraAreaConstraints.lo.y = minf(m_cameraAreaConstraints.lo.y, finalPos.y);
+			m_cameraAreaConstraints.hi.y = maxf(m_cameraAreaConstraints.hi.y, finalPos.y);
+		}
+	}
+
+	if (hasScriptedState(Scripted_Rotate))
+	{
+		if (m_rcInfo.trackObject)
+		{
+			const Object *obj = TheGameLogic->findObjectByID(m_rcInfo.target.targetObjectID);
+			if (obj)
+			{
+				const Coord3D &targetPos = *obj->getPosition();
+				const Vector2 dir(targetPos.x - m_pos.x, targetPos.y - m_pos.y);
+				const Real dirLength = dir.Length();
+				if (dirLength >= 0.1f)
+				{
+					Real angle = WWMath::Acos(dir.X / dirLength);
+					if (dir.Y < 0.0f)
+						angle = -angle;
+					angle -= PI / 2;
+					normAngle(angle);
+					View::setAngle(angle);
+				}
+			}
+		}
+		else
+		{
+			View::setAngle(m_rcInfo.angle.endAngle);
+		}
+	}
+
+	if (hasScriptedState(Scripted_Zoom))
+		m_zoom = m_zcInfo.endZoom;
+
+	if (hasScriptedState(Scripted_Pitch))
+		m_FXPitch = m_pcInfo.endPitch;
+
+	m_scriptedState = 0;
+	m_freezeTimeForCameraMovement = false;
+	m_timeMultiplier = 1;
+	m_CameraArrivedAtWaypointOnPathFlag = false;
+	m_recalcCamera = true;
+}
+
+// ------------------------------------------------------------------------------------------------
 Bool W3DView::hasScriptedState(ScriptedState state) const
 {
 	return (m_scriptedState & state) != 0;

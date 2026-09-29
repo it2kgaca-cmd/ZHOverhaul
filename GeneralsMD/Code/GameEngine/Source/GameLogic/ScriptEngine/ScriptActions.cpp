@@ -250,8 +250,9 @@ void ScriptActions::finishCinematicSkipFastForward(Bool aborted)
 
 	if (TheTacticalView)
 	{
-		// Preserve the camera transform reached by the simulated endpoint, but release cinematic control.
-		TheTacticalView->stopDoingScriptedCamera();
+		// ENABLE_INPUT may be issued immediately after a final timed RESET/MOVE/PITCH/ROTATE. Resolve
+		// the active camera state to its exact scripted endpoint before releasing cinematic ownership.
+		TheTacticalView->finishScriptedCameraImmediately();
 		TheTacticalView->lockUserControlUntilFrame(0);
 		TheTacticalView->setCameraLock(INVALID_ID);
 		TheTacticalView->setCameraLockDrawable(nullptr);

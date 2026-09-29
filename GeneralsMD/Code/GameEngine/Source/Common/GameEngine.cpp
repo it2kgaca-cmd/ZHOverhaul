@@ -929,16 +929,19 @@ void GameEngine::update()
 #if defined(RTS_ZEROHOUR)
 			// ZHOverhaul: ESC on an in-engine cinematic means "resolve it", not merely "hide it". Run
 			// additional normal logic frames without rendering until the script reaches ENABLE_INPUT.
-			// Batching keeps the OS responsive on long/broken cinematics; GameClient suppresses draws while
-			// this state is active. This is deliberately single-player only.
+			// Keep each catch-up slice tightly time-budgeted: the old 128-tick burst could spend hundreds
+			// of milliseconds in AI/pathfinding and look like a freeze. Presentation-only waits are
+			// collapsed elsewhere; world-dependent consequences still use real logic ticks.
 			if (TheScriptActions && TheScriptActions->isCinematicSkipFastForwarding() && TheNetwork == nullptr)
 			{
-				static const Int CINEMATIC_SKIP_TICKS_PER_UPDATE = 128;
+				static const Int CINEMATIC_SKIP_MAX_TICKS_PER_UPDATE = 24;
+				static const DWORD CINEMATIC_SKIP_TIME_BUDGET_MS = 8;
 				static const UnsignedInt CINEMATIC_SKIP_MAX_LOGIC_FRAMES = 10 * 60 * LOGICFRAMES_PER_SECOND;
 
+				const DWORD sliceStart = timeGetTime();
 				Int fastForwardTicks = 0;
 				while (TheScriptActions->isCinematicSkipFastForwarding() &&
-					fastForwardTicks < CINEMATIC_SKIP_TICKS_PER_UPDATE)
+					fastForwardTicks < CINEMATIC_SKIP_MAX_TICKS_PER_UPDATE)
 				{
 					if (!TheGameLogic->isInGame() || TheGameLogic->isGamePaused())
 					{
@@ -950,6 +953,9 @@ void GameEngine::update()
 					if (!TheFramePacer->isTimeFrozen())
 						TheGameClient->step();
 					++fastForwardTicks;
+
+					if ((timeGetTime() - sliceStart) >= CINEMATIC_SKIP_TIME_BUDGET_MS)
+						break;
 
 					if (TheScriptActions->isCinematicSkipFastForwarding())
 					{

@@ -184,6 +184,7 @@ public:
 
 	virtual Bool isDoingScriptedCamera() = 0;
 	virtual void stopDoingScriptedCamera() = 0;
+	virtual void finishScriptedCameraImmediately() { stopDoingScriptedCamera(); } ///< Resolve active scripted camera motion to its exact endpoint.
 
 	virtual void setAngle( Real radians );															///< Rotate the view around the vertical axis to the given angle (yaw)
 	virtual Real getAngle() { return m_angle; }										///< Return current camera angle

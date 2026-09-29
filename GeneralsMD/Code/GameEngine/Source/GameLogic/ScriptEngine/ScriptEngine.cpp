@@ -7271,6 +7271,12 @@ void ScriptEngine::signalUIInteract(const AsciiString& hookName)
 Bool ScriptEngine::isVideoComplete( const AsciiString& completedVideo, Bool removeFromList )
 {
 	ListAsciiStringIt findIt = std::find(m_completedVideo.begin(), m_completedVideo.end(), completedVideo);
+	if (TheScriptActions && TheScriptActions->isCinematicSkipFastForwarding())
+	{
+		if (removeFromList && findIt != m_completedVideo.end())
+			m_completedVideo.erase(findIt);
+		return TRUE;
+	}
 	if (findIt != m_completedVideo.end()) {
 		if (removeFromList) {
 			m_completedVideo.erase(findIt);
@@ -7290,6 +7296,13 @@ Bool ScriptEngine::isSpeechComplete( const AsciiString& testSpeech, Bool removeF
 		if (findIt->first == testSpeech) {
 			break;
 		}
+	}
+
+	if (TheScriptActions && TheScriptActions->isCinematicSkipFastForwarding())
+	{
+		if (removeFromList && findIt != m_testingSpeech.end())
+			m_testingSpeech.erase(findIt);
+		return TRUE;
 	}
 
 	if (findIt == m_testingSpeech.end()) {
@@ -7325,6 +7338,13 @@ Bool ScriptEngine::isAudioComplete( const AsciiString& testAudio, Bool removeFro
 		if (findIt->first == testAudio) {
 			break;
 		}
+	}
+
+	if (TheScriptActions && TheScriptActions->isCinematicSkipFastForwarding())
+	{
+		if (removeFromList && findIt != m_testingAudio.end())
+			m_testingAudio.erase(findIt);
+		return TRUE;
 	}
 
 	if (findIt == m_testingAudio.end()) {

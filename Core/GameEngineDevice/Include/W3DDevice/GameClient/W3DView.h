@@ -172,6 +172,7 @@ public:
 
 	virtual Bool isDoingScriptedCamera() override;
 	virtual void stopDoingScriptedCamera() override;
+	virtual void finishScriptedCameraImmediately() override;
 
 	virtual void setAngle( Real radians ) override;									///< Rotate the view around the vertical axis to the given angle (yaw)
 	virtual void setPitch( Real radians ) override;									///< Rotate the view around the horizontal axis to the given angle (pitch)

@@ -66,6 +66,12 @@
 
 // PRIVATE DATA ///////////////////////////////////////////////////////////////
 
+#if defined(RTS_ZEROHOUR)
+// When ESC starts a scripted-cinematic skip on key-down, swallow its matching key-up even if the
+// fast-forward finishes before the release arrives. Otherwise the release can leak into menu handling.
+static Bool s_consumeCinematicSkipEscapeRelease = FALSE;
+#endif
+
 // PUBLIC DATA ////////////////////////////////////////////////////////////////
 
 // PRIVATE PROTOTYPES /////////////////////////////////////////////////////////
@@ -313,6 +319,35 @@ GameMessageDisposition WindowTranslator::translateGameMessage(const GameMessage 
 			// get key and state from args
 			UnsignedByte key		= msg->getArgument( 0 )->integer;
 			UnsignedByte state	= msg->getArgument( 1 )->integer;
+
+#if defined(RTS_ZEROHOUR)
+			// Scripted cutscene ESC must be consumed before the window system sees it. The old order let
+			// key-down open the pause/menu UI, then only started the cutscene skip on key-up.
+			if (key == KEY_ESC)
+			{
+				if (s_consumeCinematicSkipEscapeRelease)
+				{
+					if (BitIsSet(state, KEY_STATE_UP))
+						s_consumeCinematicSkipEscapeRelease = FALSE;
+					returnCode = WIN_INPUT_USED;
+					break;
+				}
+
+				if (BitIsSet(state, KEY_STATE_DOWN) && !BitIsSet(state, KEY_STATE_AUTOREPEAT) &&
+					TheScriptActions && TheScriptActions->skipCurrentCinematic())
+				{
+					s_consumeCinematicSkipEscapeRelease = TRUE;
+					returnCode = WIN_INPUT_USED;
+					break;
+				}
+
+				if (TheScriptActions && TheScriptActions->isCinematicSkipFastForwarding())
+				{
+					returnCode = WIN_INPUT_USED;
+					break;
+				}
+			}
+#endif
 
 			// process event through window system
 			if( TheWindowManager )
