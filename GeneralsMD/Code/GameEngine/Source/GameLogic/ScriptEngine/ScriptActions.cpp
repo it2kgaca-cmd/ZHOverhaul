@@ -224,8 +224,14 @@ void ScriptActions::finishCinematicSkipFastForward(Bool aborted)
 	if (!m_skipCinematicPresentation)
 		return;
 
+#ifdef DEBUG_LOGGING
 	const UnsignedInt endFrame = TheGameLogic ? TheGameLogic->getFrame() : m_cinematicSkipStartFrame;
 	const UnsignedInt startFrame = m_cinematicSkipStartFrame;
+#else
+	// DEBUG_LOG compiles out in Release, so do not leave logging-only locals/parameters unused under /WX.
+	(void)aborted;
+#endif
+
 	m_skipCinematicPresentation = FALSE;
 	m_cinematicSkipStartFrame = 0;
 
@@ -257,8 +263,10 @@ void ScriptActions::finishCinematicSkipFastForward(Bool aborted)
 		TheTacticalView->setUserControlled(TRUE);
 	}
 
+#ifdef DEBUG_LOGGING
 	DEBUG_LOG(("Scripted cinematic fast-forward %s at frame %u after %u simulated frames",
 		aborted ? "aborted" : "completed", endFrame, endFrame - startFrame));
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
