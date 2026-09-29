@@ -133,9 +133,10 @@ static void prepareGuardWeapon(Object *obj)
 		return;
 
 	AIUpdateInterface *ai = obj->getAIUpdateInterface();
+	Player *ownerPlayer = obj->getControllingPlayer();
 	WeaponSlotType weaponSlot = PRIMARY_WEAPON;
 	Weapon *weapon = getLongestRangeGuardWeapon(obj, &weaponSlot);
-	if (ai == nullptr || weapon == nullptr)
+	if (ai == nullptr || ownerPlayer == nullptr || weapon == nullptr)
 		return;
 
 	Real turretAngle = 0.0f;
@@ -151,7 +152,7 @@ static void prepareGuardWeapon(Object *obj)
 	PartitionFilterRelationship relationship(obj, PartitionFilterRelationship::ALLOW_ENEMIES);
 	PartitionFilterPossibleToAttack possible(ATTACK_NEW_TARGET, obj, CMD_FROM_AI);
 	PartitionFilterSameMapStatus sameMap(obj);
-	PartitionFilterFreeOfFog visible(obj->getControllingPlayer()->getPlayerIndex());
+	PartitionFilterFreeOfFog visible(ownerPlayer->getPlayerIndex());
 	PartitionFilter *filters[] = { &relationship, &possible, &sameMap, &visible, nullptr };
 
 	SimpleObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(
@@ -1074,7 +1075,6 @@ StateReturnType AIGuardAttackAggressorState::onEnter()
 		return STATE_SUCCESS;
 	}
 
-	Weapon *weapon = obj->getCurrentWeapon();
 	const Bool stationaryArtillery = isStationaryGuardArtillery(obj);
 	const Bool noPursuit = getGuardMachine()->getGuardMode() == GUARDMODE_GUARD_WITHOUT_PURSUIT;
 
