@@ -176,6 +176,12 @@ void ScriptActions::update()
 //-------------------------------------------------------------------------------------------------
 Bool ScriptActions::skipCurrentCinematic()
 {
+	// A cinematic skip is a one-shot transition. Re-entering while the first fast-forward is still
+	// active resets its start frame and can leave the simulation repeatedly trying to resolve a
+	// cinematic that is already being torn down. Repeated ESC presses must therefore be harmless.
+	if (m_skipCinematicPresentation)
+		return FALSE;
+
 	// Fast-forwarding game logic independently is only safe in single-player.
 	if (TheNetwork != nullptr || TheInGameUI == nullptr || TheInGameUI->getInputEnabled() || m_messageWindow != nullptr)
 		return FALSE;

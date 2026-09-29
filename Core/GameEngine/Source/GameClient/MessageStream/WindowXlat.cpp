@@ -333,16 +333,20 @@ GameMessageDisposition WindowTranslator::translateGameMessage(const GameMessage 
 					break;
 				}
 
-				if (BitIsSet(state, KEY_STATE_DOWN) && !BitIsSet(state, KEY_STATE_AUTOREPEAT) &&
-					TheScriptActions && TheScriptActions->skipCurrentCinematic())
+				// Once the first ESC has started a cinematic fast-forward, every later ESC event is
+				// consumed until that fast-forward finishes. This check MUST happen before attempting
+				// skipCurrentCinematic(); otherwise a second key-down re-enters the skip and resets its
+				// start frame while the first skip is still resolving.
+				if (TheScriptActions && TheScriptActions->isCinematicSkipFastForwarding())
 				{
-					s_consumeCinematicSkipEscapeRelease = TRUE;
 					returnCode = WIN_INPUT_USED;
 					break;
 				}
 
-				if (TheScriptActions && TheScriptActions->isCinematicSkipFastForwarding())
+				if (BitIsSet(state, KEY_STATE_DOWN) && !BitIsSet(state, KEY_STATE_AUTOREPEAT) &&
+					TheScriptActions && TheScriptActions->skipCurrentCinematic())
 				{
+					s_consumeCinematicSkipEscapeRelease = TRUE;
 					returnCode = WIN_INPUT_USED;
 					break;
 				}
