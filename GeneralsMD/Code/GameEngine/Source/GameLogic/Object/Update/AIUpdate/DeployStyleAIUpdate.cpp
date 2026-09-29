@@ -63,18 +63,9 @@ static Bool hasReachedFixedGuardPost(AIUpdateInterface *ai, Object *self, Bool i
 	if (!isFixedPostDeployArtillery(ai, self))
 		return FALSE;
 
-	if (isInGuardIdleState)
-		return TRUE;
-
-	const Coord3D *guardPos = ai->getGuardLocation();
-	const Coord3D *selfPos = self->getPosition();
-	if (guardPos == nullptr || selfPos == nullptr)
-		return FALSE;
-
-	const Real dx = guardPos->x - selfPos->x;
-	const Real dy = guardPos->y - selfPos->y;
-	const Real guardPostTolerance = 25.0f;
-	return dx * dx + dy * dy <= sqr(guardPostTolerance);
+	// Plant only after the Guard return state has actually completed. Proximity is not completion:
+	// using a radius here allowed artillery to stop short, swivel/repath, or later decide it had moved.
+	return isInGuardIdleState;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -100,10 +91,82 @@ Bool DeployStyleAIUpdate::isIdle() const
 }
 
 //-------------------------------------------------------------------------------------------------
+Bool DeployStyleAIUpdate::isLocomotionLocked() const
+{
+	const Object *self = getObject();
+	const Player *owner = self ? self->getControllingPlayer() : nullptr;
+	const Bool plantedState = self &&
+		(self->testStatus(OBJECT_STATUS_DEPLOYED) || m_state == DEPLOY || m_state == READY_TO_ATTACK);
+	return self && owner && owner->getPlayerType() == PLAYER_HUMAN &&
+		plantedState && isLongRangeArtillery();
+}
+
+//-------------------------------------------------------------------------------------------------
 void DeployStyleAIUpdate::aiDoCommand( const AICommandParms* parms )
 {
 	if (!isAllowedToRespondToAiCommands(parms))
 		return;
+
+	// A deployed long-range artillery piece is planted. Only a player command whose meaning is
+	// explicitly "relocate this chassis" is allowed to break the plant. Attack/force-attack,
+	// retaliation, auto-acquisition, target motion, collision recovery, and AI commands do not.
+	Bool playerRelocation = FALSE;
+	if (parms->m_cmdSource == CMD_FROM_PLAYER)
+	{
+		switch (parms->m_cmd)
+		{
+			case AICMD_MOVE_TO_POSITION:
+			case AICMD_MOVE_TO_POSITION_EVEN_IF_SLEEPING:
+			case AICMD_MOVE_TO_OBJECT:
+			case AICMD_TIGHTEN_TO_POSITION:
+			case AICMD_MOVE_TO_POSITION_AND_EVACUATE:
+			case AICMD_MOVE_TO_POSITION_AND_EVACUATE_AND_EXIT:
+			case AICMD_FOLLOW_WAYPOINT_PATH:
+			case AICMD_FOLLOW_WAYPOINT_PATH_AS_TEAM:
+			case AICMD_FOLLOW_WAYPOINT_PATH_EXACT:
+			case AICMD_FOLLOW_WAYPOINT_PATH_AS_TEAM_EXACT:
+			case AICMD_FOLLOW_PATH:
+			case AICMD_FOLLOW_PATH_APPEND:
+			case AICMD_FOLLOW_EXITPRODUCTION_PATH:
+			case AICMD_ATTACKMOVE_TO_POSITION:
+			case AICMD_ATTACKFOLLOW_WAYPOINT_PATH:
+			case AICMD_ATTACKFOLLOW_WAYPOINT_PATH_AS_TEAM:
+			case AICMD_GUARD_POSITION:
+			case AICMD_GUARD_OBJECT:
+			case AICMD_GUARD_TUNNEL_NETWORK:
+			case AICMD_GUARD_AREA:
+			case AICMD_GET_HEALED:
+			case AICMD_GET_REPAIRED:
+			case AICMD_ENTER:
+			case AICMD_DOCK:
+			case AICMD_HUNT:
+				playerRelocation = TRUE;
+				break;
+			default:
+				break;
+		}
+	}
+
+	if (playerRelocation && isLongRangeArtillery())
+	{
+		// Begin pack immediately so the command cannot get one rogue locomotor frame before the
+		// deploy-state update notices the new path.
+		switch (m_state)
+		{
+			case READY_TO_ATTACK:
+				setMyState(UNDEPLOY);
+				break;
+			case DEPLOY:
+				setMyState(UNDEPLOY, TRUE);
+				break;
+			case ALIGNING_TURRETS:
+				setMyState(UNDEPLOY);
+				break;
+			case UNDEPLOY:
+			case READY_TO_MOVE:
+				break;
+		}
+	}
 
 	/*
 	//Hack code to allow follow waypoint scripts to be converted to attack follow waypoint scripts
@@ -142,16 +205,18 @@ UpdateSleepTime DeployStyleAIUpdate::update()
 	Bool isInGuardIdleState = getStateMachine()->isInGuardIdleState();
 
 	AIUpdateInterface *ai = self->getAI();
-	const Bool holdFixedGuardPost = hasReachedFixedGuardPost(ai, self, isInGuardIdleState);
+	const Bool plantedLocomotionLock = isLocomotionLocked();
+	const Bool holdFixedGuardPost = plantedLocomotionLock ||
+		hasReachedFixedGuardPost(ai, self, isInGuardIdleState);
 
-	// Once a long-range deploy unit reaches a fixed Guard post, the order is an emplacement
-	// contract. Attack/LOS state transitions are not allowed to manufacture a movement path
-	// that makes it pack up and chase. A later explicit player order exits Guard and restores
-	// normal pack-and-move behavior.
-	if (holdFixedGuardPost && isTryingToMove)
+	// Once planted, chassis motion is not advisory -- it is forbidden. Clear every movement
+	// artifact every update. The base AI layer also vetoes same-frame paths/goals, so an attack
+	// transition cannot sneak in one move/rotation tick before this DeployStyle wrapper sees it.
+	if (holdFixedGuardPost)
 	{
 		destroyPath();
 		setQueueForPathTime(0);
+		setLocomotorGoalNone();
 		self->clearModelConditionState(MODELCONDITION_MOVING);
 		isTryingToMove = FALSE;
 	}

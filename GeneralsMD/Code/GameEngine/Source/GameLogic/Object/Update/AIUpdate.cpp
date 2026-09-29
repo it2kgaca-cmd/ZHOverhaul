@@ -412,6 +412,13 @@ except by the pathfinder during pathfind queue processing.  jba */
 //-------------------------------------------------------------------------------------------------
 void AIUpdateInterface::doPathfind( PathfindServicesInterface *pathfinder )
 {
+	if (isLocomotionLocked())
+	{
+		destroyPath();
+		setQueueForPathTime(0);
+		return;
+	}
+
 	if (!m_waitingForPath) {
 		return;
 	}
@@ -495,6 +502,12 @@ will be processed when we get to the front of the pathfind queue. jba */
 //-------------------------------------------------------------------------------------------------
 void AIUpdateInterface::requestPath( Coord3D *destination, Bool isFinalGoal )
 {
+	if (isLocomotionLocked())
+	{
+		destroyPath();
+		setQueueForPathTime(0);
+		return;
+	}
 
 	if (m_locomotorSet.getValidSurfaces() == 0) {
 		DEBUG_CRASH(("Attempting to path immobile unit."));
@@ -536,6 +549,13 @@ void AIUpdateInterface::requestPath( Coord3D *destination, Bool isFinalGoal )
 //-------------------------------------------------------------------------------------------------
 void AIUpdateInterface::requestAttackPath( ObjectID victimID, const Coord3D* victimPos )
 {
+	if (isLocomotionLocked())
+	{
+		destroyPath();
+		setQueueForPathTime(0);
+		return;
+	}
+
 	if (m_locomotorSet.getValidSurfaces() == 0) {
 		DEBUG_CRASH(("Attempting to path immobile unit."));
 	}
@@ -559,6 +579,13 @@ void AIUpdateInterface::requestAttackPath( ObjectID victimID, const Coord3D* vic
 //-------------------------------------------------------------------------------------------------
 void AIUpdateInterface::requestApproachPath( Coord3D *destination )
 {
+	if (isLocomotionLocked())
+	{
+		destroyPath();
+		setQueueForPathTime(0);
+		return;
+	}
+
 	if (m_locomotorSet.getValidSurfaces() == 0) {
 		DEBUG_CRASH(("Attempting to path immobile unit."));
 	}
@@ -583,6 +610,13 @@ void AIUpdateInterface::requestApproachPath( Coord3D *destination )
 // Requests a safe path away from the repulsor.
 void AIUpdateInterface::requestSafePath( ObjectID repulsor )
 {
+	if (isLocomotionLocked())
+	{
+		destroyPath();
+		setQueueForPathTime(0);
+		return;
+	}
+
 	if (repulsor != m_repulsor1) {
 		m_repulsor2 = m_repulsor1; // save the prior repulsor.
 	}
@@ -608,6 +642,9 @@ enum {WAYPOINT_PATH_LIMIT=1024};
 //
 void AIUpdateInterface::setPathFromWaypoint(const Waypoint *way, const Coord2D *offset)
 {
+	if (isLocomotionLocked())
+		return;
+
 	destroyPath();
 	m_path = newInstance(Path);
 	Coord3D pos = *getObject()->getPosition();
@@ -1371,119 +1408,14 @@ AIUpdateInterface::LocalTrafficClass AIUpdateInterface::classifyLocalTraffic(con
 
 //-------------------------------------------------------------------------------------------------
 /*
- * Give an idle friendly unit a short, local displacement instead of making the advancing unit stop.
- * This never changes the displaced unit's state-machine command or path.  Once traffic clears it
- * waits briefly, then drifts back toward the position it occupied before the push.
+ * Stopped friendlies are terminal anchors. The moving unit's local steering layer is responsible
+ * for flowing around them; this hook intentionally refuses to manufacture a second parking move.
  */
 void AIUpdateInterface::receiveTrafficPush(const Object *pusher)
 {
-	Object *obj = getObject();
-	if (obj == nullptr || pusher == nullptr)
-		return;
-
-	if (!isIdle() || obj->isKindOf(KINDOF_IMMOBILE) || !isDoingGroundMovement())
-		return;
-
-	// A deployed weapon is an emplacement, not soft local traffic. Other mobile
-	// friendlies must route/yield around it until an explicit command causes it
-	// to pack and become mobile again.
-	if (obj->testStatus(OBJECT_STATUS_DEPLOYED))
-		return;
-
-	if (obj->testStatus(OBJECT_STATUS_IS_USING_ABILITY) || isBusy())
-		return;
-
-	if (classifyLocalTraffic(pusher) == LOCAL_TRAFFIC_NONE)
-		return;
-
-	// Infantry should never shove a tank out of the way.  Vehicles may push infantry
-	// or other vehicles; infantry may only push other infantry.
-	if (obj->isKindOf(KINDOF_VEHICLE) && !pusher->isKindOf(KINDOF_VEHICLE))
-		return;
-
-	const Coord3D pos = *obj->getPosition();
-	if (!m_trafficDisplaced)
-	{
-		m_trafficAnchor = pos;
-		m_trafficDisplaced = TRUE;
-	}
-
-	Coord2D away;
-	away.x = pos.x - pusher->getPosition()->x;
-	away.y = pos.y - pusher->getPosition()->y;
-	Real awayLen = away.length();
-	if (awayLen < 0.01f)
-	{
-		const Coord3D *pusherDir = pusher->getUnitDirectionVector2D();
-		away.x = pusherDir->x;
-		away.y = pusherDir->y;
-		awayLen = away.length();
-	}
-	if (awayLen < 0.01f)
-		return;
-	away.x /= awayLen;
-	away.y /= awayLen;
-
-	Real pushDist = obj->getGeometryInfo().getBoundingCircleRadius() * 0.75f;
-	if (pushDist < PATHFIND_CELL_SIZE_F * 0.75f)
-		pushDist = PATHFIND_CELL_SIZE_F * 0.75f;
-
-	Coord3D candidate = pos;
-	candidate.x += away.x * pushDist;
-	candidate.y += away.y * pushDist;
-	candidate.z = TheTerrainLogic->getLayerHeight(candidate.x, candidate.y, obj->getLayer());
-
-	Bool valid = TheAI->pathfinder()->validMovementPosition(
-		obj->getCrusherLevel() > 0, obj->getLayer(), m_locomotorSet, &candidate);
-	if (valid)
-	{
-		valid = TheAI->pathfinder()->isLinePassable(
-			obj, m_locomotorSet.getValidSurfaces(), obj->getLayer(), pos, candidate, FALSE, TRUE);
-	}
-
-	// If directly away is terrain-invalid, try either side of the pusher instead.
-	if (!valid)
-	{
-		const Coord3D *pusherDir = pusher->getUnitDirectionVector2D();
-		Coord2D side;
-		side.x = -pusherDir->y;
-		side.y = pusherDir->x;
-		for (Int attempt = 0; attempt < 2 && !valid; ++attempt)
-		{
-			Real sign = attempt == 0 ? 1.0f : -1.0f;
-			candidate = pos;
-			candidate.x += side.x * pushDist * sign;
-			candidate.y += side.y * pushDist * sign;
-			candidate.z = TheTerrainLogic->getLayerHeight(candidate.x, candidate.y, obj->getLayer());
-			valid = TheAI->pathfinder()->validMovementPosition(
-				obj->getCrusherLevel() > 0, obj->getLayer(), m_locomotorSet, &candidate);
-			if (valid)
-			{
-				valid = TheAI->pathfinder()->isLinePassable(
-					obj, m_locomotorSet.getValidSurfaces(), obj->getLayer(), pos, candidate, FALSE, TRUE);
-			}
-		}
-	}
-
-	if (!valid)
-		return;
-
-	m_trafficPushTarget = candidate;
-	m_trafficPushUntil = TheGameLogic->getFrame() + LOGICFRAMES_PER_SECOND / 2;
-
-	// Once a unit has reached a terminal group/rally envelope, a valid local
-	// displacement becomes its new parking spot.  Do not make it march back to
-	// the exact point it occupied before another friendly arrived.
-	if (friend_hasGroupArrival() &&
-			friend_isInsideGroupArrivalEnvelope(candidate, obj->getGeometryInfo().getBoundingCircleRadius() * 0.25f))
-	{
-		m_trafficReturnAfter = 0;
-	}
-	else
-	{
-		m_trafficReturnAfter = TheGameLogic->getFrame() + LOGICFRAMES_PER_SECOND;
-	}
-	wakeUpNow();
+	(void)pusher;
+	// ZHOverhaul: stopped means stopped. A stationary friendly is a local anchor, not something
+	// the crowd solver is allowed to shuffle after arrival. Moving units must steer/pass around it.
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2053,6 +1985,9 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 #ifdef DO_UNIT_TIMINGS
 	return false;
 #endif
+
+	if (isLocomotionLocked())
+		return FALSE;
 
 	if (m_ignoreCollisionsUntil > TheGameLogic->getFrame())
 		return FALSE;
@@ -2717,6 +2652,16 @@ void AIUpdateInterface::friend_endingMove()
 {
 	m_movementComplete = TRUE;
 	m_isMoving = FALSE;
+
+	// Arrival is terminal. Local crowd handling must never start a second, cosmetic
+	// "parking" move after the commanded move has completed.
+	m_trafficDisplaced = FALSE;
+	m_trafficPushUntil = 0;
+	m_trafficReturnAfter = 0;
+	m_cachedTrafficGoalValid = FALSE;
+	m_nextTrafficSolveFrame = 0;
+	setLocomotorGoalNone();
+	getObject()->clearModelConditionState(MODELCONDITION_MOVING);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2900,8 +2845,35 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 {
 	USE_PERF_TIMER(doLocomotor)
 
-	if (getObject()->isKindOf(KINDOF_IMMOBILE))
+	Object *obj = getObject();
+	if (obj->isKindOf(KINDOF_IMMOBILE))
 		return UPDATE_SLEEP_FOREVER;
+
+	const Bool locomotionLocked = isLocomotionLocked();
+	if (locomotionLocked || isIdle())
+	{
+		// No path, no positional goal, no orientation goal, no crowd micro-move. Turret AI is
+		// updated separately, so a planted artillery piece can still aim/fire without chassis motion.
+		destroyPath();
+		setQueueForPathTime(0);
+		setLocomotorGoalNone();
+		m_trafficDisplaced = FALSE;
+		m_trafficPushUntil = 0;
+		m_trafficReturnAfter = 0;
+		m_cachedTrafficGoalValid = FALSE;
+		m_nextTrafficSolveFrame = 0;
+		obj->clearModelConditionState(MODELCONDITION_MOVING);
+
+		// A planted chassis also rejects residual horizontal shove/coast. Vertical physics remains
+		// untouched so gravity, terrain contact and destruction behavior keep their normal semantics.
+		if (locomotionLocked)
+		{
+			PhysicsBehavior *physics = obj->getPhysics();
+			if (physics)
+				physics->scrubVelocity2D(0);
+		}
+		return UPDATE_SLEEP_FOREVER;
+	}
 
 	chooseGoodLocomotorFromCurrentSet();
 
@@ -3885,6 +3857,23 @@ void AIUpdateInterface::privateIdle(CommandSourceType cmdSource)
 {
 	if (getObject()->isKindOf(KINDOF_PROJECTILE))
 		return;
+
+	destroyPath();
+	setQueueForPathTime(0);
+	setLocomotorGoalNone();
+	m_trafficDisplaced = FALSE;
+	m_trafficPushUntil = 0;
+	m_trafficReturnAfter = 0;
+	m_cachedTrafficGoalValid = FALSE;
+	m_nextTrafficSolveFrame = 0;
+	getObject()->clearModelConditionState(MODELCONDITION_MOVING);
+	if (isDoingGroundMovement())
+	{
+		PhysicsBehavior *physics = getObject()->getPhysics();
+		if (physics)
+			physics->scrubVelocity2D(0);
+	}
+	TheAI->pathfinder()->updateGoal(getObject(), getObject()->getPosition(), getObject()->getLayer());
 
 	getStateMachine()->clear();
 	getStateMachine()->setState( AI_IDLE );
@@ -5217,10 +5206,10 @@ AIStateType AIUpdateInterface::getAIStateType() const
 }
 
 //-------------------------------------------------------------------------------------------------
-Bool AIUpdateInterface::isFixedPostGuardArtillery() const
+Bool AIUpdateInterface::isLongRangeArtillery() const
 {
 	const Object *obj = getObject();
-	if (obj == nullptr || getAIStateType() != AI_GUARD || getGuardTargetType() != GUARDTARGET_LOCATION)
+	if (obj == nullptr)
 		return FALSE;
 
 	const Real longestWeaponRange = obj->getLargestWeaponRange();
@@ -5230,6 +5219,15 @@ Bool AIUpdateInterface::isFixedPostGuardArtillery() const
 	const Real visionRange = TheAI->getAdjustedVisionRangeForObject(obj,
 		AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
 	return longestWeaponRange > visionRange * 1.10f;
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool AIUpdateInterface::isFixedPostGuardArtillery() const
+{
+	if (getAIStateType() != AI_GUARD || getGuardTargetType() != GUARDTARGET_LOCATION)
+		return FALSE;
+
+	return isLongRangeArtillery();
 }
 
 //-------------------------------------------------------------------------------------------------

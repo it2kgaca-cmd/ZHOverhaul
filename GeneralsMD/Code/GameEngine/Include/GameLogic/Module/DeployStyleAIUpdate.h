@@ -97,6 +97,7 @@ public:
 
  	virtual void aiDoCommand(const AICommandParms* parms) override;
 	virtual Bool isIdle() const override;
+	virtual Bool isLocomotionLocked() const override;
 	virtual UpdateSleepTime update() override;
 
 	UnsignedInt getUnpackTime()					const { return getDeployStyleAIUpdateModuleData()->m_unpackTime; }

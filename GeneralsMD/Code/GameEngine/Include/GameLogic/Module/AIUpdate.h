@@ -372,7 +372,9 @@ public:
 	void ignoreObstacleID( ObjectID id );			///< tell the pathfinder to ignore the given object as an obstacle
 
 	AIStateType getAIStateType() const;							///< What general state is the AIState Machine in?
-	Bool isFixedPostGuardArtillery() const;				///< Fixed-location Guard + weapon reach well beyond own vision.
+	Bool isLongRangeArtillery() const;						///< Weapon reach substantially exceeds this unit's own sight.
+	Bool isFixedPostGuardArtillery() const;				///< Fixed-location Guard + long-range artillery classification.
+	virtual Bool isLocomotionLocked() const { return FALSE; }	///< Hard veto for chassis movement; subclasses may lock planted units.
 
 	AsciiString getCurrentStateName() const { return m_stateMachine->getCurrentStateName(); }
 

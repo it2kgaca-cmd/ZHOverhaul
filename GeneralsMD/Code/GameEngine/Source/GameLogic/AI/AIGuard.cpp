@@ -886,11 +886,15 @@ StateReturnType AIGuardReturnState::onEnter()
 		area->getCenterPoint(&m_goalPosition);
 	}
 	AIUpdateInterface *ai = getMachineOwner()->getAIUpdateInterface();
-	if (ai && ai->isDoingGroundMovement())
+	const Bool fixedPostArtillery = isStationaryGuardArtillery(getMachineOwner());
+	if (ai && ai->isDoingGroundMovement() && !fixedPostArtillery)
 	{
 		TheAI->pathfinder()->adjustDestination(getMachineOwner(), ai->getLocomotorSet(), &m_goalPosition);
 	}
-	setAdjustsDestination(true);
+
+	// A siege Guard point is authoritative. Do not silently pick a nearby "better" parking point;
+	// reach the ordered location, finish the move, then let DeployStyle plant the chassis there.
+	setAdjustsDestination(!fixedPostArtillery);
 	return AIInternalMoveToState::onEnter();
 }
 
