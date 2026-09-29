@@ -96,7 +96,8 @@ Bool DeployStyleAIUpdate::isLocomotionLocked() const
 	const Object *self = getObject();
 	const Player *owner = self ? self->getControllingPlayer() : nullptr;
 	const Bool plantedState = self &&
-		(self->testStatus(OBJECT_STATUS_DEPLOYED) || m_state == DEPLOY || m_state == READY_TO_ATTACK);
+		(self->testStatus(OBJECT_STATUS_DEPLOYED) || m_state == DEPLOY ||
+		 m_state == READY_TO_ATTACK || m_state == ALIGNING_TURRETS);
 	return self && owner && owner->getPlayerType() == PLAYER_HUMAN &&
 		plantedState && isLongRangeArtillery();
 }
@@ -154,13 +155,13 @@ void DeployStyleAIUpdate::aiDoCommand( const AICommandParms* parms )
 		switch (m_state)
 		{
 			case READY_TO_ATTACK:
-				setMyState(UNDEPLOY);
+				setMyState(UNDEPLOY, FALSE, TRUE);
 				break;
 			case DEPLOY:
-				setMyState(UNDEPLOY, TRUE);
+				setMyState(UNDEPLOY, TRUE, TRUE);
 				break;
 			case ALIGNING_TURRETS:
-				setMyState(UNDEPLOY);
+				setMyState(UNDEPLOY, FALSE, TRUE);
 				break;
 			case UNDEPLOY:
 			case READY_TO_MOVE:
@@ -387,10 +388,41 @@ UpdateSleepTime DeployStyleAIUpdate::update()
 }
 
 //-------------------------------------------------------------------------------------------------
-void DeployStyleAIUpdate::setMyState( DeployStateTypes stateID, Bool reverseDeploy )
+void DeployStyleAIUpdate::setMyState( DeployStateTypes stateID, Bool reverseDeploy, Bool explicitPlayerRelocation )
 {
-	m_state = stateID;
 	Object *self = getObject();
+
+	// ZHOverhaul: once a human-controlled long-range deploy weapon is planted, packing is a
+	// privileged transition. No target movement, retaliation, LOS/path recovery, collision
+	// handling, Guard churn, or stale attack path is allowed to enter UNDEPLOY. Only the
+	// explicit player-relocation path in aiDoCommand() may authorize packing.
+	if (stateID == UNDEPLOY && !explicitPlayerRelocation && self)
+	{
+		const Player *owner = self->getControllingPlayer();
+		const Bool plantedState =
+			self->testStatus(OBJECT_STATUS_DEPLOYED) ||
+			m_state == DEPLOY ||
+			m_state == READY_TO_ATTACK ||
+			m_state == ALIGNING_TURRETS;
+
+		if (owner && owner->getPlayerType() == PLAYER_HUMAN &&
+			plantedState && isLongRangeArtillery())
+		{
+			destroyPath();
+			setQueueForPathTime(0);
+			setLocomotorGoalNone();
+			self->clearModelConditionState(MODELCONDITION_MOVING);
+
+			// If an old movement impulse already got as far as turret-centering, restore the
+			// deployed firing state instead of leaving the cannon trapped in ALIGNING_TURRETS.
+			if (m_state == ALIGNING_TURRETS)
+				setMyState(READY_TO_ATTACK);
+
+			return;
+		}
+	}
+
+	m_state = stateID;
 	UnsignedInt now = TheGameLogic->getFrame();
 	const DeployStyleAIUpdateModuleData *data = getDeployStyleAIUpdateModuleData();
 

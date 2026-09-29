@@ -104,7 +104,7 @@ public:
 	UnsignedInt getPackTime()						const { return getDeployStyleAIUpdateModuleData()->m_packTime; }
 	Bool doTurretsFunctionOnlyWhenDeployed() const { return getDeployStyleAIUpdateModuleData()->m_turretsFunctionOnlyWhenDeployed; }
 	Bool doTurretsHaveToCenterBeforePacking() const { return getDeployStyleAIUpdateModuleData()->m_turretsMustCenterBeforePacking; }
-	void setMyState( DeployStateTypes StateID, Bool reverseDeploy = FALSE );
+	void setMyState( DeployStateTypes StateID, Bool reverseDeploy = FALSE, Bool explicitPlayerRelocation = FALSE );
 
 protected:
 
