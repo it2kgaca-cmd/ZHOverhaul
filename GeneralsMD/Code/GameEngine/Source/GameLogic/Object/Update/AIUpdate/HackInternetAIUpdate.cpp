@@ -50,13 +50,19 @@
 //-------------------------------------------------------------------------------------------------
 AIStateMachine* HackInternetAIUpdate::makeStateMachine()
 {
-	return newInstance(HackInternetStateMachine)( getObject(), "HackInternetBasicAI");
+	// Passive cash is no longer a command mode. Use the normal AI machine so a movement
+	// order never waits for an internet-hack pack/unpack sequence.
+	return AIUpdateInterface::makeStateMachine();
 }
 
 //-------------------------------------------------------------------------------------------------
 HackInternetAIUpdate::HackInternetAIUpdate( Thing *thing, const ModuleData* moduleData ) : AIUpdateInterface( thing, moduleData )
 {
 	m_hasPendingCommand = false;
+	m_cashFramesRemaining = getHackInternetAIUpdateModuleData()->m_cashUpdateDelay;
+	if (m_cashFramesRemaining == 0)
+		m_cashFramesRemaining = 1;
+	m_cashRemainderPercent = 0;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -78,45 +84,23 @@ Bool HackInternetAIUpdate::isIdle() const
 //-------------------------------------------------------------------------------------------------
 Bool HackInternetAIUpdate::isHacking() const
 {
-	if( getStateMachine()->getCurrentStateID() == HACK_INTERNET )
-	{
-		return true;
-	}
-	return false;
+	// Income is passive now; there is no dedicated "hack internet" mode.
+	return true;
 }
 
 //-------------------------------------------------------------------------------------------------
 Bool HackInternetAIUpdate::isHackingPackingOrUnpacking() const
 {
-	if( getStateMachine()->getCurrentStateID() == HACK_INTERNET ||
-			getStateMachine()->getCurrentStateID() == PACKING ||
-			getStateMachine()->getCurrentStateID() == UNPACKING )
-	{
-		return true;
-	}
 	return false;
 }
 
 //-------------------------------------------------------------------------------------------------
 UpdateSleepTime HackInternetAIUpdate::update()
 {
-	// have to call our parent's isIdle, because we override it to never return true
-	// when we have a pending command...
-	if( AIUpdateInterface::isIdle() )
-	{
-		if( m_hasPendingCommand )
-		{
-			AICommandParms parms( AICMD_MOVE_TO_POSITION, CMD_FROM_AI );	// values don't matter, will be wiped by next line
-			m_pendingCommand.reconstitute( parms );
-			m_hasPendingCommand = false;
+	AIUpdateInterface::update();
+	updateCashIncome();
+	updateIdleHackAnimation();
 
- 			aiDoCommand(&parms);
-		}
-	}
-
-	/*UpdateSleepTime ret =*/ AIUpdateInterface::update();
-	//return (mine < ret) ? mine : ret;
-	/// @todo srj -- someday, make sleepy. for now, must not sleep.
 	return UPDATE_SLEEP_NONE;
 }
 
@@ -126,34 +110,7 @@ void HackInternetAIUpdate::aiDoCommand(const AICommandParms* parms)
 	if (!isAllowedToRespondToAiCommands(parms))
 		return;
 
-	const StateID currentState = getStateMachine()->getCurrentStateID();
-
-#if !RETAIL_COMPATIBLE_CRC
-	// TheSuperHackers @bugfix andrew-2e128 / Mauller 14/07/2025 prevent hacking hackers packing and unpacking when commanded to hack the internet
-	if (parms->m_cmd == AICMD_HACK_INTERNET && ( currentState == HACK_INTERNET || currentState == UNPACKING ) )
-	{
-		return;
-	}
-#endif
-
-	//If our hacker is currently packing up his gear, we need to prevent him
-	//from moving until completed. In order to accomplish this, we'll detect,
-	//then
-	if( currentState == HACK_INTERNET || currentState == PACKING )
-	{
-		// nuke any existing pending cmd
-		m_pendingCommand.store(*parms);
-		m_hasPendingCommand = true;
-
-		if( currentState == HACK_INTERNET )
-		{
-			getStateMachine()->clear();
-			setLastCommandSource( CMD_FROM_AI );
-			getStateMachine()->setState( PACKING );
-		}
-		return;
-	}
-
+	// The briefcase/laptop is presentation only. Commands execute immediately.
 	m_hasPendingCommand = false;
 	AIUpdateInterface::aiDoCommand(parms);
 }
@@ -162,43 +119,163 @@ void HackInternetAIUpdate::aiDoCommand(const AICommandParms* parms)
 //-------------------------------------------------------------------------------------------------
 void HackInternetAIUpdate::hackInternet()
 {
-	//if (m_hackInternetStateMachine)
-	//	deleteInstance(m_hackInternetStateMachine);
-	//m_hackInternetStateMachine = nullptr;
-
-	// must make the state machine AFTER initing the other stuff, since it may inquire of its values...
-	//m_hackInternetStateMachine = newInstance(HackInternetStateMachine)( getObject() );
-	//m_hackInternetStateMachine->initDefaultState();
-#ifdef RTS_DEBUG
-	//m_hackInternetStateMachine->setName("HackInternetSpecificAI");
-#endif
-		getStateMachine()->setState(UNPACKING);
+	// Compatibility entry point for old scripts/InternetHackContain. Cash is already running.
+	setWakeFrame(getObject(), UPDATE_SLEEP_NONE);
 }
 
 // ------------------------------------------------------------------------------------------------
 UnsignedInt HackInternetAIUpdate::getUnpackTime() const
 {
-	// Not yet contained at the time this is queried
-	return getHackInternetAIUpdateModuleData()->m_unpackTime;
+	return 0;
 }
 
 // ------------------------------------------------------------------------------------------------
 UnsignedInt HackInternetAIUpdate::getPackTime() const
 {
-	if( getObject()->getContainedBy() != nullptr )
-		return 0; //We don't need to pack if exiting a building
-
-	return getHackInternetAIUpdateModuleData()->m_packTime;
+	return 0;
 }
 
 // ------------------------------------------------------------------------------------------------
 UnsignedInt HackInternetAIUpdate::getCashUpdateDelay() const
 {
-	if( getObject()->getContainedBy() != nullptr )
-		return getHackInternetAIUpdateModuleData()->m_cashUpdateDelayFast;
-	else
-		return getHackInternetAIUpdateModuleData()->m_cashUpdateDelay;
+	UnsignedInt delay = getHackInternetAIUpdateModuleData()->m_cashUpdateDelay;
+	return delay ? delay : 1;
 }
+
+// ------------------------------------------------------------------------------------------------
+UnsignedInt HackInternetAIUpdate::getBaseCashAmount() const
+{
+	const Object *owner = getObject();
+	ExperienceTracker *xp = owner ? owner->getExperienceTracker() : nullptr;
+	if (!xp)
+		return 1;
+
+	UnsignedInt amount = 0;
+	switch (xp->getVeterancyLevel())
+	{
+		case LEVEL_HEROIC:
+			amount = getHeroicCashAmount();
+			if (amount) break;
+			FALLTHROUGH;
+		case LEVEL_ELITE:
+			amount = getEliteCashAmount();
+			if (amount) break;
+			FALLTHROUGH;
+		case LEVEL_VETERAN:
+			amount = getVeteranCashAmount();
+			if (amount) break;
+			FALLTHROUGH;
+		case LEVEL_REGULAR:
+			amount = getRegularCashAmount();
+			if (amount) break;
+			FALLTHROUGH;
+		default:
+			amount = 1;
+			break;
+	}
+	return amount;
+}
+
+// ------------------------------------------------------------------------------------------------
+UnsignedInt HackInternetAIUpdate::getCashIncomePercent() const
+{
+	const Object *owner = getObject();
+	if (!owner)
+		return 100;
+
+	const Object *container = owner->getContainedBy();
+	if (container)
+	{
+		const ThingTemplate *containerTemplate = container->getTemplate();
+		const char *containerName = containerTemplate ? containerTemplate->getName().str() : nullptr;
+		// Base and general-prefixed Internet Centers all retain this canonical suffix.
+		return (containerName && strstr(containerName, "ChinaInternetCenter")) ? 200 : 100;
+	}
+
+	const PhysicsBehavior *physics = owner->getPhysics();
+	const Bool moving = physics && physics->getVelocityMagnitude() > 0.01f;
+	return moving ? 125 : 150;
+}
+
+// ------------------------------------------------------------------------------------------------
+void HackInternetAIUpdate::updateCashIncome()
+{
+	Object *owner = getObject();
+	if (!owner || owner->isEffectivelyDead())
+		return;
+
+	if (m_cashFramesRemaining > 0)
+	{
+		--m_cashFramesRemaining;
+		return;
+	}
+	m_cashFramesRemaining = getCashUpdateDelay();
+
+	if (owner->isDisabledByType(DISABLED_HACKED))
+		return;
+
+	Player *player = owner->getControllingPlayer();
+	Money *money = player ? player->getMoney() : nullptr;
+	ExperienceTracker *xp = owner->getExperienceTracker();
+	if (!money || !xp)
+		return;
+
+	const UnsignedInt baseAmount = getBaseCashAmount();
+	const UnsignedInt incomePercent = getCashIncomePercent();
+	const UnsignedInt scaledHundredths = baseAmount * incomePercent + m_cashRemainderPercent;
+	const UnsignedInt amount = scaledHundredths / 100;
+	m_cashRemainderPercent = scaledHundredths % 100;
+
+	if (amount == 0)
+		return;
+
+	money->deposit(amount);
+	player->getScoreKeeper()->addMoneyEarned(amount);
+	xp->addExperiencePoints(getXpPerCashUpdate());
+
+	if (owner->isLogicallyVisible())
+	{
+		UnicodeString moneyString;
+		moneyString.format(TheGameText->fetch("GUI:AddCash"), amount);
+		Coord3D pos = *owner->getPosition();
+		pos.z += 20.0f;
+
+		Object *container = owner->getContainedBy();
+		if (container)
+		{
+			Real width = container->getGeometryInfo().getMajorRadius() * 0.3f;
+			Real depth = container->getGeometryInfo().getMinorRadius() * 0.3f;
+			pos.x += GameClientRandomValue(-width, width);
+			pos.y += GameClientRandomValue(-depth, depth);
+		}
+
+		TheInGameUI->addFloatingText(moneyString, &pos, GameMakeColor(0, 255, 0, 255));
+	}
+
+	AudioEventRTS sound = *(owner->getTemplate()->getPerUnitSound("UnitCashPing"));
+	sound.setObjectID(owner->getID());
+	TheAudio->addAudioEvent(&sound);
+}
+
+// ------------------------------------------------------------------------------------------------
+void HackInternetAIUpdate::updateIdleHackAnimation()
+{
+	Object *owner = getObject();
+	if (!owner || owner->testStatus(OBJECT_STATUS_IS_USING_ABILITY))
+		return;
+
+	const PhysicsBehavior *physics = owner->getPhysics();
+	const Bool moving = physics && physics->getVelocityMagnitude() > 0.01f;
+	const Bool showLaptop = owner->getContainedBy() == nullptr && !moving;
+
+	owner->clearModelConditionState(MODELCONDITION_PACKING);
+	owner->clearModelConditionState(MODELCONDITION_UNPACKING);
+	if (showLaptop)
+		owner->setModelConditionState(MODELCONDITION_FIRING_A);
+	else
+		owner->clearModelConditionState(MODELCONDITION_FIRING_A);
+}
+
 
 // ------------------------------------------------------------------------------------------------
 /** CRC */
@@ -212,12 +289,13 @@ void HackInternetAIUpdate::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 2: Passive cash ticker state */
 // ------------------------------------------------------------------------------------------------
 void HackInternetAIUpdate::xfer( Xfer *xfer )
 {
   // version
-  XferVersion currentVersion = 1;
+  XferVersion currentVersion = 2;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
@@ -226,6 +304,17 @@ void HackInternetAIUpdate::xfer( Xfer *xfer )
 	xfer->xferBool(&m_hasPendingCommand);
 	if (m_hasPendingCommand) {
 		m_pendingCommand.doXfer(xfer);
+	}
+
+	if (version >= 2)
+	{
+		xfer->xferUnsignedInt(&m_cashFramesRemaining);
+		xfer->xferUnsignedInt(&m_cashRemainderPercent);
+	}
+	else if (xfer->getXferMode() == XFER_LOAD)
+	{
+		m_cashFramesRemaining = getCashUpdateDelay();
+		m_cashRemainderPercent = 0;
 	}
 }
 

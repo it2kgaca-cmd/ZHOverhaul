@@ -65,6 +65,82 @@
 #include "GameLogic/Module/ContainModule.h"
 
 
+namespace
+{
+	const UnsignedInt INTERACTION_PERCENT_REMAINING = 34;
+	const UnsignedInt NEAR_INSTANT_INTERACTION_FRAMES = 1;
+	const Real HACKER_DEFENSIVE_RANGE_MARGIN = 10.0f;
+
+	Bool isBlackLotusActor(const Object *obj)
+	{
+		const ThingTemplate *thingTemplate = obj ? obj->getTemplate() : nullptr;
+		const char *name = thingTemplate ? thingTemplate->getName().str() : nullptr;
+		return name && strstr(name, "ChinaInfantryBlackLotus");
+	}
+
+	Bool isBlackLotusInteraction(SpecialPowerType type)
+	{
+		return type == SPECIAL_BLACKLOTUS_CAPTURE_BUILDING ||
+			type == SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK ||
+			type == SPECIAL_BLACKLOTUS_STEAL_CASH_HACK;
+	}
+
+	Bool isNearInstantInfantryObjectInteraction(SpecialPowerType type)
+	{
+		switch (type)
+		{
+			case SPECIAL_REMOTE_CHARGES:
+			case SPECIAL_TIMED_CHARGES:
+			case SPECIAL_HACKER_DISABLE_BUILDING:
+			case SPECIAL_TANKHUNTER_TNT_ATTACK:
+			case SPECIAL_BOOBY_TRAP:
+			case SPECIAL_BLACKLOTUS_CAPTURE_BUILDING:
+			case SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK:
+			case SPECIAL_BLACKLOTUS_STEAL_CASH_HACK:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	UnsignedInt adjustedInfantryInteractionFrames(const Object *obj, SpecialPowerType type, UnsignedInt frames)
+	{
+		if (frames == 0 || !obj || !obj->isKindOf(KINDOF_INFANTRY))
+			return frames;
+
+		if (type == SPECIAL_INFANTRY_CAPTURE_BUILDING ||
+			(isBlackLotusActor(obj) && isBlackLotusInteraction(type)))
+		{
+			const UnsignedInt scaled = (frames * INTERACTION_PERCENT_REMAINING + 50) / 100;
+			return scaled ? scaled : 1;
+		}
+
+		if (isNearInstantInfantryObjectInteraction(type))
+			return NEAR_INSTANT_INTERACTION_FRAMES;
+
+		return frames;
+	}
+
+	UnsignedInt blackLotusCooldownCompensationFrames(const Object *obj, const SpecialAbilityUpdateModuleData *data)
+	{
+		if (!obj || !data || !data->m_specialPowerTemplate || !isBlackLotusActor(obj))
+			return 0;
+
+		const SpecialPowerType type = data->m_specialPowerTemplate->getSpecialPowerType();
+		if (!isBlackLotusInteraction(type))
+			return 0;
+
+		const UnsignedInt original =
+			data->m_unpackTime + data->m_preparationFrames + data->m_packTime;
+		const UnsignedInt shortened =
+			adjustedInfantryInteractionFrames(obj, type, data->m_unpackTime) +
+			adjustedInfantryInteractionFrames(obj, type, data->m_preparationFrames) +
+			adjustedInfantryInteractionFrames(obj, type, data->m_packTime);
+		return original > shortened ? original - shortened : 0;
+	}
+}
+
+
 
 //-------------------------------------------------------------------------------------------------
 SpecialAbilityUpdate::SpecialAbilityUpdate( Thing *thing, const ModuleData* moduleData ) : SpecialPowerUpdateModule( thing, moduleData )
@@ -404,6 +480,15 @@ UpdateSleepTime SpecialAbilityUpdate::update()
   else if( isWithinStartAbilityRange() )
   {
     m_withinStartAbilityRange = true;
+
+    // Stop at the first legal Hacker building-hack opportunity instead of walking closer.
+    const SpecialPowerTemplate *activeTemplate = getSpecialAbilityUpdateModuleData()->m_specialPowerTemplate;
+    if (activeTemplate && activeTemplate->getSpecialPowerType() == SPECIAL_HACKER_DISABLE_BUILDING)
+    {
+      AIUpdateInterface *hackerAI = getObject()->getAIUpdateInterface();
+      if (hackerAI && !hackerAI->isIdle())
+        hackerAI->aiIdle(CMD_FROM_AI);
+    }
     if( !isFacing() && needToFace() )
     {
       startFacing();
@@ -735,7 +820,8 @@ void SpecialAbilityUpdate::startPacking(Bool success)
   const SpecialAbilityUpdateModuleData* data = getSpecialAbilityUpdateModuleData();
   m_packingState = STATE_PACKING;
   Real variation = GameLogicRandomValueReal( 1.0f - data->m_packUnpackVariationFactor, 1.0f + data->m_packUnpackVariationFactor );
-  m_animFrames = data->m_packTime * variation;
+  const UnsignedInt rawFrames = (UnsignedInt)(data->m_packTime * variation);
+  m_animFrames = adjustedInfantryInteractionFrames(getObject(), data->m_specialPowerTemplate->getSpecialPowerType(), rawFrames);
 
   //Set the animation state
   getObject()->clearAndSetModelConditionFlags(
@@ -788,7 +874,8 @@ void SpecialAbilityUpdate::startUnpacking()
   const SpecialAbilityUpdateModuleData* data = getSpecialAbilityUpdateModuleData();
   m_packingState = STATE_UNPACKING;
   Real variation = GameLogicRandomValueReal( 1.0f - data->m_packUnpackVariationFactor, 1.0f + data->m_packUnpackVariationFactor );
-  m_animFrames = data->m_unpackTime * variation;
+  const UnsignedInt rawFrames = (UnsignedInt)(data->m_unpackTime * variation);
+  m_animFrames = adjustedInfantryInteractionFrames(getObject(), data->m_specialPowerTemplate->getSpecialPowerType(), rawFrames);
 
   //Set the animation state
   getObject()->clearAndSetModelConditionFlags(
@@ -815,17 +902,8 @@ Bool SpecialAbilityUpdate::isWithinStartAbilityRange() const
   const SpecialAbilityUpdateModuleData* data = getSpecialAbilityUpdateModuleData();
   const Object *self = getObject();
 
-  //Quickly convert very short range approaches to "contact" class requiring collision before
-  //stopping.
-  Real range = data->m_startAbilityRange;
-  const Real UNDERSIZE = PATHFIND_CELL_SIZE_F * 0.25f;
-  range = __max( 0.0f, range - UNDERSIZE );
-
   if( m_withinStartAbilityRange )
-  {
-    //Only get within range once.
     return true;
-  }
 
   Real fDistSquared = 0.0f;
   Object *target = nullptr;
@@ -833,53 +911,56 @@ Bool SpecialAbilityUpdate::isWithinStartAbilityRange() const
   {
     target = TheGameLogic->findObjectByID( m_targetID );
     if( target )
-    {
       fDistSquared = ThePartitionManager->getDistanceSquared( self, target, FROM_BOUNDINGSPHERE_2D );
-    }
   }
-  else if( m_targetPos.x || m_targetPos.y || m_targetPos.z ) //It's zero if not used...
+  else if( m_targetPos.x || m_targetPos.y || m_targetPos.z )
   {
     fDistSquared = ThePartitionManager->getDistanceSquared( self, &m_targetPos, FROM_BOUNDINGSPHERE_2D );
   }
   else
   {
-    //No position, so this step is useless
     return true;
   }
 
-  //Check to see how far we are from the target!
-  Real fStartRangeSquared = data->m_startAbilityRange * data->m_startAbilityRange;
+  Real effectiveStartRange = data->m_startAbilityRange;
+  const SpecialPowerTemplate *spTemplate = data->m_specialPowerTemplate;
+  if (target && spTemplate &&
+      spTemplate->getSpecialPowerType() == SPECIAL_HACKER_DISABLE_BUILDING &&
+      target->isKindOf(KINDOF_STRUCTURE))
+  {
+    const Real defensiveRange = target->getLargestWeaponRange();
+    if (defensiveRange > 0.0f)
+      effectiveStartRange = __max(effectiveStartRange, defensiveRange + HACKER_DEFENSIVE_RANGE_MARGIN);
+  }
+
+  const Real UNDERSIZE = PATHFIND_CELL_SIZE_F * 0.25f;
+  const Real losRange = __max(0.0f, effectiveStartRange - UNDERSIZE);
+  const Real fStartRangeSquared = effectiveStartRange * effectiveStartRange;
+
   if( fDistSquared <= fStartRangeSquared )
   {
-    if( range == 0.0f && m_targetID != INVALID_ID )
+    if( effectiveStartRange == 0.0f && m_targetID != INVALID_ID )
     {
-      //We want to ensure we collided with our target first!
       ObjectIterator *iter = ThePartitionManager->iteratePotentialCollisions( self->getPosition(), self->getGeometryInfo(), 0.0f );
       MemoryPoolObjectHolder hold(iter);
       for( Object *them = iter->first(); them; them = iter->next() )
       {
         if( target == them )
-        {
           return true;
-        }
       }
       return false;
     }
 
     if( data->m_approachRequiresLOS )
     {
-      //Make sure we can see the target!
-      PartitionFilterLineOfSight  filterLOS( self );
+      PartitionFilterLineOfSight filterLOS( self );
       PartitionFilter *filters[] = { &filterLOS, nullptr };
-      ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( self, range, FROM_BOUNDINGSPHERE_2D, filters, ITER_SORTED_NEAR_TO_FAR );
+      ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( self, losRange, FROM_BOUNDINGSPHERE_2D, filters, ITER_SORTED_NEAR_TO_FAR );
       MemoryPoolObjectHolder hold(iter);
       for( Object *theTarget = iter->first(); theTarget; theTarget = iter->next() )
       {
-        //LOS check succeeded.
         if( target == theTarget )
-        {
           return true;
-        }
       }
     }
     else
@@ -982,8 +1063,8 @@ void SpecialAbilityUpdate::startPreparation()
   const SpecialAbilityUpdateModuleData* data = getSpecialAbilityUpdateModuleData();
   const SpecialPowerTemplate *spTemplate = data->m_specialPowerTemplate;
 
-  //Set the preparation timer
-  m_prepFrames = data->m_preparationFrames;
+  // Captures retain 34% of their choreography; other infantry object interactions are near-instant.
+  m_prepFrames = adjustedInfantryInteractionFrames(getObject(), spTemplate->getSpecialPowerType(), data->m_preparationFrames);
 
   switch( spTemplate->getSpecialPowerType() )
   {
@@ -1027,7 +1108,7 @@ void SpecialAbilityUpdate::startPreparation()
                                                    MAKE_MODELCONDITION_MASK( MODELCONDITION_RAISING_FLAG ) );
       Drawable* draw = getObject()->getDrawable();
       if (draw)
-        draw->setAnimationCompletionTime(data->m_preparationFrames);
+        draw->setAnimationCompletionTime(m_prepFrames);
 
       //Warn the victim so he might have a chance to react!
       if( target && target->isLocallyViewed() )
@@ -1844,6 +1925,17 @@ void SpecialAbilityUpdate::finishAbility()
 	//AudioEventRTS event = *getObject()->getTemplate()->getVoiceTaskComplete();
 	//event.setObjectID(getObject()->getID());
 	//TheAudio->addAudioEvent(&event);
+
+	// Black Lotus keeps the original total cadence: shortened interaction time is paid back as
+	// post-action cooldown for capture, vehicle disable, and cash steal.
+	const UnsignedInt lotusSavedFrames = blackLotusCooldownCompensationFrames(getObject(), data);
+	if (lotusSavedFrames > 0)
+	{
+		SpecialPowerModuleInterface *spm = getMySPM();
+		const SpecialPowerTemplate *spTemplate = getTemplate();
+		if (spm && spTemplate)
+			spm->setReadyFrame(TheGameLogic->getFrame() + spTemplate->getReloadTime() + lotusSavedFrames);
+	}
 
 	onExit( false );
 }

@@ -184,6 +184,13 @@ class HackInternetAIUpdate : public AIUpdateInterface, public HackInternetAIInte
 	MAKE_STANDARD_MODULE_MACRO_WITH_MODULE_DATA( HackInternetAIUpdate, HackInternetAIUpdateModuleData )
 
 private:
+	void updateCashIncome();
+	void updateIdleHackAnimation();
+	UnsignedInt getBaseCashAmount() const;
+	UnsignedInt getCashIncomePercent() const;
+
+	UnsignedInt m_cashFramesRemaining;
+	UnsignedInt m_cashRemainderPercent;
 
 public:
 	HackInternetAIUpdate( Thing *thing, const ModuleData* moduleData );
