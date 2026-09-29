@@ -5219,7 +5219,7 @@ AIStateType AIUpdateInterface::getAIStateType() const
 //-------------------------------------------------------------------------------------------------
 Bool AIUpdateInterface::isFixedPostGuardArtillery() const
 {
-	Object *obj = getObject();
+	const Object *obj = getObject();
 	if (obj == nullptr || getAIStateType() != AI_GUARD || getGuardTargetType() != GUARDTARGET_LOCATION)
 		return FALSE;
 
