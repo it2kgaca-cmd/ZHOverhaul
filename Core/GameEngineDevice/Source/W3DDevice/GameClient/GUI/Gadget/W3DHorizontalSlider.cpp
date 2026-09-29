@@ -238,10 +238,7 @@ void W3DGadgetHorizontalSliderImageDrawB( GameWindow *window,
 
 	SliderData *s = (SliderData *)window->winGetUserData();
 
-	// Image-style sliders normally come from .wnd assets with their image state populated.
-	// Runtime or malformed controls may not. Degrade to the standard colored renderer instead
-	// of dereferencing missing SliderData or Image pointers.
-	if (s == nullptr || fillSquare == nullptr || blankSquare == nullptr || highlightSquare == nullptr)
+	if (s == nullptr)
 	{
 		W3DGadgetHorizontalSliderDraw(window, instData);
 		return;
@@ -265,6 +262,11 @@ void W3DGadgetHorizontalSliderImageDrawB( GameWindow *window,
 	if( BitIsSet( instData->getState(), WIN_STATE_HILITED ) )
 	{
 		highlightSquare					= GadgetSliderGetHiliteImageLeft( window );
+		if (highlightSquare == nullptr)
+		{
+			W3DGadgetHorizontalSliderDraw(window, instData);
+			return;
+		}
 		ICoord2D backgroundStart, backgroundEnd;
 		backgroundStart.x = origin.x - (highlightSquare->getImageWidth() * xMulti)/2;
 		backgroundStart.y = origin.y + (highlightSquare->getImageHeight() *yMulti)/3;
@@ -290,6 +292,11 @@ void W3DGadgetHorizontalSliderImageDrawB( GameWindow *window,
 	}
 
 	fillSquare = GadgetSliderGetDisabledImageLeft( window );
+	if (fillSquare == nullptr)
+	{
+		W3DGadgetHorizontalSliderDraw(window, instData);
+		return;
+	}
 	start.x = origin.x;
 	start.y = origin.y;
 	end.y = start.y + fillSquare->getImageHeight() * yMulti;
@@ -309,6 +316,11 @@ void W3DGadgetHorizontalSliderImageDrawB( GameWindow *window,
 	}
 
 	blankSquare	= GadgetSliderGetDisabledImageRight( window );
+	if (blankSquare == nullptr)
+	{
+		W3DGadgetHorizontalSliderDraw(window, instData);
+		return;
+	}
 	end.x	= start.x + blankSquare->getImageWidth()* xMulti;
 
 	while(end.x < origin.x + size.x )
