@@ -263,25 +263,7 @@ static Bool inWeaponRangeObject(State *thisState, void* userData);
 // actual targeting remains governed by player shroud visibility and weapon legality.
 static Bool isFixedPostGuardArtillery(Object *obj, AIUpdateInterface *ai)
 {
-	if (obj == nullptr || ai == nullptr ||
-			ai->getAIStateType() != AI_GUARD ||
-			ai->getGuardTargetType() != GUARDTARGET_LOCATION)
-		return FALSE;
-
-	Real longestWeaponRange = 0.0f;
-	for (Int slotIndex = 0; slotIndex < WEAPONSLOT_COUNT; ++slotIndex)
-	{
-		Weapon *weapon = obj->getWeaponInWeaponSlot(static_cast<WeaponSlotType>(slotIndex));
-		if (weapon)
-			longestWeaponRange = max(longestWeaponRange, weapon->getAttackRange(obj));
-	}
-
-	if (longestWeaponRange <= 0.0f)
-		return FALSE;
-
-	const Real visionRange = TheAI->getAdjustedVisionRangeForObject(obj,
-		AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
-	return longestWeaponRange > visionRange * 1.10f;
+	return obj && ai && ai->isFixedPostGuardArtillery();
 }
 
 //----------------------------------------------------------------------------------------------------------
