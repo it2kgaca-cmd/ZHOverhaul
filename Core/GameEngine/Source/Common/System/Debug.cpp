@@ -878,9 +878,9 @@ static void showReleaseCrashDialog(
 		"Build: %s\n\n"
 		"Diagnostic report:\n%s\n\n"
 #ifdef RTS_ENABLE_CRASHDUMP
-		"Minimal/full crash dumps (Crash*.dmp) are written to the same user-data directory.\n\n"
+		"Crash dumps are saved in the CrashDumps folder inside the Zero Hour user-data directory.\n\n"
 #endif
-		"Please use the report and dumps instead of the old generic 'serious error' message.",
+		"Please include the diagnostic report and crash dump when reporting this issue.",
 		reason ? reason : "<no reason supplied>",
 		source,
 		GitShortSHA1,

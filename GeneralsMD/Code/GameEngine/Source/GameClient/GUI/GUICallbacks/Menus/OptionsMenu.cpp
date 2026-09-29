@@ -280,7 +280,7 @@ static void initGameSpeedControl()
 
 	sliderGameSpeed = TheWindowManager->gogoGadgetSlider(
 		legacyEntry->winGetParent(),
-		WIN_STATUS_ENABLED | WIN_STATUS_IMAGE,
+		WIN_STATUS_ENABLED,
 		x, y, width, height,
 		&instData, &sliderData, legacyEntry->winGetFont(), TRUE);
 

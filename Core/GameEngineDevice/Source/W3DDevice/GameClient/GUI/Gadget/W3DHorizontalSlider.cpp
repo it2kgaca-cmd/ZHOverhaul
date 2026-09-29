@@ -150,6 +150,15 @@ void W3DGadgetHorizontalSliderImageDraw( GameWindow *window,
 
 	SliderData *s = (SliderData *)window->winGetUserData();
 
+	// Image-style sliders normally come from .wnd assets with their image state populated.
+	// Runtime or malformed controls may not. Degrade to the standard colored renderer instead
+	// of dereferencing missing SliderData or Image pointers.
+	if (s == nullptr || fillSquare == nullptr || blankSquare == nullptr || highlightSquare == nullptr)
+	{
+		W3DGadgetHorizontalSliderDraw(window, instData);
+		return;
+	}
+
 	Real xMulti = INT_TO_REAL(TheDisplay->getWidth()) / DEFAULT_DISPLAY_WIDTH;
 
 	// figure out how many boxes we draw for this slider
@@ -228,6 +237,15 @@ void W3DGadgetHorizontalSliderImageDrawB( GameWindow *window,
 	window->winGetSize( &size.x, &size.y );
 
 	SliderData *s = (SliderData *)window->winGetUserData();
+
+	// Image-style sliders normally come from .wnd assets with their image state populated.
+	// Runtime or malformed controls may not. Degrade to the standard colored renderer instead
+	// of dereferencing missing SliderData or Image pointers.
+	if (s == nullptr || fillSquare == nullptr || blankSquare == nullptr || highlightSquare == nullptr)
+	{
+		W3DGadgetHorizontalSliderDraw(window, instData);
+		return;
+	}
 
 	Real xMulti = INT_TO_REAL(TheDisplay->getWidth()) / DEFAULT_DISPLAY_WIDTH;
 	Real yMulti = INT_TO_REAL(TheDisplay->getHeight()) / DEFAULT_DISPLAY_HEIGHT;
