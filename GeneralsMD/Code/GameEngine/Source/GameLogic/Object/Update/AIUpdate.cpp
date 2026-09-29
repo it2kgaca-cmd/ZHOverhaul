@@ -3040,9 +3040,19 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 			}
 		}
 
-		if (!blocked && m_blockedFrames>1)
+		if (isDoingGroundMovement() && blocked)
+		{
+			// Locomotor terrain probes now report cliffs/shorelines as real blockers. Persist that
+			// information into the normal stuck machinery so the move state abandons a bad local
+			// approach and asks the pathfinder for a fresh route instead of grinding forever.
+			m_isBlocked = TRUE;
+			if (m_blockedFrames >= LOGICFRAMES_PER_SECOND / 2)
+				m_isBlockedAndStuck = TRUE;
+		}
+		else if (!blocked && m_blockedFrames>1)
 		{
 			m_blockedFrames = 1;
+			m_isBlockedAndStuck = FALSE;
 		}
 
 		// After our movement for the frame, update our AirborneTarget flag.

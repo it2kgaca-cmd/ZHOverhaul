@@ -1003,6 +1003,68 @@ void Locomotor::locoUpdate_moveTowardsPosition(Object* obj, const Coord3D& goalP
 	Real dy = goalPos.y - obj->getPosition()->y;
 	Real dz = goalPos.z - obj->getPosition()->z;
 	Real dist = sqrt(dx*dx+dy*dy);
+
+	// ZHOverhaul: don't let a ground unit grind its footprint into a cliff/shoreline forever.
+	// The old locomotors often checked only the center point (or noticed danger only while turning),
+	// then simply withheld motive force and retried the same bad approach forever. Probe a short
+	// footprint-wide corridor ahead. Mark it blocked so AI path recovery can repath decisively.
+	if (dist > 0.01f &&
+		BitIsSet(m_template->m_surfaces, LOCOMOTORSURFACE_AIR) == false &&
+		!getFlag(ALLOW_INVALID_POSITION))
+	{
+		const Coord3D *curPos = obj->getPosition();
+		const Real invDist = 1.0f / dist;
+		const Real dirX = dx * invDist;
+		const Real dirY = dy * invDist;
+
+		Real footprint = obj->getGeometryInfo().getBoundingCircleRadius();
+		if (footprint < 2.0f)
+			footprint = 2.0f;
+
+		Real lookAhead = footprint * 0.75f;
+		if (lookAhead < PATHFIND_CELL_SIZE_F * 0.45f)
+			lookAhead = PATHFIND_CELL_SIZE_F * 0.45f;
+		if (lookAhead > PATHFIND_CELL_SIZE_F * 1.25f)
+			lookAhead = PATHFIND_CELL_SIZE_F * 1.25f;
+		if (lookAhead > dist)
+			lookAhead = dist;
+
+		const Real sideClearance = footprint * 0.60f;
+		const Real leftX = -dirY;
+		const Real leftY = dirX;
+
+		Coord3D probeCenter = *curPos;
+		probeCenter.x += dirX * lookAhead;
+		probeCenter.y += dirY * lookAhead;
+
+		Coord3D probeLeft = probeCenter;
+		probeLeft.x += leftX * sideClearance;
+		probeLeft.y += leftY * sideClearance;
+
+		Coord3D probeRight = probeCenter;
+		probeRight.x -= leftX * sideClearance;
+		probeRight.y -= leftY * sideClearance;
+
+		const Bool corridorValid =
+			TheAI->pathfinder()->validMovementTerrain(obj->getLayer(), this, &probeCenter) &&
+			TheAI->pathfinder()->validMovementTerrain(obj->getLayer(), this, &probeLeft) &&
+			TheAI->pathfinder()->validMovementTerrain(obj->getLayer(), this, &probeRight);
+
+		if (!corridorValid)
+		{
+			*blocked = true;
+			physics->scrubVelocity2D(0);
+
+			// Keep facing the intended route so a freshly computed path can take over cleanly,
+			// but do not continue applying motive force into forbidden terrain this frame.
+			physics->setTurning(rotateTowardsPosition(obj, goalPos));
+			Coord3D force;
+			force.zero();
+			physics->applyMotiveForce(&force);
+			handleBehaviorZ(obj, physics, goalPos);
+			return;
+		}
+	}
 	if (dist>onPathDistToGoal)
 	{
 		if (!obj->isKindOf(KINDOF_PROJECTILE) && dist>2*onPathDistToGoal)
