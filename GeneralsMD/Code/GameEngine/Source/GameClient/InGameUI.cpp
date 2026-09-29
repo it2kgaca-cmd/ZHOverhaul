@@ -1672,10 +1672,22 @@ void InGameUI::handleBuildPlacements()
 	static Real stickyAngle = 0.0f;
 	static Bool stickyValid = FALSE;
 
+	// Environmental suggestions never become the player's preferred rotation. When the cursor
+	// leaves nearby obstructions, the ghost therefore returns to the player's/default angle.
+	static Real playerPreferredAngle = 0.0f;
+	static Bool playerPreferredAngleValid = FALSE;
+
+	// Hold Shift for direct rotation without the old click-first placement anchor.
+	static Bool shiftRotateActive = FALSE;
+	static ICoord2D shiftRotateAnchorScreen;
+	static Real shiftRotateStartAngle = 0.0f;
+
 	if (stickyBuildType != m_pendingPlaceType)
 	{
 		stickyBuildType = m_pendingPlaceType;
 		stickyValid = FALSE;
+		playerPreferredAngleValid = FALSE;
+		shiftRotateActive = FALSE;
 	}
 
 	//
@@ -1686,7 +1698,12 @@ void InGameUI::handleBuildPlacements()
 	{
 		ICoord2D loc;
 		Coord3D world;
-		Real angle = m_placeIcon[ 0 ]->getOrientation();
+		if (!playerPreferredAngleValid)
+		{
+			playerPreferredAngle = m_placeIcon[0]->getOrientation();
+			playerPreferredAngleValid = TRUE;
+		}
+		Real angle = playerPreferredAngle;
 
 		// update the angle of the icon to match any placement angle and pick the
 		// location the icon will be at (anchored is the start, otherwise it's the mouse)
@@ -1714,13 +1731,8 @@ void InGameUI::handleBuildPlacements()
 					v.y = worldEnd.y - worldStart.y;
 					angle = v.toAngle();
 
-					// TheSuperHackers @tweak Stubbjax 04/08/2025 Snap angle to nearest 45 degrees
-					// while using force attack mode for convenience.
-					if (isInForceAttackMode())
-					{
-						const Real snapRadians = DEG_TO_RADF(45);
-						angle = WWMath::Round(angle / snapRadians) * snapRadians;
-					}
+					// Anchored line placement owns its drag angle. Ctrl is reserved for bypassing
+					// smart placement and must not silently quantize the player's rotation.
 				}
 			}
 
@@ -1728,9 +1740,30 @@ void InGameUI::handleBuildPlacements()
 		else
 		{
 			const MouseIO *mouseIO = TheMouse->getMouseStatus();
+			const Bool shiftRotate = isInPreferSelectionMode();
 
-			// location is the mouse position
-			loc = mouseIO->pos;
+			if (shiftRotate)
+			{
+				if (!shiftRotateActive)
+				{
+					shiftRotateActive = TRUE;
+					shiftRotateAnchorScreen = mouseIO->pos;
+					shiftRotateStartAngle = playerPreferredAngle;
+				}
+
+				// Freeze the placement point while rotating. Half a degree per horizontal pixel
+				// gives fine control without requiring an initial click.
+				loc = shiftRotateAnchorScreen;
+				const Int pixelDelta = mouseIO->pos.x - shiftRotateAnchorScreen.x;
+				angle = shiftRotateStartAngle + DEG_TO_RADF(0.50f) * pixelDelta;
+				playerPreferredAngle = angle;
+			}
+			else
+			{
+				shiftRotateActive = FALSE;
+				loc = mouseIO->pos;
+				angle = playerPreferredAngle;
+			}
 
 		}
 
@@ -1755,17 +1788,31 @@ void InGameUI::handleBuildPlacements()
 			Coord3D resolvedWorld = world;
 			Real resolvedAngle = angle;
 			Bool resolvedLegal = FALSE;
+			const Bool smartPlacementEnabled = !isInForceAttackMode();
 			if (builderObject != nullptr && !TheBuildAssistant->isLineBuildTemplate(m_pendingPlaceType))
 			{
-				resolvedLegal = TheBuildAssistant->findNearestLegalPlacement(
-					&world, m_pendingPlaceType, angle, placementOptions,
-					builderObject, nullptr, &resolvedWorld, &resolvedAngle);
+				if (smartPlacementEnabled)
+				{
+					resolvedLegal = TheBuildAssistant->findNearestLegalPlacement(
+						&world, m_pendingPlaceType, playerPreferredAngle, placementOptions,
+						builderObject, nullptr, &resolvedWorld, &resolvedAngle);
+				}
+				else
+				{
+					// Ctrl means exact/raw placement: no magnetic position correction and no
+					// environmental rotation. Legality feedback remains active.
+					resolvedWorld = world;
+					resolvedAngle = playerPreferredAngle;
+					resolvedLegal = TheBuildAssistant->isLocationLegalToBuild(
+						&resolvedWorld, m_pendingPlaceType, resolvedAngle, placementOptions,
+						builderObject, nullptr) == LBC_OK;
+				}
 
 				Real stickyRelease = m_pendingPlaceType->getTemplateGeometryInfo().getMajorRadius() * 1.10f;
 				if (stickyRelease < PATHFIND_CELL_SIZE_F * 2.0f)
 					stickyRelease = PATHFIND_CELL_SIZE_F * 2.0f;
 
-				if (resolvedLegal && stickyValid)
+				if (smartPlacementEnabled && resolvedLegal && stickyValid)
 				{
 					// Smooth small legal movements of the snap solution. If interpolation
 					// would cross the obstruction, retain the previous legal transform
@@ -1795,21 +1842,6 @@ void InGameUI::handleBuildPlacements()
 						}
 					}
 				}
-				else if (!resolvedLegal && stickyValid)
-				{
-					const Real rawDx = rawWorld.x - stickyPlacement.x;
-					const Real rawDy = rawWorld.y - stickyPlacement.y;
-					if (rawDx*rawDx + rawDy*rawDy <= sqr(stickyRelease) &&
-							TheBuildAssistant->isLocationLegalToBuild(
-								&stickyPlacement, m_pendingPlaceType, stickyAngle, placementOptions,
-								builderObject, nullptr) == LBC_OK)
-					{
-						resolvedLegal = TRUE;
-						resolvedWorld = stickyPlacement;
-						resolvedAngle = stickyAngle;
-					}
-				}
-
 				if (resolvedLegal)
 				{
 					stickyPlacement = resolvedWorld;
@@ -1831,28 +1863,27 @@ void InGameUI::handleBuildPlacements()
 			m_placeIcon[0]->setPosition(&world);
 			m_placeIcon[0]->setOrientation(angle);
 
-			if( TheGameClient->getFrame() & 0x1 )
-			{
-				TheTerrainVisual->removeAllBibs();
+			// Validity feedback is immediate and authoritative. Hysteresis may choose between legal
+			// suggestions, but it may never retain a stale legal ghost after the current pose fails.
+			TheTerrainVisual->removeAllBibs();
 
-				LegalBuildCode lbc = LBC_GENERIC_FAILURE;
-				if (resolvedLegal)
-					lbc = LBC_OK;
-				else if (builderObject != nullptr)
-					lbc = TheBuildAssistant->isLocationLegalToBuild(
-						&world, m_pendingPlaceType, angle, placementOptions,
-						builderObject, nullptr );
+			LegalBuildCode lbc = LBC_GENERIC_FAILURE;
+			if (resolvedLegal)
+				lbc = LBC_OK;
+			else if (builderObject != nullptr)
+				lbc = TheBuildAssistant->isLocationLegalToBuild(
+					&world, m_pendingPlaceType, angle, placementOptions,
+					builderObject, nullptr );
 
-				if( lbc != LBC_OK )
-					m_placeIcon[0]->colorTint(&IllegalBuildColor);
-				else
-					m_placeIcon[0]->colorTint(nullptr);
+			if( lbc != LBC_OK )
+				m_placeIcon[0]->colorTint(&IllegalBuildColor);
+			else
+				m_placeIcon[0]->colorTint(nullptr);
 
-				if (lbc != LBC_OK)
-					TheTerrainVisual->addFactionBibDrawable(m_placeIcon[0], TRUE);
-				else
-					TheTerrainVisual->removeFactionBibDrawable(m_placeIcon[0]);
-			}
+			if (lbc != LBC_OK)
+				TheTerrainVisual->addFactionBibDrawable(m_placeIcon[0], TRUE);
+			else
+				TheTerrainVisual->removeFactionBibDrawable(m_placeIcon[0]);
 		}
 
 		//

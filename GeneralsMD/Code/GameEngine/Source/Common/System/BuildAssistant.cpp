@@ -1092,13 +1092,11 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 	*resolvedPos = *desiredPos;
 	*resolvedAngle = desiredAngle;
 
-	LegalBuildCode initial = isLocationLegalToBuild(
+	const LegalBuildCode initial = isLocationLegalToBuild(
 		desiredPos, build, desiredAngle, options, builderObject, player);
-	if (initial == LBC_OK)
-		return TRUE;
 
-	// Shroud is not a geometric placement problem. Do not let magnetic placement
-	// leak information or slide a hidden cursor around looking for revealed cells.
+	// Shroud is not a geometric placement problem. Never slide/rotate a hidden cursor around
+	// searching for revealed cells because that leaks map information.
 	if (initial == LBC_SHROUD)
 		return FALSE;
 
@@ -1106,9 +1104,67 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 	if (captureRadius < PATHFIND_CELL_SIZE_F * 3.0f)
 		captureRadius = PATHFIND_CELL_SIZE_F * 3.0f;
 
-	// Unit-circle samples, ordered deterministically. Four radial rings give the
-	// cursor a "sticky edge" feel: it remains on the nearest legal side of an
-	// obstruction until the raw mouse moves beyond the capture radius.
+	// Nearby structures influence orientation. In open ground there is deliberately no
+	// environmental suggestion: preserve the player's preferred angle exactly.
+	Object *nearestStructure = nullptr;
+	Real nearestStructureDistSqr = 1.0e30f;
+	Real influenceRadius = captureRadius * 2.50f;
+	if (influenceRadius < PATHFIND_CELL_SIZE_F * 6.0f)
+		influenceRadius = PATHFIND_CELL_SIZE_F * 6.0f;
+
+	PartitionFilterAcceptByKindOf structureFilter(MAKE_KINDOF_MASK(KINDOF_STRUCTURE), KINDOFMASK_NONE);
+	PartitionFilter *filters[] = { &structureFilter, nullptr };
+	ObjectIterator *nearby = ThePartitionManager->iterateObjectsInRange(
+		desiredPos, influenceRadius, FROM_BOUNDINGSPHERE_2D, filters);
+	MemoryPoolObjectHolder nearbyHolder(nearby);
+
+	for (Object *other = nearby->first(); other; other = nearby->next())
+	{
+		if (other == builderObject || other->isEffectivelyDead() || other->isContained())
+			continue;
+
+		const Real dx = other->getPosition()->x - desiredPos->x;
+		const Real dy = other->getPosition()->y - desiredPos->y;
+		const Real distSqr = dx*dx + dy*dy;
+		if (nearestStructure == nullptr || distSqr < nearestStructureDistSqr ||
+			(distSqr == nearestStructureDistSqr && other->getID() < nearestStructure->getID()))
+		{
+			nearestStructure = other;
+			nearestStructureDistSqr = distSqr;
+		}
+	}
+
+	if (initial == LBC_OK && nearestStructure == nullptr)
+		return TRUE;
+
+	// Deterministic local candidate set. The raw player angle always participates. Near another
+	// structure, also try matching its axis and the perpendicular axis; blocked placements get
+	// quarter-turn alternatives before the small fallback angle sweep.
+	Real candidateAngles[16];
+	Int angleCount = 0;
+	candidateAngles[angleCount++] = desiredAngle;
+
+	if (nearestStructure)
+	{
+		const Real structureAngle = nearestStructure->getOrientation();
+		for (Int quarter = 0; quarter < 4; ++quarter)
+			candidateAngles[angleCount++] = structureAngle + quarter * (PI * 0.5f);
+	}
+
+	candidateAngles[angleCount++] = desiredAngle + PI * 0.5f;
+	candidateAngles[angleCount++] = desiredAngle - PI * 0.5f;
+	candidateAngles[angleCount++] = desiredAngle + PI;
+
+	if (initial != LBC_OK)
+	{
+		const Real angleStep = DEG_TO_RADF(5.0f);
+		for (Int step = 1; step <= 4 && angleCount + 1 < 16; ++step)
+		{
+			candidateAngles[angleCount++] = desiredAngle + angleStep * step;
+			candidateAngles[angleCount++] = desiredAngle - angleStep * step;
+		}
+	}
+
 	static const Real dirs[16][2] =
 	{
 		{ 1.000000f,  0.000000f}, { 0.923880f,  0.382683f},
@@ -1121,47 +1177,79 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 		{ 0.707107f, -0.707107f}, { 0.923880f, -0.382683f}
 	};
 
-	for (Int ring = 1; ring <= 4; ++ring)
+	Bool found = FALSE;
+	Real bestScore = 1.0e30f;
+	Coord3D bestPos = *desiredPos;
+	Real bestAngle = desiredAngle;
+
+	for (Int a = 0; a < angleCount; ++a)
 	{
-		const Real radius = captureRadius * (INT_TO_REAL(ring) / 4.0f);
-		for (Int d = 0; d < 16; ++d)
+		const Real candidateAngle = candidateAngles[a];
+
+		// sample=-1 is the exact cursor position. Remaining samples are four local rings.
+		for (Int sample = -1; sample < 64; ++sample)
 		{
 			Coord3D candidate = *desiredPos;
-			candidate.x += dirs[d][0] * radius;
-			candidate.y += dirs[d][1] * radius;
-			candidate.z = TheTerrainLogic->getGroundHeight(candidate.x, candidate.y);
+			if (sample >= 0)
+			{
+				const Int ring = sample / 16 + 1;
+				const Int dir = sample % 16;
+				const Real radius = captureRadius * (INT_TO_REAL(ring) / 4.0f);
+				candidate.x += dirs[dir][0] * radius;
+				candidate.y += dirs[dir][1] * radius;
+				candidate.z = TheTerrainLogic->getGroundHeight(candidate.x, candidate.y);
+			}
 
 			if (isLocationLegalToBuild(
-					&candidate, build, desiredAngle, options, builderObject, player) == LBC_OK)
+					&candidate, build, candidateAngle, options, builderObject, player) != LBC_OK)
 			{
-				*resolvedPos = candidate;
-				*resolvedAngle = desiredAngle;
-				return TRUE;
+				continue;
+			}
+
+			const Real dx = candidate.x - desiredPos->x;
+			const Real dy = candidate.y - desiredPos->y;
+			Real score = dx*dx + dy*dy;
+
+			// Preserve deliberate player rotation unless environmental alignment buys a meaningfully
+			// cleaner fit. Express angular cost as an equivalent local displacement.
+			const Real angleDelta = fabs(stdAngleDiff(candidateAngle, desiredAngle));
+			const Real angleDistance = captureRadius * 0.35f * (angleDelta / PI);
+			score += angleDistance * angleDistance;
+
+			if (nearestStructure)
+			{
+				Real alignmentError = PI;
+				const Real structureAngle = nearestStructure->getOrientation();
+				for (Int quarter = 0; quarter < 4; ++quarter)
+				{
+					const Real err = fabs(stdAngleDiff(candidateAngle,
+						structureAngle + quarter * (PI * 0.5f)));
+					if (err < alignmentError)
+						alignmentError = err;
+				}
+
+				const Real alignmentDistance =
+					captureRadius * 0.50f * (alignmentError / (PI * 0.5f));
+				score += alignmentDistance * alignmentDistance;
+			}
+
+			if (!found || score < bestScore - 0.001f ||
+				(fabs(score - bestScore) <= 0.001f && candidateAngle < bestAngle))
+			{
+				found = TRUE;
+				bestScore = score;
+				bestPos = candidate;
+				bestAngle = candidateAngle;
 			}
 		}
 	}
 
-	// If position snapping cannot solve it, try nearby orientations at the raw
-	// cursor point. This lets rotation skip small invalid angle intervals while
-	// preserving the player's intended angle as closely as possible.
-	const Real angleStep = DEG_TO_RADF(5.0f);
-	for (Int step = 1; step <= 9; ++step)
-	{
-		const Real delta = angleStep * step;
-		const Real candidateAngles[2] = { desiredAngle + delta, desiredAngle - delta };
-		for (Int a = 0; a < 2; ++a)
-		{
-			if (isLocationLegalToBuild(
-					desiredPos, build, candidateAngles[a], options, builderObject, player) == LBC_OK)
-			{
-				*resolvedPos = *desiredPos;
-				*resolvedAngle = candidateAngles[a];
-				return TRUE;
-			}
-		}
-	}
+	if (!found)
+		return FALSE;
 
-	return FALSE;
+	*resolvedPos = bestPos;
+	*resolvedAngle = bestAngle;
+	return TRUE;
 }
 
 //-------------------------------------------------------------------------------------------------
