@@ -1022,6 +1022,10 @@ StateReturnType AIGuardPickUpCrateState::onEnter()
 	Object *owner = getMachineOwner();
 	AIUpdateInterface *ai = owner->getAIUpdateInterface();
 
+	// Emplaced artillery never abandons a fixed Guard post for a crate.
+	if (isStationaryGuardArtillery(owner))
+		return STATE_SUCCESS;
+
 	// Check to see if we have created a crate we need to pick up.
 	Object* crate = ai->checkForCrateToPickup();
 	if (crate)
