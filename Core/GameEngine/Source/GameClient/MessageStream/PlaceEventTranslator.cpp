@@ -270,7 +270,7 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 						Real resolvedAngle = angle;
 						if (TheBuildAssistant->findNearestLegalPlacement(
 								&worldStart, build, angle, magneticOptions, builderObj, nullptr,
-								&resolvedWorld, &resolvedAngle))
+								TRUE, FALSE, 0.0f, &resolvedWorld, &resolvedAngle))
 						{
 							worldStart = resolvedWorld;
 							angle = resolvedAngle;
