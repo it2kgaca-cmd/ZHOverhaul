@@ -880,7 +880,7 @@ static void showReleaseCrashDialog(
 #ifdef RTS_ENABLE_CRASHDUMP
 		"Crash dumps are saved in the CrashDumps folder inside the Zero Hour user-data directory.\n\n"
 #endif
-		"Please include the diagnostic report and crash dump when reporting this issue.",
+		"Please include the diagnostic report and crash dump files when reporting this issue.",
 		reason ? reason : "<no reason supplied>",
 		source,
 		GitShortSHA1,
