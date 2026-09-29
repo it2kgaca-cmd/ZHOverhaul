@@ -56,26 +56,75 @@
 
 const Real CLOSE_ENOUGH = (25.0f);
 
+static Weapon *getLongestRangeGuardWeapon(Object *obj, WeaponSlotType *outSlot = nullptr)
+{
+	if (obj == nullptr)
+		return nullptr;
+
+	Weapon *bestWeapon = nullptr;
+	WeaponSlotType bestSlot = PRIMARY_WEAPON;
+	Real bestRange = 0.0f;
+	for (Int slotIndex = 0; slotIndex < WEAPONSLOT_COUNT; ++slotIndex)
+	{
+		const WeaponSlotType slot = static_cast<WeaponSlotType>(slotIndex);
+		Weapon *weapon = obj->getWeaponInWeaponSlot(slot);
+		if (weapon == nullptr)
+			continue;
+
+		const Real range = weapon->getAttackRange(obj);
+		if (bestWeapon == nullptr || range > bestRange)
+		{
+			bestWeapon = weapon;
+			bestSlot = slot;
+			bestRange = range;
+		}
+	}
+
+	if (outSlot && bestWeapon)
+		*outSlot = bestSlot;
+	return bestWeapon;
+}
+
 static Bool isStationaryGuardArtillery(Object *obj)
 {
 	if (obj == nullptr)
 		return FALSE;
 
 	AIUpdateInterface *ai = obj->getAIUpdateInterface();
-	Weapon *weapon = obj->getCurrentWeapon();
-	if (ai == nullptr || weapon == nullptr)
+	if (ai == nullptr || ai->getGuardTargetType() != GUARDTARGET_LOCATION)
 		return FALSE;
 
-	const WhichTurretType turret = ai->getWhichTurretForCurWeapon();
-	if (turret == TURRET_INVALID || ai->getTurretTurnRate(turret) <= 0.0f)
+	Weapon *weapon = getLongestRangeGuardWeapon(obj);
+	if (weapon == nullptr)
 		return FALSE;
 
 	// Classify against ordinary perception, not Guard's expanded inner scan radius.
-	// Using GUARDINNER here can inflate a human guarder's 180 vision to ~324 and
-	// make a genuine 350-range deploy artillery piece stop looking like artillery.
+	// Long-range weapons ordered to guard a fixed point are treated as emplaced
+	// artillery even if their currently-selected weapon/turret is disabled while packed.
 	const Real visionRange = TheAI->getAdjustedVisionRangeForObject(obj,
 		AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
 	return weapon->getAttackRange(obj) > visionRange * 1.10f;
+}
+
+static Bool isGuardTargetVisibleToOwner(const Object *owner, const Object *target)
+{
+	const Player *player = owner ? owner->getControllingPlayer() : nullptr;
+	return player && target &&
+		target->getShroudedStatus(player->getPlayerIndex()) == OBJECTSHROUD_CLEAR;
+}
+
+static Bool isWithinAnyGuardWeaponRange(Object *owner, Object *target)
+{
+	if (owner == nullptr || target == nullptr)
+		return FALSE;
+
+	for (Int slotIndex = 0; slotIndex < WEAPONSLOT_COUNT; ++slotIndex)
+	{
+		Weapon *weapon = owner->getWeaponInWeaponSlot(static_cast<WeaponSlotType>(slotIndex));
+		if (weapon && weapon->isWithinAttackRange(owner, target))
+			return TRUE;
+	}
+	return FALSE;
 }
 
 static void prepareGuardWeapon(Object *obj)
@@ -84,22 +133,26 @@ static void prepareGuardWeapon(Object *obj)
 		return;
 
 	AIUpdateInterface *ai = obj->getAIUpdateInterface();
-	Weapon *weapon = obj->getCurrentWeapon();
+	WeaponSlotType weaponSlot = PRIMARY_WEAPON;
+	Weapon *weapon = getLongestRangeGuardWeapon(obj, &weaponSlot);
 	if (ai == nullptr || weapon == nullptr)
 		return;
 
-	const WhichTurretType turret = ai->getWhichTurretForCurWeapon();
+	Real turretAngle = 0.0f;
+	const WhichTurretType turret = ai->getWhichTurretForWeaponSlot(weaponSlot, &turretAngle);
+	if (turret == TURRET_INVALID)
+		return;
+
 	ai->prepareTurretForGuard(turret);
 
-	// Artillery should acquire and pre-aim before a target crosses the legal firing
-	// boundary. This does NOT extend weapon range; it only spends idle/guard time
-	// slewing the turret toward a prospective target so it can fire immediately
-	// when the target enters range.
+	// Artillery may pre-aim beyond firing range, but only at a target that the
+	// controlling player currently has revealed. This never extends legal fire range.
 	const Real acquisitionRange = weapon->getAttackRange(obj) * 1.25f;
 	PartitionFilterRelationship relationship(obj, PartitionFilterRelationship::ALLOW_ENEMIES);
 	PartitionFilterPossibleToAttack possible(ATTACK_NEW_TARGET, obj, CMD_FROM_AI);
 	PartitionFilterSameMapStatus sameMap(obj);
-	PartitionFilter *filters[] = { &relationship, &possible, &sameMap, nullptr };
+	PartitionFilterFreeOfFog visible(obj->getControllingPlayer()->getPlayerIndex());
+	PartitionFilter *filters[] = { &relationship, &possible, &sameMap, &visible, nullptr };
 
 	SimpleObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(
 		obj->getPosition(), acquisitionRange, FROM_CENTER_2D, filters, ITER_SORTED_NEAR_TO_FAR);
@@ -108,7 +161,6 @@ static void prepareGuardWeapon(Object *obj)
 	Object *preAimTarget = nullptr;
 	for (Object *candidate = iter ? iter->first() : nullptr; candidate; candidate = iter->next())
 	{
-		// Do not pre-aim into our own minimum-range dead zone.
 		if (!weapon->isTooClose(obj, candidate))
 		{
 			preAimTarget = candidate;
@@ -188,13 +240,20 @@ static Bool hasAttackedMeAndICanReturnFire( State *thisState, void* /*userData*/
 	const Bool stationaryArtillery = isStationaryGuardArtillery(obj);
 	const Bool noPursuit = guardMachine->getGuardMode() == GUARDMODE_GUARD_WITHOUT_PURSUIT;
 
+	// A fixed-post artillery Guard order is an emplacement contract: reach the post first.
+	if (stationaryArtillery && thisState->getID() == AI_GUARD_RETURN)
+		return FALSE;
+
+	// Never retaliate at a target that the controlling player cannot currently see.
+	if (!isGuardTargetVisibleToOwner(obj, target))
+		return FALSE;
+
 	// Emplaced artillery and explicit no-pursuit guards never abandon the post
 	// to answer a threat. Keep the memory alive until it expires / becomes legal
 	// to counter-fire.
 	if (stationaryArtillery || noPursuit)
 	{
-		Weapon *weapon = obj->getCurrentWeapon();
-		if (weapon == nullptr || !weapon->isWithinAttackRange(obj, target))
+		if (!isWithinAnyGuardWeaponRange(obj, target))
 			return FALSE;
 	}
 	else
@@ -336,7 +395,7 @@ AIGuardMachine::~AIGuardMachine()
 
 	if (isStationaryGuardArtillery(const_cast<Object *>(obj)))
 	{
-		Weapon *weapon = const_cast<Object *>(obj)->getCurrentWeapon();
+		Weapon *weapon = getLongestRangeGuardWeapon(const_cast<Object *>(obj));
 		if (weapon)
 			return weapon->getAttackRange(obj);
 	}
@@ -360,8 +419,8 @@ Bool AIGuardMachine::lookForInnerTarget()
 		teamVictim = owner->getTeam()->getTeamTargetObject();
 		if (teamVictim && isStationaryGuardArtillery(owner))
 		{
-			Weapon *weapon = owner->getCurrentWeapon();
-			if (weapon == nullptr || !weapon->isWithinAttackRange(owner, teamVictim))
+			if (!isGuardTargetVisibleToOwner(owner, teamVictim) ||
+					!isWithinAnyGuardWeaponRange(owner, teamVictim))
 				teamVictim = nullptr;
 		}
 		if (teamVictim)
@@ -383,6 +442,7 @@ Bool AIGuardMachine::lookForInnerTarget()
 	PartitionFilterRelationship					f5(owner, PartitionFilterRelationship::ALLOW_NEUTRAL);
 	PartitionFilterPossibleToEnter			f6(owner, CMD_FROM_AI);
 	PartitionFilterPossibleToHijack			f7(owner, CMD_FROM_AI);
+	PartitionFilterFreeOfFog					f8(owner->getControllingPlayer()->getPlayerIndex());
 
 	PartitionFilter *filters[16];
 	Int count = 0;
@@ -411,6 +471,7 @@ Bool AIGuardMachine::lookForInnerTarget()
 	}
 
 	filters[count++] = &filterMapStatus;
+	filters[count++] = &f8;
 
 	Real visionRange = AIGuardMachine::getStdGuardRange(owner);
 
@@ -445,14 +506,13 @@ Bool AIGuardMachine::lookForInnerTarget()
 	Object* target = nullptr;
 	if (isStationaryGuardArtillery(owner))
 	{
-		Weapon *weapon = owner->getCurrentWeapon();
 		SimpleObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(
 			&pos, visionRange, FROM_CENTER_2D, filters, ITER_SORTED_NEAR_TO_FAR);
 		MemoryPoolObjectHolder hold(iter);
 		for (Object *candidate = iter ? iter->first() : nullptr;
 			 candidate != nullptr; candidate = iter->next())
 		{
-			if (weapon && weapon->isWithinAttackRange(owner, candidate))
+			if (isWithinAnyGuardWeaponRange(owner, candidate))
 			{
 				target = candidate;
 				break;
@@ -607,6 +667,15 @@ StateReturnType AIGuardInnerState::update()
 {
 	if (m_attackState)
 	{
+		Object *owner = getMachineOwner();
+		if (isStationaryGuardArtillery(owner))
+		{
+			Object *nemesis = TheGameLogic->findObjectByID(getGuardMachine()->getNemesisID());
+			if (!isGuardTargetVisibleToOwner(owner, nemesis) ||
+					!isWithinAnyGuardWeaponRange(owner, nemesis))
+				return STATE_SUCCESS;
+		}
+
 		// if the position has moved (IE we're guarding an object), move with it.
 		Object* targetToGuard = getGuardMachine()->findTargetToGuardByID();
 		if (targetToGuard)
@@ -837,8 +906,8 @@ StateReturnType AIGuardReturnState::update()
 	{
 		m_nextReturnScanTime = now + 2 + (getMachineOwner()->getID() % 3);
 		prepareGuardWeapon(getMachineOwner());
-		if (getGuardMachine()->lookForInnerTarget())
-			return STATE_FAILURE; // early termination because we found a target.
+		if (!isStationaryGuardArtillery(getMachineOwner()) && getGuardMachine()->lookForInnerTarget())
+			return STATE_FAILURE; // mobile guards may interrupt the return; emplaced artillery may not.
 	}
 
 	// Just let the return movement finish.
@@ -896,7 +965,8 @@ StateReturnType AIGuardIdleState::update()
 	if (now < m_nextEnemyScanTime)
 		return STATE_SLEEP(m_nextEnemyScanTime - now);
 
-	m_nextEnemyScanTime = now + 2 + (getMachineOwner()->getID() % 3);
+	const Bool stationaryArtillery = isStationaryGuardArtillery(getMachineOwner());
+	m_nextEnemyScanTime = now + (stationaryArtillery ? 1 : 2 + (getMachineOwner()->getID() % 3));
 	prepareGuardWeapon(getMachineOwner());
 
 #ifdef STATE_MACHINE_DEBUG
@@ -905,7 +975,7 @@ StateReturnType AIGuardIdleState::update()
 	Object *owner = getMachineOwner();
 	AIUpdateInterface *ai = owner->getAIUpdateInterface();
 	// Check to see if we have created a crate we need to pick up.
-	if (ai->getCrateID() != INVALID_ID)
+	if (!stationaryArtillery && ai->getCrateID() != INVALID_ID)
 	{
 		getMachine()->setState(AI_GUARD_GET_CRATE);
 		return STATE_SLEEP(m_nextEnemyScanTime - now);
@@ -1011,7 +1081,7 @@ StateReturnType AIGuardAttackAggressorState::onEnter()
 	// Stationary artillery and explicit no-pursuit guarders counter-fire only when
 	// the aggressor is already in a legal firing envelope.
 	if ((stationaryArtillery || noPursuit) &&
-			(weapon == nullptr || !weapon->isWithinAttackRange(obj, nemesis)))
+			(!isGuardTargetVisibleToOwner(obj, nemesis) || !isWithinAnyGuardWeaponRange(obj, nemesis)))
 		return STATE_SUCCESS;
 
 	Object* targetToGuard = getGuardMachine()->findTargetToGuardByID();
@@ -1046,6 +1116,15 @@ StateReturnType AIGuardAttackAggressorState::onEnter()
 StateReturnType AIGuardAttackAggressorState::update()
 {
 	if (m_attackState==nullptr) return STATE_SUCCESS;
+
+	Object *owner = getMachineOwner();
+	if (isStationaryGuardArtillery(owner))
+	{
+		Object *nemesis = TheGameLogic->findObjectByID(getGuardMachine()->getNemesisID());
+		if (!isGuardTargetVisibleToOwner(owner, nemesis) ||
+				!isWithinAnyGuardWeaponRange(owner, nemesis))
+			return STATE_SUCCESS;
+	}
 	// if the position has moved (IE we're guarding an object), move with it.
 	Object* targetToGuard = getGuardMachine()->findTargetToGuardByID();
 	if (targetToGuard)
