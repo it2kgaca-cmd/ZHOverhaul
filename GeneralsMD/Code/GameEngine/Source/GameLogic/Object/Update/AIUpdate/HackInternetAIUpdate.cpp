@@ -146,7 +146,7 @@ UnsignedInt HackInternetAIUpdate::getCashUpdateDelay() const
 UnsignedInt HackInternetAIUpdate::getBaseCashAmount() const
 {
 	const Object *owner = getObject();
-	ExperienceTracker *xp = owner ? owner->getExperienceTracker() : nullptr;
+	const ExperienceTracker *xp = owner ? owner->getExperienceTracker() : nullptr;
 	if (!xp)
 		return 1;
 

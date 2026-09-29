@@ -423,7 +423,10 @@ void reallyDoStart()
 	GameWindow *sliderGameSpeed = TheWindowManager->winGetWindowFromId( parentSkirmishGameOptions, sliderGameSpeedID );
 	Int maxFPS = GadgetSliderGetPosition( sliderGameSpeed );
 	DEBUG_LOG(("GameSpeedSlider was at %d", maxFPS));
-	maxFPS = max(GAME_SPEED_MIN_FPS, min(GAME_SPEED_MAX_FPS, maxFPS));
+	if (maxFPS < (Int)GAME_SPEED_MIN_FPS)
+		maxFPS = (Int)GAME_SPEED_MIN_FPS;
+	else if (maxFPS > (Int)GAME_SPEED_MAX_FPS)
+		maxFPS = (Int)GAME_SPEED_MAX_FPS;
 
 	TheFramePacer->setLogicTimeScaleFps(maxFPS);
 	TheFramePacer->enableLogicTimeScale(TRUE);
@@ -1359,8 +1362,11 @@ void SkirmishGameOptionsMenuInit( WindowLayout *layout, void *userData )
 			(Real)(GAME_SPEED_MAX_FPS - GAME_SPEED_MIN_FPS);
 	}
 
-	Int sliderPos = max(GAME_SPEED_MIN_FPS,
-		min(GAME_SPEED_MAX_FPS, prefs.getInt("FPS", LOGICFRAMES_PER_SECOND)));
+	Int sliderPos = prefs.getInt("FPS", LOGICFRAMES_PER_SECOND);
+	if (sliderPos < (Int)GAME_SPEED_MIN_FPS)
+		sliderPos = (Int)GAME_SPEED_MIN_FPS;
+	else if (sliderPos > (Int)GAME_SPEED_MAX_FPS)
+		sliderPos = (Int)GAME_SPEED_MAX_FPS;
 	GadgetSliderSetPosition( sliderGameSpeed, sliderPos );
 	setFPSTextBox(sliderPos);
 	buttonStart->winSetText(TheGameText->fetch("GUI:Start"));
