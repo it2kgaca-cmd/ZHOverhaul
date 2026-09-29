@@ -372,6 +372,7 @@ public:
 	void ignoreObstacleID( ObjectID id );			///< tell the pathfinder to ignore the given object as an obstacle
 
 	AIStateType getAIStateType() const;							///< What general state is the AIState Machine in?
+	Bool isFixedPostGuardArtillery() const;				///< Fixed-location Guard + weapon reach well beyond own vision.
 
 	AsciiString getCurrentStateName() const { return m_stateMachine->getCurrentStateName(); }
 
