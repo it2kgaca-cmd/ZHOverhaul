@@ -264,23 +264,19 @@ Debug::~Debug()
   // again, do not put any code in here
 }
 
-#if defined(_WIN32)
-// Use a vectored exception handler on modern Windows toolchains. Unlike _set_se_translator,
-// VEH does not require /EHa and therefore does not silently depend on a different C++ exception model.
-static LONG WINAPI LocalVectoredExceptionHandler(struct _EXCEPTION_POINTERS *pExPtrs)
-{
-  DebugExceptionhandler::ExceptionFilter(pExPtrs);
-  return EXCEPTION_CONTINUE_SEARCH;
-}
-
-static PVOID LocalVectoredExceptionHandle = nullptr;
-#endif
-
 void Debug::InstallExceptionHandler()
 {
 #if defined(_WIN32)
-  if (!LocalVectoredExceptionHandle)
-    LocalVectoredExceptionHandle = AddVectoredExceptionHandler(1, LocalVectoredExceptionHandler);
+  // The fatal debug reporter must run only for genuinely unhandled exceptions.
+  // A vectored exception handler sees first-chance exceptions before normal SEH/C++
+  // handlers get a chance to consume them. That incorrectly treated benign runtime
+  // notifications such as MSVC's thread-name exception (0x406D1388), and potentially
+  // ordinary handled C++ exceptions, as fatal crashes.
+  //
+  // SetUnhandledExceptionFilter is process-wide and runs at the correct point in the
+  // exception pipeline. PreStaticInit installs the same filter very early; repeat it
+  // here so late initialization reasserts our handler without requiring /EHa.
+  SetUnhandledExceptionFilter(DebugExceptionhandler::ExceptionFilter);
 #else
   #error "Unsupported compiler for exception handling"
 #endif
