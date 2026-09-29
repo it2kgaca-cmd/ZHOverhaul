@@ -1678,11 +1678,20 @@ void InGameUI::handleBuildPlacements()
 	static ICoord2D shiftRotateAnchorScreen;
 	static Real shiftRotateStartAngle = 0.0f;
 
+	// Short, decaying world-space cursor motion history. It is only a tie-breaker when several
+	// obstructions compete; it never overrides a clear terrain edge, supply source, or same-type row.
+	static Bool cursorWorldValid = FALSE;
+	static Coord3D lastCursorWorld;
+	static Coord2D cursorMotion = { 0.0f, 0.0f };
+
 	if (stickyBuildType != m_pendingPlaceType)
 	{
 		stickyBuildType = m_pendingPlaceType;
 		playerPreferredAngleValid = FALSE;
 		shiftRotateActive = FALSE;
+		cursorWorldValid = FALSE;
+		cursorMotion.x = 0.0f;
+		cursorMotion.y = 0.0f;
 	}
 
 	//
@@ -1769,6 +1778,42 @@ void InGameUI::handleBuildPlacements()
 		to do is set a simple angle and have it automatically change, ug! */
 		if( TheTacticalView->screenToTerrain( &loc, &world ) )
 		{
+			Bool haveCursorBias = FALSE;
+			Real cursorMoveAngle = 0.0f;
+			if (!isPlacementAnchored())
+			{
+				if (cursorWorldValid)
+				{
+					const Real dx = world.x - lastCursorWorld.x;
+					const Real dy = world.y - lastCursorWorld.y;
+					const Real deltaSqr = dx*dx + dy*dy;
+
+					if (deltaSqr > 0.0625f)
+					{
+						// Smooth enough to ignore hand jitter, responsive enough to express deliberate
+						// movement around a corner or between two constrained sides.
+						cursorMotion.x = cursorMotion.x * 0.65f + dx * 0.35f;
+						cursorMotion.y = cursorMotion.y * 0.65f + dy * 0.35f;
+					}
+					else
+					{
+						cursorMotion.x *= 0.80f;
+						cursorMotion.y *= 0.80f;
+					}
+				}
+
+				lastCursorWorld = world;
+				cursorWorldValid = TRUE;
+
+				const Real motionSqr =
+					cursorMotion.x*cursorMotion.x + cursorMotion.y*cursorMotion.y;
+				if (motionSqr > 0.25f)
+				{
+					haveCursorBias = TRUE;
+					cursorMoveAngle = atan2(cursorMotion.y, cursorMotion.x);
+				}
+			}
+
 			Object *builderObject = TheGameLogic->findObjectByID(getPendingPlaceSourceObjectID());
 			if (builderObject == nullptr && getPendingPlaceSourceObjectID() == INVALID_ID)
 				builderObject = findClosestSelectedBuilderForPlacementPreview(m_pendingPlaceType, world);
@@ -1791,7 +1836,8 @@ void InGameUI::handleBuildPlacements()
 				{
 					resolvedLegal = TheBuildAssistant->findNearestLegalPlacement(
 						&world, m_pendingPlaceType, playerPreferredAngle, placementOptions,
-						builderObject, nullptr, !manualRotation, &resolvedWorld, &resolvedAngle);
+						builderObject, nullptr, !manualRotation,
+						haveCursorBias, cursorMoveAngle, &resolvedWorld, &resolvedAngle);
 				}
 				else
 				{

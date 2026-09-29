@@ -1084,6 +1084,8 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 																 const Object *builderObject,
 																 Player *player,
 																 Bool allowAutoRotation,
+																 Bool haveCursorBias,
+																 Real cursorMoveAngle,
 																 Coord3D *resolvedPos,
 																 Real *resolvedAngle )
 {
@@ -1101,10 +1103,11 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 	if (initial == LBC_SHROUD)
 		return FALSE;
 
-	// The old prototype brute-forced as many as ~17 angles * 65 positions every render frame.
-	// A legality test is expensive (footprint terrain, overlap and path checks), so choose the
-	// contextual facing ONCE, then perform only a tiny bounded positional search.
+	// Keep the smart solver cheap. Choose one contextual facing using lightweight structure/terrain
+	// probes, then perform only a tiny bounded positional search at that facing.
 	const Real buildRadius = build->getTemplateGeometryInfo().getMajorRadius();
+	const Real footprintRadius = build->getTemplateGeometryInfo().getBoundingCircleRadius();
+
 	Real captureRadius = buildRadius * 0.65f;
 	if (captureRadius < PATHFIND_CELL_SIZE_F * 2.0f)
 		captureRadius = PATHFIND_CELL_SIZE_F * 2.0f;
@@ -1113,12 +1116,23 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 	if (influenceRadius < PATHFIND_CELL_SIZE_F * 8.0f)
 		influenceRadius = PATHFIND_CELL_SIZE_F * 8.0f;
 
+	static const Real dirs[8][2] =
+	{
+		{ 1.000000f,  0.000000f},
+		{ 0.707107f,  0.707107f},
+		{ 0.000000f,  1.000000f},
+		{-0.707107f,  0.707107f},
+		{-1.000000f,  0.000000f},
+		{-0.707107f, -0.707107f},
+		{ 0.000000f, -1.000000f},
+		{ 0.707107f, -0.707107f}
+	};
+
 	Object *nearestSameType = nullptr;
 	Real nearestSameTypeDistSqr = 1.0e30f;
 
-	// "Broad obstruction" is intentionally based on accumulated nearby structure mass rather
-	// than a single nearest object's center. Multiple wall pieces/buildings on one side reinforce
-	// the same direction; one large structure can qualify on its own.
+	// Broad structure obstruction: several wall/building pieces on one side reinforce the same
+	// direction, while a single substantial building can qualify on its own.
 	Real obstructionVectorX = 0.0f;
 	Real obstructionVectorY = 0.0f;
 	Real obstructionWeight = 0.0f;
@@ -1155,12 +1169,10 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 
 		const Real dist = sqrtf(distSqr);
 		const Real otherRadius = other->getGeometryInfo().getBoundingCircleRadius();
-		Real edgeDistance = dist - otherRadius - buildRadius;
+		Real edgeDistance = dist - otherRadius - footprintRadius;
 		if (edgeDistance < 0.0f)
 			edgeDistance = 0.0f;
 
-		// Nearby and broad objects contribute more strongly; distant little objects contribute very
-		// little. Normalize direction first so a faraway object's raw coordinate does not dominate.
 		const Real denom = edgeDistance + PATHFIND_CELL_SIZE_F;
 		const Real weight = (otherRadius + PATHFIND_CELL_SIZE_F) / denom;
 		obstructionVectorX += (dx / dist) * weight;
@@ -1171,12 +1183,87 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 			largestObstructionRadius = otherRadius;
 	}
 
+	// Terrain/world-boundary obstruction: eight cheap footprint-relative probes. This deliberately
+	// avoids pathfinding or full build-legality calls. World void, cliff cells, water, very steep
+	// normals, and sharp height changes all push the building's rear toward that constrained side.
+	Real terrainVectorX = 0.0f;
+	Real terrainVectorY = 0.0f;
+	Real terrainWeight = 0.0f;
+	Int terrainBlockedDirections = 0;
+
+	Region3D mapExtent;
+	TheTerrainLogic->getExtent(&mapExtent);
+
+	Real probeMargin = footprintRadius * 0.30f;
+	if (probeMargin < PATHFIND_CELL_SIZE_F * 1.5f)
+		probeMargin = PATHFIND_CELL_SIZE_F * 1.5f;
+
+	const Real innerRadius = footprintRadius * 0.70f;
+	const Real outerRadius = footprintRadius + probeMargin;
+	Real heightThreshold = TheGlobalData->m_allowedHeightVariationForBuilding * 1.50f;
+	if (heightThreshold < PATHFIND_CELL_SIZE_F * 0.50f)
+		heightThreshold = PATHFIND_CELL_SIZE_F * 0.50f;
+
+	for (Int dir = 0; dir < 8; ++dir)
+	{
+		Coord3D innerProbe = *desiredPos;
+		Coord3D outerProbe = *desiredPos;
+		innerProbe.x += dirs[dir][0] * innerRadius;
+		innerProbe.y += dirs[dir][1] * innerRadius;
+		outerProbe.x += dirs[dir][0] * outerRadius;
+		outerProbe.y += dirs[dir][1] * outerRadius;
+
+		Real score = 0.0f;
+		if (!mapExtent.isInRegionNoZ(outerProbe))
+		{
+			score = 6.0f; // world edge is an absolute obstruction
+		}
+		else
+		{
+			if (TheTerrainLogic->isCliffCell(outerProbe.x, outerProbe.y) ||
+				TheTerrainLogic->isCliffCell(innerProbe.x, innerProbe.y))
+			{
+				score += 4.0f;
+			}
+
+			if (TheTerrainLogic->isUnderwater(outerProbe.x, outerProbe.y))
+				score += 3.0f;
+
+			Coord3D outerNormal;
+			const Real outerHeight = TheTerrainLogic->getGroundHeight(
+				outerProbe.x, outerProbe.y, &outerNormal);
+			const Real innerHeight = TheTerrainLogic->getGroundHeight(
+				innerProbe.x, innerProbe.y);
+			const Real heightDelta = fabs(outerHeight - innerHeight);
+
+			if (heightDelta > heightThreshold)
+			{
+				Real heightScore = heightDelta / heightThreshold;
+				if (heightScore > 3.0f)
+					heightScore = 3.0f;
+				score += heightScore;
+			}
+
+			// A normal with low Z is a steep hillside/mountain face even if it isn't authored as
+			// a formal cliff cell. Keep the threshold conservative to ignore ordinary rolling ground.
+			if (outerNormal.z < 0.70f)
+				score += (0.70f - outerNormal.z) * 4.0f;
+		}
+
+		if (score >= 1.0f)
+		{
+			terrainVectorX += dirs[dir][0] * score;
+			terrainVectorY += dirs[dir][1] * score;
+			terrainWeight += score;
+			++terrainBlockedDirections;
+		}
+	}
+
 	Bool haveContextAngle = FALSE;
 	Real contextAngle = desiredAngle;
 
-	// Supply structures are the deliberate exception to the general "back to obstruction" rule.
-	// Their useful face should point toward the nearest supply source so collectors get the sensible
-	// working side by default.
+	// Supply structures are the deliberate exception: their useful face points toward the nearest
+	// actual supply source so collectors naturally work from the useful side.
 	if (allowAutoRotation && build->isKindOf(KINDOF_FS_SUPPLY_CENTER))
 	{
 		Object *nearestSupply = nullptr;
@@ -1219,28 +1306,53 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 		}
 	}
 
-	// Repeated copies of the same building should read as one coherent row/cluster, not turn their
-	// backs toward each other. Copy the nearest equivalent building's exact facing.
+	// Same-type placement is intentionally stronger than generic obstruction avoidance: rows/clusters
+	// of identical structures should share one exact facing.
 	if (allowAutoRotation && !haveContextAngle && nearestSameType)
 	{
 		contextAngle = nearestSameType->getOrientation();
 		haveContextAngle = TRUE;
 	}
 
-	// Otherwise put the rear of the building toward a genuinely broad obstruction. A single
-	// substantial building qualifies; several smaller wall/building pieces can combine into one.
-	if (allowAutoRotation && !haveContextAngle && obstructionWeight > 0.0f)
+	// Combine terrain and broad structure pressure. Terrain gets extra authority because world edges,
+	// cliffs and mountains are hard environmental constraints, not merely neighboring objects.
+	if (allowAutoRotation && !haveContextAngle)
 	{
-		const Real vectorLenSqr =
-			obstructionVectorX*obstructionVectorX + obstructionVectorY*obstructionVectorY;
-		const Bool broadEnough =
-			largestObstructionRadius >= buildRadius * 0.75f ||
+		Real combinedX = terrainVectorX * 1.75f;
+		Real combinedY = terrainVectorY * 1.75f;
+		Real combinedWeight = terrainWeight * 1.75f;
+
+		const Bool broadStructure =
+			obstructionWeight > 0.0f &&
+			(largestObstructionRadius >= footprintRadius * 0.75f || obstructionCount >= 2);
+
+		if (broadStructure)
+		{
+			combinedX += obstructionVectorX;
+			combinedY += obstructionVectorY;
+			combinedWeight += obstructionWeight;
+		}
+
+		// When several constrained directions compete, use the player's recent cursor travel as a
+		// gentle tie-breaker. Back is biased toward cursor travel, therefore front faces opposite it.
+		// A single clean edge/cliff does not use this hint and remains deterministic.
+		const Bool ambiguousObstruction =
+			terrainBlockedDirections >= 4 ||
+			(terrainBlockedDirections > 0 && broadStructure) ||
 			obstructionCount >= 2;
 
-		if (broadEnough && vectorLenSqr > 0.04f)
+		if (haveCursorBias && ambiguousObstruction && combinedWeight > 0.0f)
 		{
-			const Real obstructionAngle = atan2(obstructionVectorY, obstructionVectorX);
-			contextAngle = obstructionAngle + PI; // front faces away; rear faces the obstruction
+			const Real cursorWeight = combinedWeight * 0.35f;
+			combinedX += Cos(cursorMoveAngle) * cursorWeight;
+			combinedY += Sin(cursorMoveAngle) * cursorWeight;
+		}
+
+		const Real vectorLenSqr = combinedX*combinedX + combinedY*combinedY;
+		if (combinedWeight > 0.0f && vectorLenSqr > 0.04f)
+		{
+			const Real obstructionAngle = atan2(combinedY, combinedX);
+			contextAngle = obstructionAngle + PI; // rear toward obstruction; front toward open ground
 			haveContextAngle = TRUE;
 		}
 	}
@@ -1249,20 +1361,7 @@ Bool BuildAssistant::findNearestLegalPlacement( const Coord3D *desiredPos,
 		return TRUE;
 
 	// Two small rings, eight directions: 17 positions per angle including the exact cursor.
-	// Context facing gets first refusal. If it cannot fit locally, fall back to the player's angle
-	// rather than dragging the building or trying dozens of arbitrary rotations.
-	static const Real dirs[8][2] =
-	{
-		{ 1.000000f,  0.000000f},
-		{ 0.707107f,  0.707107f},
-		{ 0.000000f,  1.000000f},
-		{-0.707107f,  0.707107f},
-		{-1.000000f,  0.000000f},
-		{-0.707107f, -0.707107f},
-		{ 0.000000f, -1.000000f},
-		{ 0.707107f, -0.707107f}
-	};
-
+	// Context facing gets first refusal. If it cannot fit locally, fall back to the player's angle.
 	Real candidateAngles[2];
 	Int angleCount = 0;
 	if (haveContextAngle)

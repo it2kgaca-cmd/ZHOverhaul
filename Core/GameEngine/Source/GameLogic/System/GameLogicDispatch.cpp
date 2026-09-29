@@ -754,7 +754,7 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 
 	// Smart Load is deliberately local. A container is discoverable when at least one passenger
 	// in the selected group is within this radius; once discovered, the whole group may use it.
-	const Real nearbyRangeSqr = sqr(600.0f);
+	const Real nearbyRangeSqr = sqr(180.0f);
 
 	// Even explicitly selected containers obey the locality rule. Ctrl+V with a remote transport
 	// should not manufacture a cross-map boarding march.

@@ -163,6 +163,8 @@ public:
 											 const Object *builderObject,
 											 Player *player,
 											 Bool allowAutoRotation,
+											 Bool haveCursorBias,
+											 Real cursorMoveAngle,
 											 Coord3D *resolvedPos,
 											 Real *resolvedAngle );
 
