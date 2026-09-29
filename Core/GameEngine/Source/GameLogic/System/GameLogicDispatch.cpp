@@ -651,6 +651,37 @@ static Bool smartLoadIsPilot(Object *obj)
 	return FALSE;
 }
 
+static Bool smartLoadContainerNearAnyPassenger(Object *container,
+	const std::vector<ObjectID>& passengerIDs, Real rangeSqr)
+{
+	if (container == nullptr)
+		return FALSE;
+
+	for (std::vector<ObjectID>::const_iterator it = passengerIDs.begin(); it != passengerIDs.end(); ++it)
+	{
+		Object *passenger = TheGameLogic->findObjectByID(*it);
+		if (passenger && passenger != container &&
+			ThePartitionManager->getDistanceSquared(passenger, container, FROM_CENTER_2D) <= rangeSqr)
+		{
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+static Bool smartLoadCanRendezvous(Object *container)
+{
+	if (container == nullptr || container->isEffectivelyDead() ||
+		container->isKindOf(KINDOF_AIRCRAFT) || container->isKindOf(KINDOF_IMMOBILE) ||
+		!container->isKindOf(KINDOF_VEHICLE))
+	{
+		return FALSE;
+	}
+
+	AIUpdateInterface *ai = container->getAIUpdateInterface();
+	return ai && ai->isDoingGroundMovement();
+}
+
 static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *issuingPlayer)
 {
 #if defined(RTS_PROFILE_TRACY)
@@ -721,9 +752,24 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 		return FALSE;
 	}
 
-	// Add nearby compatible container candidates. Selected destinations always outrank these.
-	// This intentionally scans only on explicit hotkey use, not every frame.
+	// Smart Load is deliberately local. A container is discoverable when at least one passenger
+	// in the selected group is within this radius; once discovered, the whole group may use it.
 	const Real nearbyRangeSqr = sqr(600.0f);
+
+	// Even explicitly selected containers obey the locality rule. Ctrl+V with a remote transport
+	// should not manufacture a cross-map boarding march.
+	std::vector<SmartLoadContainerCandidate> localSelectedContainers;
+	for (std::vector<SmartLoadContainerCandidate>::const_iterator it = containers.begin(); it != containers.end(); ++it)
+	{
+		Object *containerObj = TheGameLogic->findObjectByID(it->id);
+		if (smartLoadContainerNearAnyPassenger(containerObj, passengerIDs, nearbyRangeSqr))
+			localSelectedContainers.push_back(*it);
+	}
+	containers.swap(localSelectedContainers);
+
+	// Add nearby compatible container candidates. Selected destinations still outrank incidental
+	// nearby destinations, but assignment inside each priority class is globally nearest-pair.
+	// This intentionally scans only on explicit hotkey use, not every frame.
 	for (Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject())
 	{
 		if (!smartLoadIsUsableContainer(obj) || smartLoadContainsID(selected, obj->getID()))
@@ -829,7 +875,7 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 
 			const Bool vehicleSelected = smartLoadContainsID(selected, vehicle->getID());
 			const Real distSqr = ThePartitionManager->getDistanceSquared(pilot, vehicle, FROM_CENTER_2D);
-			if (!vehicleSelected && distSqr > nearbyRangeSqr)
+			if (distSqr > nearbyRangeSqr)
 				continue;
 
 			// This is the authoritative engine path for pilot collision entry, including
@@ -895,125 +941,206 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 		}
 	}
 
-	// Pass 0 fills selected/nearby containers with non-container passengers first.
-	// Pass 1 allows already-loaded or otherwise unused selected containers to nest when legal.
+	// Pass 0 fills containers with ordinary passengers first. Pass 1 allows unused selected
+	// containers to nest when legal. Within a pass, solve the assignment globally: repeatedly
+	// choose the nearest legal passenger/container pair instead of letting ObjectID order let a
+	// farther passenger steal the transport standing beside somebody else.
+	std::vector<ObjectID> containAssignedIDs;
+	std::map<ObjectID, std::vector<ObjectID> > rendezvousPassengersByContainer;
+
 	for (Int pass = 0; pass < 2; ++pass)
 	{
-		for (std::vector<ObjectID>::const_iterator pit = passengerIDs.begin(); pit != passengerIDs.end(); ++pit)
+		while (TRUE)
 		{
-			Object *passenger = TheGameLogic->findObjectByID(*pit);
-			if (passenger == nullptr || passenger->isContained() || passenger->isEffectivelyDead() ||
-					std::binary_search(pilotAssignedIDs.begin(), pilotAssignedIDs.end(), passenger->getID()))
-				continue;
-
-			const Bool passengerIsContainer = smartLoadIsUsableContainer(passenger);
-			if ((pass == 0 && passengerIsContainer) || (pass == 1 && !passengerIsContainer))
-				continue;
-			if (pass == 1 && std::find(usedAsDestination.begin(), usedAsDestination.end(), passenger->getID()) != usedAsDestination.end())
-				continue;
-
-			AIUpdateInterface *ai = passenger->getAIUpdateInterface();
-			if (ai == nullptr)
-				continue;
-
-			Int bestIndex = -1;
+			Object *bestPassenger = nullptr;
+			Int bestContainerIndex = -1;
 			Int bestPriority = 999;
 			Real bestDistSqr = 1.0e30f;
-			ObjectID bestID = INVALID_ID;
+			ObjectID bestPassengerID = INVALID_ID;
+			ObjectID bestContainerID = INVALID_ID;
+			Int bestSlotsRequired = 0;
 
-			for (Int i = 0; i < (Int)containers.size(); ++i)
+			for (std::vector<ObjectID>::const_iterator pit = passengerIDs.begin(); pit != passengerIDs.end(); ++pit)
 			{
-				SmartLoadContainerCandidate& candidate = containers[i];
-				if (candidate.id == passenger->getID())
-					continue;
-
-				Object *containerObj = TheGameLogic->findObjectByID(candidate.id);
-				if (!smartLoadIsUsableContainer(containerObj))
-					continue;
-
-				ContainModuleInterface *contain = containerObj->getContain();
-				if (contain == nullptr)
-					continue;
-
-				++containPairsChecked;
-				if (!TheActionManager->canEnterObject(passenger, containerObj, CMD_FROM_PLAYER, DONT_CHECK_CAPACITY))
+				if (std::binary_search(pilotAssignedIDs.begin(), pilotAssignedIDs.end(), *pit) ||
+					std::binary_search(containAssignedIDs.begin(), containAssignedIDs.end(), *pit))
 				{
-					++enterRejected;
 					continue;
 				}
 
-				const Int slotsRequired = smartLoadSlotsRequired(passenger, contain);
-				if (slotsRequired <= 0)
+				Object *passenger = TheGameLogic->findObjectByID(*pit);
+				if (passenger == nullptr || passenger->isContained() || passenger->isEffectivelyDead())
+					continue;
+
+				const Bool passengerIsContainer = smartLoadIsUsableContainer(passenger);
+				if ((pass == 0 && passengerIsContainer) || (pass == 1 && !passengerIsContainer))
+					continue;
+				if (pass == 1 &&
+					std::find(usedAsDestination.begin(), usedAsDestination.end(), passenger->getID()) != usedAsDestination.end())
 				{
-					++slotRejected;
 					continue;
 				}
 
-				Int availableCapacity = candidate.remainingCapacity;
-				if (contain->isTunnelContain())
+				AIUpdateInterface *passengerAI = passenger->getAIUpdateInterface();
+				if (passengerAI == nullptr)
+					continue;
+
+				for (Int i = 0; i < (Int)containers.size(); ++i)
 				{
-					Player *tunnelOwner = containerObj->getControllingPlayer();
-					if (tunnelOwner == nullptr)
+					SmartLoadContainerCandidate& candidate = containers[i];
+					if (candidate.id == passenger->getID())
 						continue;
-					availableCapacity -= reservedTunnelSlotsByPlayer[tunnelOwner->getPlayerIndex()];
-				}
-				if (availableCapacity < slotsRequired)
-				{
-					++capacityRejected;
-					continue;
-				}
 
-				// Selected destination first; then our nearby transports/tunnels; then legal
-				// nearby garrisons. Distance and object ID provide deterministic tie breaks.
-				Int priority = candidate.selected ? 0 :
-					((containerObj->getControllingPlayer() == issuingPlayer && !contain->isGarrisonable()) ? 1 : 2);
-				const Real distSqr = ThePartitionManager->getDistanceSquared(passenger, containerObj, FROM_CENTER_2D);
+					Object *containerObj = TheGameLogic->findObjectByID(candidate.id);
+					if (!smartLoadIsUsableContainer(containerObj))
+						continue;
 
-				if (bestIndex < 0 || priority < bestPriority ||
-						(priority == bestPriority && (distSqr < bestDistSqr ||
-						(distSqr == bestDistSqr && candidate.id < bestID))))
-				{
-					bestIndex = i;
-					bestPriority = priority;
-					bestDistSqr = distSqr;
-					bestID = candidate.id;
-				}
-			}
+					ContainModuleInterface *contain = containerObj->getContain();
+					if (contain == nullptr)
+						continue;
 
-			if (bestIndex >= 0)
-			{
-				Object *containerObj = TheGameLogic->findObjectByID(containers[bestIndex].id);
-				ContainModuleInterface *contain = containerObj ? containerObj->getContain() : nullptr;
-				const Int slotsRequired = smartLoadSlotsRequired(passenger, contain);
-				if (containerObj && contain && slotsRequired > 0)
-				{
+					++containPairsChecked;
+					if (!TheActionManager->canEnterObject(passenger, containerObj, CMD_FROM_PLAYER, DONT_CHECK_CAPACITY))
+					{
+						++enterRejected;
+						continue;
+					}
+
+					const Int slotsRequired = smartLoadSlotsRequired(passenger, contain);
+					if (slotsRequired <= 0)
+					{
+						++slotRejected;
+						continue;
+					}
+
+					Int availableCapacity = candidate.remainingCapacity;
 					if (contain->isTunnelContain())
 					{
 						Player *tunnelOwner = containerObj->getControllingPlayer();
 						if (tunnelOwner == nullptr)
 							continue;
-						reservedTunnelSlotsByPlayer[tunnelOwner->getPlayerIndex()] += slotsRequired;
+						availableCapacity -= reservedTunnelSlotsByPlayer[tunnelOwner->getPlayerIndex()];
 					}
-					else
+					if (availableCapacity < slotsRequired)
 					{
-						containers[bestIndex].remainingCapacity -= slotsRequired;
+						++capacityRejected;
+						continue;
 					}
-					if (!smartLoadContainsID(usedAsDestination, containerObj->getID()))
+
+					const Int priority = candidate.selected ? 0 :
+						((containerObj->getControllingPlayer() == issuingPlayer && !contain->isGarrisonable()) ? 1 : 2);
+					const Real distSqr =
+						ThePartitionManager->getDistanceSquared(passenger, containerObj, FROM_CENTER_2D);
+
+					Bool better = (bestContainerIndex < 0);
+					if (!better && priority != bestPriority)
+						better = priority < bestPriority;
+					else if (!better && distSqr != bestDistSqr)
+						better = distSqr < bestDistSqr;
+					else if (!better && passenger->getID() != bestPassengerID)
+						better = passenger->getID() < bestPassengerID;
+					else if (!better)
+						better = candidate.id < bestContainerID;
+
+					if (better)
 					{
-						usedAsDestination.push_back(containerObj->getID());
-						std::sort(usedAsDestination.begin(), usedAsDestination.end());
+						bestPassenger = passenger;
+						bestContainerIndex = i;
+						bestPriority = priority;
+						bestDistSqr = distSqr;
+						bestPassengerID = passenger->getID();
+						bestContainerID = candidate.id;
+						bestSlotsRequired = slotsRequired;
 					}
-					ai->aiEnter(containerObj, CMD_FROM_PLAYER);
-#if defined(RTS_PROFILE_TRACY)
-					AsciiString message;
-					message.format("SmartLoadAssign frame=%u mode=CONTAIN passenger=%u:%s destination=%u:%s slots=%d",
-						TheGameLogic->getFrame(), passenger->getID(), passenger->getTemplate()->getName().str(),
-						containerObj->getID(), containerObj->getTemplate()->getName().str(), slotsRequired);
-					PROFILER_MSG(message.str(), message.getLength());
-#endif
-					assignedAny = TRUE;
 				}
 			}
+
+			if (bestPassenger == nullptr || bestContainerIndex < 0)
+				break;
+
+			Object *containerObj = TheGameLogic->findObjectByID(containers[bestContainerIndex].id);
+			ContainModuleInterface *contain = containerObj ? containerObj->getContain() : nullptr;
+			AIUpdateInterface *passengerAI = bestPassenger->getAIUpdateInterface();
+			if (containerObj == nullptr || contain == nullptr || passengerAI == nullptr || bestSlotsRequired <= 0)
+				break;
+
+			if (contain->isTunnelContain())
+			{
+				Player *tunnelOwner = containerObj->getControllingPlayer();
+				if (tunnelOwner == nullptr)
+					break;
+				reservedTunnelSlotsByPlayer[tunnelOwner->getPlayerIndex()] += bestSlotsRequired;
+			}
+			else
+			{
+				containers[bestContainerIndex].remainingCapacity -= bestSlotsRequired;
+			}
+
+			containAssignedIDs.push_back(bestPassenger->getID());
+			std::sort(containAssignedIDs.begin(), containAssignedIDs.end());
+
+			if (!smartLoadContainsID(usedAsDestination, containerObj->getID()))
+			{
+				usedAsDestination.push_back(containerObj->getID());
+				std::sort(usedAsDestination.begin(), usedAsDestination.end());
+			}
+
+			passengerAI->aiEnter(containerObj, CMD_FROM_PLAYER);
+			rendezvousPassengersByContainer[containerObj->getID()].push_back(bestPassenger->getID());
+
+#if defined(RTS_PROFILE_TRACY)
+			AsciiString message;
+			message.format("SmartLoadAssign frame=%u mode=CONTAIN passenger=%u:%s destination=%u:%s slots=%d dist2=%.1f",
+				TheGameLogic->getFrame(), bestPassenger->getID(), bestPassenger->getTemplate()->getName().str(),
+				containerObj->getID(), containerObj->getTemplate()->getName().str(),
+				bestSlotsRequired, bestDistSqr);
+			PROFILER_MSG(message.str(), message.getLength());
+#endif
+			assignedAny = TRUE;
+		}
+	}
+
+	// Ground transports cooperate with their assigned passengers. Move once toward the midpoint
+	// between the transport and the assigned passenger cluster; AIEnter tracks the moving container,
+	// so passengers and vehicle converge instead of making the passengers run the whole distance.
+	// Aircraft are intentionally excluded: helicopter pickup needs its own controlled descent contract.
+	for (std::map<ObjectID, std::vector<ObjectID> >::iterator rit = rendezvousPassengersByContainer.begin();
+		rit != rendezvousPassengersByContainer.end(); ++rit)
+	{
+		Object *containerObj = TheGameLogic->findObjectByID(rit->first);
+		if (!smartLoadCanRendezvous(containerObj) || rit->second.empty())
+			continue;
+
+		Coord3D centroid;
+		centroid.zero();
+		Int passengerCount = 0;
+		for (std::vector<ObjectID>::const_iterator pit = rit->second.begin(); pit != rit->second.end(); ++pit)
+		{
+			Object *passenger = TheGameLogic->findObjectByID(*pit);
+			if (!passenger || passenger->isContained() || passenger->isEffectivelyDead())
+				continue;
+			centroid.x += passenger->getPosition()->x;
+			centroid.y += passenger->getPosition()->y;
+			centroid.z += passenger->getPosition()->z;
+			++passengerCount;
+		}
+		if (passengerCount <= 0)
+			continue;
+
+		centroid.x /= passengerCount;
+		centroid.y /= passengerCount;
+		centroid.z /= passengerCount;
+
+		Coord3D pickup = *containerObj->getPosition();
+		pickup.x = (pickup.x + centroid.x) * 0.5f;
+		pickup.y = (pickup.y + centroid.y) * 0.5f;
+		pickup.z = TheTerrainLogic->getLayerHeight(pickup.x, pickup.y, containerObj->getLayer());
+
+		AIUpdateInterface *containerAI = containerObj->getAIUpdateInterface();
+		if (containerAI)
+		{
+			TheAI->pathfinder()->adjustDestination(containerObj, containerAI->getLocomotorSet(), &pickup);
+			containerAI->aiMoveToPosition(&pickup, CMD_FROM_PLAYER);
 		}
 	}
 
