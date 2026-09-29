@@ -62,18 +62,11 @@ static Bool isHardPlantedDeployWeapon(const Object *self)
 }
 
 //-------------------------------------------------------------------------------------------------
-// Fixed-location Guard turns a long-range deploy unit into a siege emplacement.
-// Nuke Cannons are explicitly included even if a future INI/range change makes them fail the
-// generic long-range classifier.
+// The hard fixed-post Guard contract is intentionally Nuke-Cannon-specific. Other artillery
+// keeps the shared AI's normal movement/idle behavior and may implement its own positioning rules.
 static Bool isFixedPostDeployArtillery(AIUpdateInterface *ai, Object *self)
 {
-	if (self == nullptr || ai == nullptr)
-		return FALSE;
-
-	if (ai->isFixedPostGuardArtillery())
-		return TRUE;
-
-	return isHardPlantedDeployWeapon(self) &&
+	return self && ai && isHardPlantedDeployWeapon(self) &&
 		ai->getAIStateType() == AI_GUARD &&
 		ai->getGuardTargetType() == GUARDTARGET_LOCATION;
 }
@@ -119,9 +112,8 @@ Bool DeployStyleAIUpdate::isLocomotionLocked() const
 	const Bool plantedState = self &&
 		(self->testStatus(OBJECT_STATUS_DEPLOYED) || m_state == DEPLOY ||
 		 m_state == READY_TO_ATTACK || m_state == ALIGNING_TURRETS);
-	const Bool hardPlantWeapon = isHardPlantedDeployWeapon(self) || isLongRangeArtillery();
 	return self && owner && owner->getPlayerType() == PLAYER_HUMAN &&
-		plantedState && hardPlantWeapon;
+		plantedState && isHardPlantedDeployWeapon(self);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -170,7 +162,7 @@ void DeployStyleAIUpdate::aiDoCommand( const AICommandParms* parms )
 		}
 	}
 
-	if (playerRelocation && (isHardPlantedDeployWeapon(getObject()) || isLongRangeArtillery()))
+	if (playerRelocation && isHardPlantedDeployWeapon(getObject()))
 	{
 		// Begin pack immediately so the command cannot get one rogue locomotor frame before the
 		// deploy-state update notices the new path.
@@ -428,7 +420,7 @@ void DeployStyleAIUpdate::setMyState( DeployStateTypes stateID, Bool reverseDepl
 			m_state == ALIGNING_TURRETS;
 
 		if (owner && owner->getPlayerType() == PLAYER_HUMAN &&
-			plantedState && (isHardPlantedDeployWeapon(self) || isLongRangeArtillery()))
+			plantedState && isHardPlantedDeployWeapon(self))
 		{
 			destroyPath();
 			setQueueForPathTime(0);

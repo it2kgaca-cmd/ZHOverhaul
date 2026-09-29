@@ -2850,10 +2850,12 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 		return UPDATE_SLEEP_FOREVER;
 
 	const Bool locomotionLocked = isLocomotionLocked();
-	if (locomotionLocked || isIdle())
+	if (locomotionLocked)
 	{
-		// No path, no positional goal, no orientation goal, no crowd micro-move. Turret AI is
-		// updated separately, so a planted artillery piece can still aim/fire without chassis motion.
+		// A hard-planted deploy unit is the exceptional case: no path, positional/orientation goal,
+		// crowd micro-move, or residual chassis coast. Ordinary idle units MUST continue through
+		// locomotor maintenance: ground units stop naturally, hovercraft hold altitude, and winged
+		// aircraft keep flying/circling instead of falling out of the sky.
 		destroyPath();
 		setQueueForPathTime(0);
 		setLocomotorGoalNone();
@@ -2864,14 +2866,10 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 		m_nextTrafficSolveFrame = 0;
 		obj->clearModelConditionState(MODELCONDITION_MOVING);
 
-		// A planted chassis also rejects residual horizontal shove/coast. Vertical physics remains
-		// untouched so gravity, terrain contact and destruction behavior keep their normal semantics.
-		if (locomotionLocked)
-		{
-			PhysicsBehavior *physics = obj->getPhysics();
-			if (physics)
-				physics->scrubVelocity2D(0);
-		}
+		PhysicsBehavior *physics = obj->getPhysics();
+		if (physics)
+			physics->scrubVelocity2D(0);
+
 		return UPDATE_SLEEP_FOREVER;
 	}
 
