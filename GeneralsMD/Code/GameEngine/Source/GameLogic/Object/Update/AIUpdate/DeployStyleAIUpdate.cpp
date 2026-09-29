@@ -35,6 +35,7 @@
 #include "GameClient/Drawable.h"
 #include "GameClient/InGameUI.h"
 
+#include "GameLogic/AI.h"
 #include "GameLogic/ExperienceTracker.h"
 #include "GameLogic/Locomotor.h"
 #include "GameLogic/Object.h"
@@ -46,6 +47,53 @@
 #include "GameLogic/Module/DeployStyleAIUpdate.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 
+
+//-------------------------------------------------------------------------------------------------
+// Fixed-location Guard turns a long-range deploy unit into a siege emplacement.
+// Classification is based on its longest weapon, not the currently active weapon,
+// because deploy units such as the Nuke Cannon disable their turret while packed.
+static Bool isFixedPostDeployArtillery(AIUpdateInterface *ai, Object *self)
+{
+	if (ai == nullptr || self == nullptr ||
+			ai->getAIStateType() != AI_GUARD ||
+			ai->getGuardTargetType() != GUARDTARGET_LOCATION)
+		return FALSE;
+
+	Real longestWeaponRange = 0.0f;
+	for (Int slotIndex = 0; slotIndex < WEAPONSLOT_COUNT; ++slotIndex)
+	{
+		Weapon *weapon = self->getWeaponInWeaponSlot(static_cast<WeaponSlotType>(slotIndex));
+		if (weapon)
+			longestWeaponRange = max(longestWeaponRange, weapon->getAttackRange(self));
+	}
+
+	if (longestWeaponRange <= 0.0f)
+		return FALSE;
+
+	const Real visionRange = TheAI->getAdjustedVisionRangeForObject(self,
+		AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
+	return longestWeaponRange > visionRange * 1.10f;
+}
+
+//-------------------------------------------------------------------------------------------------
+static Bool hasReachedFixedGuardPost(AIUpdateInterface *ai, Object *self, Bool isInGuardIdleState)
+{
+	if (!isFixedPostDeployArtillery(ai, self))
+		return FALSE;
+
+	if (isInGuardIdleState)
+		return TRUE;
+
+	const Coord3D *guardPos = ai->getGuardLocation();
+	const Coord3D *selfPos = self->getPosition();
+	if (guardPos == nullptr || selfPos == nullptr)
+		return FALSE;
+
+	const Real dx = guardPos->x - selfPos->x;
+	const Real dy = guardPos->y - selfPos->y;
+	const Real guardPostTolerance = 25.0f;
+	return dx * dx + dy * dy <= sqr(guardPostTolerance);
+}
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
@@ -112,6 +160,19 @@ UpdateSleepTime DeployStyleAIUpdate::update()
 	Bool isInGuardIdleState = getStateMachine()->isInGuardIdleState();
 
 	AIUpdateInterface *ai = self->getAI();
+	const Bool holdFixedGuardPost = hasReachedFixedGuardPost(ai, self, isInGuardIdleState);
+
+	// Once a long-range deploy unit reaches a fixed Guard post, the order is an emplacement
+	// contract. Attack/LOS state transitions are not allowed to manufacture a movement path
+	// that makes it pack up and chase. A later explicit player order exits Guard and restores
+	// normal pack-and-move behavior.
+	if (holdFixedGuardPost && isTryingToMove)
+	{
+		destroyPath();
+		setQueueForPathTime(0);
+		self->clearModelConditionState(MODELCONDITION_MOVING);
+		isTryingToMove = FALSE;
+	}
 
 	if( isTryingToAttack && weapon )
 	{
@@ -149,7 +210,7 @@ UpdateSleepTime DeployStyleAIUpdate::update()
 	if (isInRange || isInGuardIdleState)
 #else
 	// @todo Simplify the code by moving the second branch up so 'isTryingToMove' is checked first.
-	if (!isTryingToMove && (isInRange || isInGuardIdleState))
+	if (!isTryingToMove && (isInRange || isInGuardIdleState || holdFixedGuardPost))
 #endif
 	{
 		switch( m_state )
@@ -177,7 +238,7 @@ UpdateSleepTime DeployStyleAIUpdate::update()
 				break;
 		}
 	}
-	else if( isTryingToMove )
+	else if( isTryingToMove && !holdFixedGuardPost )
 	{
 		switch( m_state )
 		{
