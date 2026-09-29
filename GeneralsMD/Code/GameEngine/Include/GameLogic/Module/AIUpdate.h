@@ -460,6 +460,7 @@ private:
 	Bool computeAttackPath(PathfindServicesInterface *pathfinder,  const Object *victim, const Coord3D* victimPos );	///< computes path to attack the current target, returns false if no path
 	Object *findNearestPersistentForceAttackTarget(ObjectID skipTargetID, Bool *anyLiveTarget, Bool *anyLiveHiddenTarget);
 	void updatePersistentForceAttackTargetSet(UpdateSleepTime& sleepTime);
+	void updateSmartLoadRendezvous(UpdateSleepTime& sleepTime);
 #ifdef ALLOW_SURRENDER
 	void doSurrenderUpdateStuff();
 #endif
@@ -551,6 +552,11 @@ public:
 	void setPersistentForceAttackTargetSet(const std::vector<ObjectID>& orderedTargets, ObjectID currentTargetID);
 	void clearPersistentForceAttackTargetSet();
 	Bool hasPersistentForceAttackTargetSet() const { return !m_persistentForceAttackTargets.empty(); }
+
+	// Smart Load ground-transport rendezvous.  Passengers retain their normal AI_ENTER order;
+	// the container periodically closes on the centroid of only those still trying to board.
+	void friend_setSmartLoadRendezvous(const std::vector<ObjectID>& passengerIDs);
+	void friend_clearSmartLoadRendezvous();
 
 	void setCurrentVictim( const Object *nemesis );			///<  Current victim.
 	Object *getCurrentVictim() const;
@@ -737,6 +743,10 @@ private:
 	std::vector<ObjectID>	m_persistentForceAttackTargets;	///< target set from Ctrl-box force attack
 	UnsignedInt				m_persistentForceAttackCursor;	///< legacy serialized cursor; nearest-first selection no longer depends on list order
 	ObjectID						m_persistentForceAttackCurrentID;	///< target currently being worked by this set
+	std::vector<ObjectID>	m_smartLoadRendezvousPassengers;	///< passengers assigned to this ground transport by Ctrl+V
+	UnsignedInt				m_nextSmartLoadRendezvousFrame;	///< throttle centroid recomputation/repath churn
+	Coord3D					m_lastSmartLoadPickup;			///< last pickup centroid actually issued to the transport
+	Bool						m_lastSmartLoadPickupValid;
 	Real								m_desiredSpeed;							///< the desired speed of the tank
 	CommandSourceType		m_lastCommandSource;			/**< Keep track of the source of the last command we got.
 																									This is set immediately before the SetState that goes

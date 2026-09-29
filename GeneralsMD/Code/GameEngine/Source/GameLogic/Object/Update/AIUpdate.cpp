@@ -217,6 +217,10 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_persistentForceAttackTargets.clear();
 	m_persistentForceAttackCursor = 0;
 	m_persistentForceAttackCurrentID = INVALID_ID;
+	m_smartLoadRendezvousPassengers.clear();
+	m_nextSmartLoadRendezvousFrame = 0;
+	m_lastSmartLoadPickup.zero();
+	m_lastSmartLoadPickupValid = FALSE;
 	m_desiredSpeed = FAST_AS_POSSIBLE;
 	m_lastCommandSource = CMD_FROM_AI;
 	m_guardMode = GUARDMODE_NORMAL;
@@ -1226,6 +1230,7 @@ UpdateSleepTime AIUpdateInterface::update()
 
 	m_isInUpdate = FALSE;
 
+	updateSmartLoadRendezvous(subMachineSleep);
 	updatePersistentForceAttackTargetSet(subMachineSleep);
 
 	if (m_completedWaypoint != nullptr)
@@ -3535,7 +3540,13 @@ void AIUpdateInterface::aiDoCommand(const AICommandParms* parms)
 		return;
 
 	if (parms->m_cmdSource == CMD_FROM_PLAYER)
+	{
 		clearPersistentForceAttackTargetSet();
+
+		// Ctrl+V transport cooperation is subordinate to direct player control.  Any later
+		// explicit order to the transport immediately releases the rendezvous contract.
+		friend_clearSmartLoadRendezvous();
+	}
 
 #ifdef ALLOW_SURRENDER
 	// surrendered items have very limited options, and only via AI cmds
@@ -5205,6 +5216,136 @@ Object *AIUpdateInterface::findNearestPersistentForceAttackTarget(
 	}
 
 	return bestTarget;
+}
+
+//----------------------------------------------------------------------------------------------------------
+void AIUpdateInterface::friend_setSmartLoadRendezvous(const std::vector<ObjectID>& passengerIDs)
+{
+	m_smartLoadRendezvousPassengers = passengerIDs;
+	std::sort(m_smartLoadRendezvousPassengers.begin(), m_smartLoadRendezvousPassengers.end());
+	m_smartLoadRendezvousPassengers.erase(
+		std::unique(m_smartLoadRendezvousPassengers.begin(), m_smartLoadRendezvousPassengers.end()),
+		m_smartLoadRendezvousPassengers.end());
+	m_nextSmartLoadRendezvousFrame = 0;
+	m_lastSmartLoadPickupValid = FALSE;
+
+	if (!m_smartLoadRendezvousPassengers.empty())
+		wakeUpNow();
+}
+
+//----------------------------------------------------------------------------------------------------------
+void AIUpdateInterface::friend_clearSmartLoadRendezvous()
+{
+	m_smartLoadRendezvousPassengers.clear();
+	m_nextSmartLoadRendezvousFrame = 0;
+	m_lastSmartLoadPickupValid = FALSE;
+}
+
+//----------------------------------------------------------------------------------------------------------
+void AIUpdateInterface::updateSmartLoadRendezvous(UpdateSleepTime& sleepTime)
+{
+	if (m_smartLoadRendezvousPassengers.empty())
+		return;
+
+	Object *container = getObject();
+	if (container == nullptr || container->isEffectivelyDead() || container->isContained() ||
+		container->isKindOf(KINDOF_AIRCRAFT) || container->isKindOf(KINDOF_IMMOBILE) ||
+		!container->isKindOf(KINDOF_VEHICLE) || !isDoingGroundMovement())
+	{
+		friend_clearSmartLoadRendezvous();
+		return;
+	}
+
+	ContainModuleInterface *contain = container->getContain();
+	if (contain == nullptr)
+	{
+		friend_clearSmartLoadRendezvous();
+		return;
+	}
+
+	const UnsignedInt now = TheGameLogic->getFrame();
+	if (m_nextSmartLoadRendezvousFrame != 0 && now < m_nextSmartLoadRendezvousFrame)
+	{
+		const UnsignedInt delta = m_nextSmartLoadRendezvousFrame - now;
+		if (delta < static_cast<UnsignedInt>(sleepTime))
+			sleepTime = UPDATE_SLEEP(delta);
+		return;
+	}
+
+	std::vector<ObjectID> remaining;
+	remaining.reserve(m_smartLoadRendezvousPassengers.size());
+
+	Coord3D centroid;
+	centroid.zero();
+	Int passengerCount = 0;
+
+	for (std::vector<ObjectID>::const_iterator it = m_smartLoadRendezvousPassengers.begin();
+		it != m_smartLoadRendezvousPassengers.end(); ++it)
+	{
+		Object *passenger = TheGameLogic->findObjectByID(*it);
+		if (passenger == nullptr || passenger->isEffectivelyDead() || passenger->isContained())
+			continue;
+
+		AIUpdateInterface *passengerAI = passenger->getAIUpdateInterface();
+		if (passengerAI == nullptr || passengerAI->getEnterTarget() != container)
+			continue;
+
+		remaining.push_back(passenger->getID());
+		centroid.x += passenger->getPosition()->x;
+		centroid.y += passenger->getPosition()->y;
+		centroid.z += passenger->getPosition()->z;
+		++passengerCount;
+	}
+
+	m_smartLoadRendezvousPassengers.swap(remaining);
+
+	if (passengerCount <= 0)
+	{
+		friend_clearSmartLoadRendezvous();
+
+		// The final passenger boarded (or everybody cancelled).  Do not let the transport
+		// continue driving to a stale pickup point after the rendezvous is over.
+		if (isMoving())
+			privateIdle(CMD_FROM_AI);
+		return;
+	}
+
+	centroid.x /= passengerCount;
+	centroid.y /= passengerCount;
+	centroid.z /= passengerCount;
+
+	Coord3D pickup = centroid;
+	pickup.z = TheTerrainLogic->getLayerHeight(pickup.x, pickup.y, container->getLayer());
+	TheAI->pathfinder()->adjustDestination(container, getLocomotorSet(), &pickup);
+
+	Real retargetDist = container->getGeometryInfo().getBoundingCircleRadius() * 0.75f;
+	if (retargetDist < PATHFIND_CELL_SIZE_F * 0.50f)
+		retargetDist = PATHFIND_CELL_SIZE_F * 0.50f;
+	if (retargetDist > PATHFIND_CELL_SIZE_F * 1.50f)
+		retargetDist = PATHFIND_CELL_SIZE_F * 1.50f;
+
+	Bool needRetarget = !m_lastSmartLoadPickupValid || !isMoving();
+	if (!needRetarget)
+	{
+		const Real dx = pickup.x - m_lastSmartLoadPickup.x;
+		const Real dy = pickup.y - m_lastSmartLoadPickup.y;
+		needRetarget = dx*dx + dy*dy > sqr(retargetDist);
+	}
+
+	if (needRetarget)
+	{
+		privateMoveToPosition(&pickup, CMD_FROM_AI);
+		m_lastSmartLoadPickup = pickup;
+		m_lastSmartLoadPickupValid = TRUE;
+	}
+
+	UnsignedInt interval = LOGICFRAMES_PER_SECOND / 6;
+	if (interval < 1)
+		interval = 1;
+	m_nextSmartLoadRendezvousFrame = now + interval;
+
+	if (interval < static_cast<UnsignedInt>(sleepTime))
+		sleepTime = UPDATE_SLEEP(interval);
 }
 
 //----------------------------------------------------------------------------------------------------------

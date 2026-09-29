@@ -1100,10 +1100,11 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 		}
 	}
 
-	// Ground transports cooperate with their assigned passengers. Move once toward the midpoint
-	// between the transport and the assigned passenger cluster; AIEnter tracks the moving container,
-	// so passengers and vehicle converge instead of making the passengers run the whole distance.
-	// Aircraft are intentionally excluded: helicopter pickup needs its own controlled descent contract.
+	// Ground transports cooperate for the whole boarding operation, not just one midpoint move.
+	// The container AI remembers the passengers assigned by this Ctrl+V invocation, periodically
+	// recomputes the centroid of those still executing AI_ENTER, and closes on that live pickup point.
+	// Any later direct player order cancels the contract.  Aircraft remain excluded because a
+	// helicopter needs a separate fly-to / controlled-descent / board / take-off sequence.
 	for (std::map<ObjectID, std::vector<ObjectID> >::iterator rit = rendezvousPassengersByContainer.begin();
 		rit != rendezvousPassengersByContainer.end(); ++rit)
 	{
@@ -1111,37 +1112,9 @@ static Bool assignSelectedUnitsToSmartContainers(AIGroup *selection, Player *iss
 		if (!smartLoadCanRendezvous(containerObj) || rit->second.empty())
 			continue;
 
-		Coord3D centroid;
-		centroid.zero();
-		Int passengerCount = 0;
-		for (std::vector<ObjectID>::const_iterator pit = rit->second.begin(); pit != rit->second.end(); ++pit)
-		{
-			Object *passenger = TheGameLogic->findObjectByID(*pit);
-			if (!passenger || passenger->isContained() || passenger->isEffectivelyDead())
-				continue;
-			centroid.x += passenger->getPosition()->x;
-			centroid.y += passenger->getPosition()->y;
-			centroid.z += passenger->getPosition()->z;
-			++passengerCount;
-		}
-		if (passengerCount <= 0)
-			continue;
-
-		centroid.x /= passengerCount;
-		centroid.y /= passengerCount;
-		centroid.z /= passengerCount;
-
-		Coord3D pickup = *containerObj->getPosition();
-		pickup.x = (pickup.x + centroid.x) * 0.5f;
-		pickup.y = (pickup.y + centroid.y) * 0.5f;
-		pickup.z = TheTerrainLogic->getLayerHeight(pickup.x, pickup.y, containerObj->getLayer());
-
 		AIUpdateInterface *containerAI = containerObj->getAIUpdateInterface();
 		if (containerAI)
-		{
-			TheAI->pathfinder()->adjustDestination(containerObj, containerAI->getLocomotorSet(), &pickup);
-			containerAI->aiMoveToPosition(&pickup, CMD_FROM_PLAYER);
-		}
+			containerAI->friend_setSmartLoadRendezvous(rit->second);
 	}
 
 #if defined(RTS_PROFILE_TRACY)
