@@ -1215,6 +1215,9 @@ void GlobalData::parseGameDataDefinition( INI* ini )
 	TheWritableGlobalData->m_firewallPortAllocationDelta = optionPref.getFirewallPortAllocationDelta();
 	TheWritableGlobalData->m_firewallPortOverride = optionPref.getFirewallPortOverride();
 
+	TheWritableGlobalData->m_useFpsLimit = optionPref.getFPSLimitEnabled();
+	TheWritableGlobalData->m_framesPerSecondLimit = optionPref.getFramesPerSecondLimit();
+
 	TheWritableGlobalData->m_saveCameraInReplay = optionPref.saveCameraInReplays();
 	TheWritableGlobalData->m_useCameraInReplay = optionPref.useCameraInReplays();
 	TheWritableGlobalData->m_enablePlayerObserver = optionPref.getPlayerObserverEnabled();

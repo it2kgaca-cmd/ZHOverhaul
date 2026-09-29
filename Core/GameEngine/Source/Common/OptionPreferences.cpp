@@ -674,6 +674,16 @@ Bool OptionPreferences::getFPSLimitEnabled()
 	return FALSE;
 }
 
+Int OptionPreferences::getFramesPerSecondLimit()
+{
+	OptionPreferences::const_iterator it = find("FramesPerSecondLimit");
+	if (it == end())
+		return TheGlobalData->m_framesPerSecondLimit > 0 ? TheGlobalData->m_framesPerSecondLimit : 30;
+
+	const Int fps = atoi(it->second.str());
+	return fps > 0 ? fps : 30;
+}
+
 Bool OptionPreferences::get3DShadowsEnabled()
 {
 	OptionPreferences::const_iterator it = find("UseShadowVolumes");

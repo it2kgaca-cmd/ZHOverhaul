@@ -791,6 +791,11 @@ public:
 	// Adjusts destination to a spot near dest that is possible to path to.
 	Bool adjustToPossibleDestination(Object *obj, const LocomotorSet& locomotorSet, Coord3D *dest);
 
+	// Admits a terminal movement goal only if the active locomotor can actually reach its terrain.
+	// Invalid cliff/water/disconnected goals are projected to the nearest reachable endpoint instead
+	// of being preserved as canonical retry targets.
+	Bool adjustToReachableDestination(Object *obj, const LocomotorSet& locomotorSet, Coord3D *dest);
+
 	void snapPosition(Object *obj, Coord3D *pos); // Snaps the current position to it's grid location.
 	void snapClosestGoalPosition(Object *obj, Coord3D *pos); // Snaps the current position to a good goal position.
 	Bool goalPosition(Object *obj, Coord3D *pos); // Returns the goal position on the grid.

@@ -198,6 +198,11 @@ static GameWindow *   checkNoDynamicLod   = nullptr;
 static NameKeyType    checkUnlockFpsID = NAMEKEY_INVALID;
 static GameWindow *   checkUnlockFps   = nullptr;
 
+static NameKeyType    sliderMaxFpsID = NAMEKEY_INVALID;
+static GameWindow *   sliderMaxFps = nullptr;
+static GameWindow *   staticTextMaxFps = nullptr;
+static GameWindow *   staticTextMaxFpsValue = nullptr;
+
 static NameKeyType    checkHeatEffectsID = NAMEKEY_INVALID;
 static GameWindow *   checkHeatEffects   = nullptr;
 
@@ -224,7 +229,13 @@ static OptionPreferences *pref = nullptr;
 enum
 {
 	GAME_SPEED_MIN_FPS = 30,
-	GAME_SPEED_MAX_FPS = 120
+	GAME_SPEED_MAX_FPS = 120,
+	MAX_FPS_PRESET_COUNT = 18
+};
+
+static const Int s_maxFpsPresets[MAX_FPS_PRESET_COUNT] = {
+	30, 50, 56, 60, 65, 70, 72, 75, 80, 85, 90, 100, 110, 120, 144, 240, 480,
+	(Int)RenderFpsPreset::UncappedFpsValue
 };
 
 static Int clampGameSpeed(Int speed)
@@ -252,6 +263,50 @@ static void updateGameSpeedLabel(Int speed)
 		fallback.format(L"Game Speed: %d", clampGameSpeed(speed));
 		GadgetStaticTextSetText(staticTextGameSpeed, fallback);
 	}
+}
+
+static Int maxFpsIndexFromValue(Int fps, Bool limitEnabled)
+{
+	if (!limitEnabled || fps >= (Int)RenderFpsPreset::UncappedFpsValue)
+		return MAX_FPS_PRESET_COUNT - 1;
+
+	Int bestIndex = 0;
+	Int bestDelta = 0x7fffffff;
+	for (Int i = 0; i < MAX_FPS_PRESET_COUNT - 1; ++i)
+	{
+		Int delta = fps - s_maxFpsPresets[i];
+		if (delta < 0)
+			delta = -delta;
+		if (delta < bestDelta)
+		{
+			bestDelta = delta;
+			bestIndex = i;
+		}
+	}
+	return bestIndex;
+}
+
+static Int maxFpsValueFromIndex(Int index)
+{
+	if (index < 0)
+		index = 0;
+	if (index >= MAX_FPS_PRESET_COUNT)
+		index = MAX_FPS_PRESET_COUNT - 1;
+	return s_maxFpsPresets[index];
+}
+
+static void updateMaxFpsLabel(Int index)
+{
+	if (!staticTextMaxFpsValue)
+		return;
+
+	const Int fps = maxFpsValueFromIndex(index);
+	UnicodeString valueText;
+	if (fps >= (Int)RenderFpsPreset::UncappedFpsValue)
+		valueText = TheGameText->FETCH_OR_SUBSTITUTE("GUI:Unlimited", L"Unlimited");
+	else
+		valueText.format(L"%d", fps);
+	GadgetStaticTextSetText(staticTextMaxFpsValue, valueText);
 }
 
 static void copySliderVisuals(GameWindow *dest, GameWindow *source)
@@ -313,6 +368,119 @@ static void copySliderVisuals(GameWindow *dest, GameWindow *source)
 		thumb->winSetStatus(WIN_STATUS_IMAGE);
 		thumb->winSetDrawFunc(TheWindowManager->getPushButtonImageDrawFunc());
 	}
+}
+
+static void initMaxFpsControl()
+{
+	sliderMaxFps = nullptr;
+	staticTextMaxFps = nullptr;
+	staticTextMaxFpsValue = nullptr;
+	sliderMaxFpsID = TheNameKeyGenerator->nameToKey("OptionsMenu.wnd:SliderMaxFpsRuntime");
+
+	if (!checkUnlockFps || !sliderParticleCap)
+		return;
+
+	GameWindow *parent = checkUnlockFps->winGetParent();
+	if (!parent || sliderParticleCap->winGetParent() != parent)
+		return;
+
+	Int checkX = 0, checkY = 0, checkWidth = 0, checkHeight = 0;
+	Int donorX = 0, donorY = 0, donorWidth = 0, donorHeight = 0;
+	checkUnlockFps->winGetPosition(&checkX, &checkY);
+	checkUnlockFps->winGetSize(&checkWidth, &checkHeight);
+	sliderParticleCap->winGetPosition(&donorX, &donorY);
+	sliderParticleCap->winGetSize(&donorWidth, &donorHeight);
+	(void)donorY;
+
+	const Int gap = 6;
+	const Int valueWidth = 58;
+	const Int labelWidth = donorX - checkX - gap;
+	const Int sliderWidth = donorWidth - valueWidth - gap;
+	if (checkWidth <= 0 || checkHeight <= 0 || donorHeight <= 0 ||
+		labelWidth <= 0 || sliderWidth < HORIZONTAL_SLIDER_THUMB_WIDTH * 2)
+		return;
+
+	TextData labelData;
+	memset(&labelData, 0, sizeof(labelData));
+	labelData.centeredVertically = TRUE;
+
+	WinInstanceData labelInstData;
+	labelInstData.init();
+	labelInstData.m_style = GWS_STATIC_TEXT;
+
+	staticTextMaxFps = TheWindowManager->gogoGadgetStaticText(
+		parent, WIN_STATUS_ENABLED,
+		checkX, checkY, labelWidth, checkHeight,
+		&labelInstData, &labelData, checkUnlockFps->winGetFont(), FALSE);
+	if (!staticTextMaxFps)
+		return;
+
+	staticTextMaxFps->winSetEnabledTextColors(
+		checkUnlockFps->winGetEnabledTextColor(),
+		checkUnlockFps->winGetEnabledTextBorderColor());
+	staticTextMaxFps->winSetDisabledTextColors(
+		checkUnlockFps->winGetDisabledTextColor(),
+		checkUnlockFps->winGetDisabledTextBorderColor());
+	staticTextMaxFps->winSetHiliteTextColors(
+		checkUnlockFps->winGetHiliteTextColor(),
+		checkUnlockFps->winGetHiliteTextBorderColor());
+	GadgetStaticTextSetText(staticTextMaxFps,
+		TheGameText->FETCH_OR_SUBSTITUTE("GUI:MaxFPS", L"Max FPS"));
+
+	SliderData sliderData;
+	memset(&sliderData, 0, sizeof(sliderData));
+	sliderData.minVal = 0;
+	sliderData.maxVal = MAX_FPS_PRESET_COUNT - 1;
+	sliderData.position = 0;
+
+	WinInstanceData sliderInstData;
+	sliderInstData.init();
+	sliderInstData.m_style = sliderParticleCap->winGetStyle() | GWS_MOUSE_TRACK;
+
+	const Int sliderY = checkY + (checkHeight - donorHeight) / 2;
+	sliderMaxFps = TheWindowManager->gogoGadgetSlider(
+		parent, WIN_STATUS_ENABLED,
+		donorX, sliderY, sliderWidth, donorHeight,
+		&sliderInstData, &sliderData, sliderParticleCap->winGetFont(), TRUE);
+	if (!sliderMaxFps)
+		return;
+
+	sliderMaxFps->winSetWindowId(sliderMaxFpsID);
+	copySliderVisuals(sliderMaxFps, sliderParticleCap);
+
+	TextData valueData;
+	memset(&valueData, 0, sizeof(valueData));
+	valueData.centered = TRUE;
+	valueData.centeredVertically = TRUE;
+
+	WinInstanceData valueInstData;
+	valueInstData.init();
+	valueInstData.m_style = GWS_STATIC_TEXT;
+
+	staticTextMaxFpsValue = TheWindowManager->gogoGadgetStaticText(
+		parent, WIN_STATUS_ENABLED,
+		donorX + sliderWidth + gap, checkY, valueWidth, checkHeight,
+		&valueInstData, &valueData, checkUnlockFps->winGetFont(), FALSE);
+	if (staticTextMaxFpsValue)
+	{
+		staticTextMaxFpsValue->winSetEnabledTextColors(
+			checkUnlockFps->winGetEnabledTextColor(),
+			checkUnlockFps->winGetEnabledTextBorderColor());
+		staticTextMaxFpsValue->winSetDisabledTextColors(
+			checkUnlockFps->winGetDisabledTextColor(),
+			checkUnlockFps->winGetDisabledTextBorderColor());
+		staticTextMaxFpsValue->winSetHiliteTextColors(
+			checkUnlockFps->winGetHiliteTextColor(),
+			checkUnlockFps->winGetHiliteTextBorderColor());
+	}
+
+	const Int initialIndex = maxFpsIndexFromValue(
+		TheGlobalData->m_framesPerSecondLimit, TheGlobalData->m_useFpsLimit);
+	GadgetSliderSetPosition(sliderMaxFps, initialIndex);
+	updateMaxFpsLabel(initialIndex);
+
+	// The slider owns both capped values and the Unlimited state.
+	checkUnlockFps->winHide(TRUE);
 }
 
 static void initGameSpeedControl()
@@ -582,9 +750,19 @@ static void setDefaults()
 		GadgetCheckBoxSetChecked( checkNoDynamicLod, !TheGlobalData->m_enableDynamicLOD);
 
 		//-------------------------------------------------------------------------------------------------
- 		// Disable FPS Limit
+ 		// Max render FPS
 		//
-		GadgetCheckBoxSetChecked( checkUnlockFps, !TheGlobalData->m_useFpsLimit);
+		if (sliderMaxFps)
+		{
+			const Int index = maxFpsIndexFromValue(
+				TheGlobalData->m_framesPerSecondLimit, TheGlobalData->m_useFpsLimit);
+			GadgetSliderSetPosition(sliderMaxFps, index);
+			updateMaxFpsLabel(index);
+		}
+		else
+		{
+			GadgetCheckBoxSetChecked(checkUnlockFps, !TheGlobalData->m_useFpsLimit);
+		}
 
 		//-------------------------------------------------------------------------------------------------
  		// Heat Effects
@@ -684,10 +862,6 @@ static void saveOptions()
 		TheWritableGlobalData->m_useHeatEffects = GadgetCheckBoxIsChecked( checkHeatEffects );
 		(*pref)["HeatEffects"] = TheGlobalData->m_useHeatEffects ? "yes" : "no";
 
-		// Never write this out
-		//TheWritableGlobalData->m_useFpsLimit = !GadgetCheckBoxIsChecked( checkUnlockFps );
-		//(*pref)["FPSLimit"] = TheGlobalData->m_useFpsLimit ? "yes" : "no";
-
 		TheWritableGlobalData->m_enableBehindBuildingMarkers = GadgetCheckBoxIsChecked( checkBuildingOcclusion );
 		(*pref)["BuildingOcclusion"] = TheWritableGlobalData->m_enableBehindBuildingMarkers ? "yes" : "no";
 
@@ -706,6 +880,31 @@ static void saveOptions()
 
 				TheWritableGlobalData->m_maxParticleCount = val;
 		}
+	}
+
+	//-------------------------------------------------------------------------------------------------
+	// Max render FPS.  This is independent of the static LOD preset, so save it even when the
+	// Advanced Display panel is not in Custom mode.
+	if (sliderMaxFps)
+	{
+		const Int fps = maxFpsValueFromIndex(GadgetSliderGetPosition(sliderMaxFps));
+		const Bool capped = fps < (Int)RenderFpsPreset::UncappedFpsValue;
+		TheWritableGlobalData->m_useFpsLimit = capped;
+		TheWritableGlobalData->m_framesPerSecondLimit = fps;
+
+		(*pref)["FPSLimit"] = capped ? "yes" : "no";
+		AsciiString fpsPref;
+		fpsPref.format("%d", fps);
+		(*pref)["FramesPerSecondLimit"] = fpsPref;
+
+		TheFramePacer->setFramesPerSecondLimit(fps);
+		TheFramePacer->reset();
+	}
+	else if (checkUnlockFps)
+	{
+		// Fallback if runtime slider creation fails: preserve the stock checkbox semantics.
+		TheWritableGlobalData->m_useFpsLimit = !GadgetCheckBoxIsChecked(checkUnlockFps);
+		(*pref)["FPSLimit"] = TheGlobalData->m_useFpsLimit ? "yes" : "no";
 	}
 
 	//-------------------------------------------------------------------------------------------------
@@ -1319,6 +1518,9 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 	sliderParticleCapID = TheNameKeyGenerator->nameToKey( "OptionsMenu.wnd:ParticleCapSlider" );
   sliderParticleCap = TheWindowManager->winGetWindowFromId( nullptr, sliderParticleCapID );
 
+	// Replace the legacy Unlock FPS checkbox row with a real Max FPS selector.
+	initMaxFpsControl();
+
 	WinAdvancedDisplay->winHide(TRUE);
 
 	Color color =  GameMakeColor(255,255,255,255);
@@ -1531,7 +1733,17 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 
 	GadgetCheckBoxSetChecked( checkHeatEffects, TheGlobalData->m_useHeatEffects);
 
-	GadgetCheckBoxSetChecked( checkUnlockFps, !TheGlobalData->m_useFpsLimit);
+	if (sliderMaxFps)
+	{
+		const Int maxFpsIndex = maxFpsIndexFromValue(
+			TheGlobalData->m_framesPerSecondLimit, TheGlobalData->m_useFpsLimit);
+		GadgetSliderSetPosition(sliderMaxFps, maxFpsIndex);
+		updateMaxFpsLabel(maxFpsIndex);
+	}
+	else
+	{
+		GadgetCheckBoxSetChecked(checkUnlockFps, !TheGlobalData->m_useFpsLimit);
+	}
 
 	GadgetCheckBoxSetChecked( checkBuildingOcclusion, TheGlobalData->m_enableBehindBuildingMarkers);
 
@@ -1837,6 +2049,11 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 			if (control && control->winGetWindowId() == sliderGameSpeedID)
 			{
 				updateGameSpeedLabel((Int)mData2);
+				return MSG_HANDLED;
+			}
+			if (control && control->winGetWindowId() == sliderMaxFpsID)
+			{
+				updateMaxFpsLabel((Int)mData2);
 				return MSG_HANDLED;
 			}
 			break;

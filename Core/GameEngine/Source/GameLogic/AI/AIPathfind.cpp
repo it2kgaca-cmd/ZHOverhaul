@@ -6285,6 +6285,12 @@ Bool Pathfinder::checkForPossible(Bool isCrusher, Int fromZone,  Bool center, co
 {
 	PathfindCell *goalCell = getCell(layer, cellX, cellY);
 	if (!goalCell) return false;
+
+	// Destination admission must respect the active locomotor.  Zone equivalence alone is not
+	// sufficient: a ground-only unit must never treat a WATER or CLIFF cell as a legal endpoint.
+	if (!validMovementPosition(isCrusher, locomotorSet.getValidSurfaces(), goalCell))
+		return false;
+
 #if RTS_GENERALS && RETAIL_COMPATIBLE_PATHFINDING
 	if (goalCell->getType() == PathfindCell::CELL_OBSTACLE) return false;
 #else
@@ -6356,7 +6362,8 @@ Bool Pathfinder::adjustToPossibleDestination(Object *obj, const LocomotorSet& lo
 
 	zone2 =  m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), isCrusher, goalCell->getZone());
 
-	if (zone1 == zone2) {
+	if (zone1 == zone2 &&
+		validMovementPosition(isCrusher, locomotorSet.getValidSurfaces(), goalCell)) {
 		if (checkDestination(obj, goalCellNdx.x, goalCellNdx.y, destinationLayer, radius, center)) {
 			return true;
 		}
@@ -6409,6 +6416,102 @@ Bool Pathfinder::adjustToPossibleDestination(Object *obj, const LocomotorSet& lo
 		}
 		delta++;
 	}
+	return false;
+}
+
+
+//-------------------------------------------------------------------------------------------------
+/**
+ * Canonicalize a final ground-movement destination before it becomes retry intent.
+ *
+ * First use the normal nearby-destination adjustment.  If the requested point lives in a
+ * terrain zone this locomotor cannot reach (for example the far side of impassable water or
+ * a cliff face), walk the command ray back toward the unit and choose the first legal cell
+ * in the unit's effective terrain zone.  This is intentionally terrain/zone based rather
+ * than a full A* search: it runs once when a terminal goal is admitted, not every update.
+ */
+Bool Pathfinder::adjustToReachableDestination(Object *obj, const LocomotorSet& locomotorSet, Coord3D *dest)
+{
+	if (obj == nullptr || dest == nullptr)
+		return false;
+
+	Coord3D adjusted = *dest;
+	if (adjustToPossibleDestination(obj, locomotorSet, &adjusted))
+	{
+		*dest = adjusted;
+		return true;
+	}
+
+	// Layer transitions (bridges/walls) already have dedicated path states.  Do not second-guess
+	// them with a ground-only projection if the ordinary adjustment could not resolve the goal.
+	if (obj->getLayer() != LAYER_GROUND)
+		return false;
+
+	Int radius;
+	Bool center;
+	getRadiusAndCenter(obj, radius, center);
+
+	Coord3D from = *obj->getPosition();
+	ICoord2D startCellNdx;
+	ICoord2D goalCellNdx;
+	if (worldToCell(&from, &startCellNdx) || worldToCell(dest, &goalCellNdx))
+		return false;
+
+	PathfindCell *startCell = getCell(LAYER_GROUND, startCellNdx.x, startCellNdx.y);
+	if (startCell == nullptr)
+		return false;
+
+	const Bool isCrusher = obj->getCrusherLevel() > 0;
+	Int startZone = m_zoneManager.getEffectiveZone(
+		locomotorSet.getValidSurfaces(), isCrusher, startCell->getZone());
+
+	Bool startingInObstacle = startCell->getType() == PathfindCell::CELL_OBSTACLE;
+	if (startingInObstacle)
+	{
+		startZone = m_zoneManager.getEffectiveTerrainZone(startZone);
+		startZone = m_zoneManager.getEffectiveZone(
+			locomotorSet.getValidSurfaces(), isCrusher, startZone);
+	}
+
+	// Bresenham from the rejected goal back toward the unit.  The first cell in the unit's
+	// effective zone is the closest terminal endpoint along the player's intended direction.
+	Int x = goalCellNdx.x;
+	Int y = goalCellNdx.y;
+	const Int targetX = startCellNdx.x;
+	const Int targetY = startCellNdx.y;
+	const Int dx = IABS(targetX - x);
+	const Int sx = x < targetX ? 1 : -1;
+	const Int dy = -IABS(targetY - y);
+	const Int sy = y < targetY ? 1 : -1;
+	Int err = dx + dy;
+
+	for (;;)
+	{
+		Coord3D candidate = *dest;
+		if (checkForPossible(isCrusher, startZone, center, locomotorSet,
+			x, y, LAYER_GROUND, &candidate, startingInObstacle) &&
+			checkDestination(obj, x, y, LAYER_GROUND, radius, center))
+		{
+			*dest = candidate;
+			return true;
+		}
+
+		if (x == targetX && y == targetY)
+			break;
+
+		const Int e2 = 2 * err;
+		if (e2 >= dy)
+		{
+			err += dy;
+			x += sx;
+		}
+		if (e2 <= dx)
+		{
+			err += dx;
+			y += sy;
+		}
+	}
+
 	return false;
 }
 
