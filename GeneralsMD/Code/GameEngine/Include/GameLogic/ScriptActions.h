@@ -50,7 +50,10 @@ public:
 
 	virtual void executeAction( ScriptAction *pAction ) = 0; ///< execute a script action.
 	virtual void closeWindows( Bool suppressNewWindows ) = 0;
-	virtual Bool skipCurrentCinematic() = 0; ///< Skip presentation-only parts of the current scripted cinematic.
+	virtual Bool skipCurrentCinematic() = 0; ///< Fast-forward the current scripted cinematic to its gameplay endpoint.
+	virtual Bool isCinematicSkipFastForwarding() const = 0;
+	virtual UnsignedInt getCinematicSkipStartFrame() const = 0;
+	virtual void abortCinematicSkipFastForward() = 0;
 
 	// Called by the script engine in postProcessLoad()
 	virtual void doEnableOrDisableObjectDifficultyBonuses(Bool enableBonuses) = 0;
@@ -78,6 +81,9 @@ public:
 	virtual void executeAction( ScriptAction *pAction ) override;
 	virtual void closeWindows( Bool suppressNewWindows ) override;
 	virtual Bool skipCurrentCinematic() override;
+	virtual Bool isCinematicSkipFastForwarding() const override { return m_skipCinematicPresentation; }
+	virtual UnsignedInt getCinematicSkipStartFrame() const override { return m_cinematicSkipStartFrame; }
+	virtual void abortCinematicSkipFastForward() override;
 
 	virtual void doEnableOrDisableObjectDifficultyBonuses(Bool enableBonuses) override;
 
@@ -88,9 +94,11 @@ protected:
 
 	Bool m_suppressNewWindows;
 	Bool m_skipCinematicPresentation;
+	UnsignedInt m_cinematicSkipStartFrame;
 	AsciiString m_unnamedUnit;
 
 protected: // helper functions
+	void finishCinematicSkipFastForward(Bool aborted);
 	Bool shouldSuppressSkippedCinematicAction(ScriptAction *action) const;
 	void changeObjectPanelFlagForSingleObject(Object *obj, const AsciiString& flagToChange, Bool newVal );
 

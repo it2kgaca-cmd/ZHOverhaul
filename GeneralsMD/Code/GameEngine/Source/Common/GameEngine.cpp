@@ -83,6 +83,7 @@
 #include "GameLogic/Locomotor.h"
 #include "GameLogic/RankInfo.h"
 #include "GameLogic/ScriptEngine.h"
+#include "GameLogic/ScriptActions.h"
 #include "GameLogic/SidesList.h"
 
 #include "GameClient/ClientInstance.h"
@@ -924,6 +925,46 @@ void GameEngine::update()
 			{
 				TheGameClient->step();
 			}
+
+#if defined(RTS_ZEROHOUR)
+			// ZHOverhaul: ESC on an in-engine cinematic means "resolve it", not merely "hide it". Run
+			// additional normal logic frames without rendering until the script reaches ENABLE_INPUT.
+			// Batching keeps the OS responsive on long/broken cinematics; GameClient suppresses draws while
+			// this state is active. This is deliberately single-player only.
+			if (TheScriptActions && TheScriptActions->isCinematicSkipFastForwarding() && TheNetwork == nullptr)
+			{
+				static const Int CINEMATIC_SKIP_TICKS_PER_UPDATE = 128;
+				static const UnsignedInt CINEMATIC_SKIP_MAX_LOGIC_FRAMES = 10 * 60 * LOGICFRAMES_PER_SECOND;
+
+				Int fastForwardTicks = 0;
+				while (TheScriptActions->isCinematicSkipFastForwarding() &&
+					fastForwardTicks < CINEMATIC_SKIP_TICKS_PER_UPDATE)
+				{
+					if (!TheGameLogic->isInGame() || TheGameLogic->isGamePaused())
+					{
+						TheScriptActions->abortCinematicSkipFastForward();
+						break;
+					}
+
+					TheGameLogic->UPDATE();
+					if (!TheFramePacer->isTimeFrozen())
+						TheGameClient->step();
+					++fastForwardTicks;
+
+					if (TheScriptActions->isCinematicSkipFastForwarding())
+					{
+						const UnsignedInt elapsed = TheGameLogic->getFrame() - TheScriptActions->getCinematicSkipStartFrame();
+						if (elapsed >= CINEMATIC_SKIP_MAX_LOGIC_FRAMES)
+						{
+							DEBUG_LOG(("Cinematic fast-forward exceeded safety budget at frame %u; restoring control",
+								TheGameLogic->getFrame()));
+							TheScriptActions->abortCinematicSkipFastForward();
+							break;
+						}
+					}
+				}
+			}
+#endif
 		}
 	}
 }

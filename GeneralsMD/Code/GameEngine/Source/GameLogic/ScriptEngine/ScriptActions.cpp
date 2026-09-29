@@ -128,6 +128,7 @@ ScriptActions::ScriptActions()
 {
 	m_suppressNewWindows = FALSE;
 	m_skipCinematicPresentation = FALSE;
+	m_cinematicSkipStartFrame = 0;
 	m_unnamedUnit = AsciiString::TheEmptyString;
 
 }
@@ -156,6 +157,7 @@ void ScriptActions::reset()
 {
 	m_suppressNewWindows = FALSE;
 	m_skipCinematicPresentation = FALSE;
+	m_cinematicSkipStartFrame = 0;
 	closeWindows(FALSE); // Close victory or defeat windows.
 
 }
@@ -170,12 +172,11 @@ void ScriptActions::update()
 
 
 //-------------------------------------------------------------------------------------------------
-/** Skip the presentation layer of an in-engine scripted cinematic without skipping mission logic. */
+/** Begin a headless fast-forward of an in-engine scripted cinematic. Gameplay logic keeps running. */
 //-------------------------------------------------------------------------------------------------
 Bool ScriptActions::skipCurrentCinematic()
 {
-	// Script skipping changes local presentation state and scripted time. Keep it single-player only
-	// so a client cannot desynchronize a network game by escaping a scripted sequence independently.
+	// Fast-forwarding game logic independently is only safe in single-player.
 	if (TheNetwork != nullptr || TheInGameUI == nullptr || TheInGameUI->getInputEnabled() || m_messageWindow != nullptr)
 		return FALSE;
 
@@ -189,10 +190,47 @@ Bool ScriptActions::skipCurrentCinematic()
 		return FALSE;
 
 	m_skipCinematicPresentation = TRUE;
+	m_cinematicSkipStartFrame = TheGameLogic ? TheGameLogic->getFrame() : 0;
 
-	TheInGameUI->setInputEnabled(TRUE);
+	// Keep control locked until the cinematic's own ENABLE_INPUT action is reached. The fast-forward
+	// loop advances real GameLogic frames, so movement, damage, deaths, spawns, timers, AI and other
+	// mission consequences resolve exactly through the normal simulation path.
+	TheInGameUI->setInputEnabled(FALSE);
 	if (TheMouse)
-		TheMouse->setVisibility(TRUE);
+		TheMouse->setVisibility(FALSE);
+
+	// A scripted FREEZE_TIME would otherwise prevent world-frame progress forever. Ignore the current
+	// cinematic freeze now; later FREEZE_TIME actions are presentation-suppressed while skipping.
+	if (TheScriptEngine)
+		TheScriptEngine->doUnfreezeTime();
+	if (TheTacticalView)
+		TheTacticalView->setTimeMultiplier(1);
+
+	if (TheDisplay)
+	{
+		TheDisplay->setCinematicText(AsciiString::TheEmptyString);
+		TheDisplay->setCinematicTextFrames(0);
+	}
+	TheInGameUI->removeMilitarySubtitle();
+
+	DEBUG_LOG(("Fast-forwarding scripted cinematic from frame %u", m_cinematicSkipStartFrame));
+	return TRUE;
+}
+
+
+//-------------------------------------------------------------------------------------------------
+void ScriptActions::finishCinematicSkipFastForward(Bool aborted)
+{
+	if (!m_skipCinematicPresentation)
+		return;
+
+	const UnsignedInt endFrame = TheGameLogic ? TheGameLogic->getFrame() : m_cinematicSkipStartFrame;
+	const UnsignedInt startFrame = m_cinematicSkipStartFrame;
+	m_skipCinematicPresentation = FALSE;
+	m_cinematicSkipStartFrame = 0;
+
+	if (TheScriptEngine)
+		TheScriptEngine->doUnfreezeTime();
 
 	if (TheDisplay)
 	{
@@ -200,10 +238,13 @@ Bool ScriptActions::skipCurrentCinematic()
 		TheDisplay->setCinematicText(AsciiString::TheEmptyString);
 		TheDisplay->setCinematicTextFrames(0);
 	}
-	ShowControlBar(FALSE);
+
+	if (TheInGameUI)
+		TheInGameUI->removeMilitarySubtitle();
 
 	if (TheTacticalView)
 	{
+		// Preserve the camera transform reached by the simulated endpoint, but release cinematic control.
 		TheTacticalView->stopDoingScriptedCamera();
 		TheTacticalView->lockUserControlUntilFrame(0);
 		TheTacticalView->setCameraLock(INVALID_ID);
@@ -216,11 +257,21 @@ Bool ScriptActions::skipCurrentCinematic()
 		TheTacticalView->setUserControlled(TRUE);
 	}
 
-	if (TheScriptEngine)
-		TheScriptEngine->doUnfreezeTime();
+	DEBUG_LOG(("Scripted cinematic fast-forward %s at frame %u after %u simulated frames",
+		aborted ? "aborted" : "completed", endFrame, endFrame - startFrame));
+}
 
-	DEBUG_LOG(("Skipped scripted cinematic presentation at frame %u", TheGameLogic ? TheGameLogic->getFrame() : 0));
-	return TRUE;
+//-------------------------------------------------------------------------------------------------
+void ScriptActions::abortCinematicSkipFastForward()
+{
+	if (!m_skipCinematicPresentation)
+		return;
+
+	finishCinematicSkipFastForward(TRUE);
+	if (TheInGameUI)
+		TheInGameUI->setInputEnabled(TRUE);
+	if (TheMouse)
+		TheMouse->setVisibility(TRUE);
 }
 
 
@@ -3317,11 +3368,6 @@ void ScriptActions::doMergeTeamIntoTeam(const AsciiString& teamSrcName, const As
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doDisableInput()
 {
-	// Once the player skips a cinematic, later presentation scripts in that same sequence must not
-	// steal control back. The sequence's normal ENABLE_INPUT action clears this suppression state.
-	if (m_skipCinematicPresentation)
-		return;
-
 #if defined(RTS_DEBUG)
 	if (!TheGlobalData->m_disableScriptedInputDisabling)
 #endif
@@ -3341,7 +3387,10 @@ void ScriptActions::doDisableInput()
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doEnableInput()
 {
-	m_skipCinematicPresentation = FALSE;
+	// ENABLE_INPUT is the cinematic's natural endpoint. If ESC requested a skip, reveal the world only
+	// after the real simulation has progressed here, then release any remaining presentation control.
+	if (m_skipCinematicPresentation)
+		finishCinematicSkipFastForward(FALSE);
 	TheInGameUI->setInputEnabled(true);
 	TheMouse->setVisibility(true);
 }
@@ -6605,29 +6654,19 @@ Bool ScriptActions::shouldSuppressSkippedCinematicAction(ScriptAction *action) c
 	if (action == nullptr)
 		return FALSE;
 
+	// Gameplay and camera-positioning actions still execute during skip. Only transient presentation
+	// that would either spam after the catch-up or prevent fast-forward progress is suppressed.
 	switch (action->getActionType())
 	{
-		case ScriptAction::MOVE_CAMERA_TO:
-		case ScriptAction::SETUP_CAMERA:
-		case ScriptAction::ZOOM_CAMERA:
-		case ScriptAction::PITCH_CAMERA:
-		case ScriptAction::CAMERA_FOLLOW_NAMED:
-		case ScriptAction::CAMERA_MOD_LOOK_TOWARD:
-		case ScriptAction::CAMERA_MOD_FINAL_LOOK_TOWARD:
-		case ScriptAction::MOVE_CAMERA_ALONG_WAYPOINT_PATH:
-		case ScriptAction::ROTATE_CAMERA:
-		case ScriptAction::CAMERA_LOOK_TOWARD_OBJECT:
-		case ScriptAction::CAMERA_LOOK_TOWARD_WAYPOINT:
-		case ScriptAction::RESET_CAMERA:
-		case ScriptAction::MOVE_CAMERA_TO_SELECTION:
+		case ScriptAction::PLAY_SOUND_EFFECT:
+		case ScriptAction::PLAY_SOUND_EFFECT_AT:
+		case ScriptAction::SOUND_PLAY_NAMED:
+		case ScriptAction::SPEECH_PLAY:
+		case ScriptAction::DISPLAY_CINEMATIC_TEXT:
 		case ScriptAction::CAMERA_MOD_FREEZE_TIME:
 		case ScriptAction::CAMERA_MOD_FREEZE_ANGLE:
-		case ScriptAction::CAMERA_MOD_SET_FINAL_ZOOM:
-		case ScriptAction::CAMERA_MOD_SET_FINAL_PITCH:
-		case ScriptAction::CAMERA_MOD_SET_FINAL_SPEED_MULTIPLIER:
-		case ScriptAction::CAMERA_MOD_SET_ROLLING_AVERAGE:
 		case ScriptAction::SET_VISUAL_SPEED_MULTIPLIER:
-		case ScriptAction::DISPLAY_CINEMATIC_TEXT:
+		case ScriptAction::SUSPEND_BACKGROUND_SOUNDS:
 		case ScriptAction::CAMERA_LETTERBOX_BEGIN:
 		case ScriptAction::CAMERA_BW_MODE_BEGIN:
 		case ScriptAction::CAMERA_MOTION_BLUR:
@@ -6636,9 +6675,8 @@ Bool ScriptActions::shouldSuppressSkippedCinematicAction(ScriptAction *action) c
 		case ScriptAction::CAMERA_MOTION_BLUR_END_FOLLOW:
 		case ScriptAction::FREEZE_TIME:
 		case ScriptAction::SHOW_MILITARY_CAPTION:
-		case ScriptAction::CAMERA_TETHER_NAMED:
-		case ScriptAction::CAMERA_ENABLE_SLAVE_MODE:
 		case ScriptAction::CAMERA_ADD_SHAKER_AT:
+		case ScriptAction::SOUND_AMBIENT_PAUSE:
 			return TRUE;
 		default:
 			return FALSE;
@@ -6650,8 +6688,21 @@ Bool ScriptActions::shouldSuppressSkippedCinematicAction(ScriptAction *action) c
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::executeAction( ScriptAction *pAction )
 {
-	if (m_skipCinematicPresentation && shouldSuppressSkippedCinematicAction(pAction))
-		return;
+	if (m_skipCinematicPresentation && pAction != nullptr)
+	{
+		// Movies depend on client-side playback to signal completion. During headless catch-up, mark the
+		// skipped movie complete immediately so a WAIT_FOR_VIDEO script cannot deadlock the fast-forward.
+		if (pAction->getActionType() == ScriptAction::MOVIE_PLAY_FULLSCREEN ||
+			pAction->getActionType() == ScriptAction::MOVIE_PLAY_RADAR)
+		{
+			if (TheScriptEngine && pAction->getParameter(0))
+				TheScriptEngine->notifyOfCompletedVideo(pAction->getParameter(0)->getString());
+			return;
+		}
+
+		if (shouldSuppressSkippedCinematicAction(pAction))
+			return;
+	}
 
 	switch (pAction->getActionType()) {
 		default:

@@ -83,6 +83,7 @@
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/GhostObject.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/ScriptActions.h"
 #include "GameLogic/ScriptEngine.h"		// For TheScriptEngine - jkmcd
 
 #define DRAWABLE_HASH_SIZE	8192
@@ -726,7 +727,13 @@ void GameClient::update()
 	// redraw all views, update the GUI
 	//if(TheGameLogic->getFrame() >= 2)
 
-		TheDisplay->DRAW();
+#if defined(RTS_ZEROHOUR)
+		// While a skipped cinematic is being resolved, keep the last presented frame on screen. Camera
+		// and display state still advance through GameClient::step(), but intermediate warp-speed frames
+		// are never shown to the player.
+		if (!(TheScriptActions && TheScriptActions->isCinematicSkipFastForwarding()))
+#endif
+			TheDisplay->DRAW();
 	}
 
 	{
