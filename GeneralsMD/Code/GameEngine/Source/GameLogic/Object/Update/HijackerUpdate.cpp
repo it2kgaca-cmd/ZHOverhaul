@@ -57,6 +57,7 @@ HijackerUpdate::HijackerUpdate( Thing *thing, const ModuleData *moduleData ) : U
 	setIsInVehicle( FALSE );
 	m_wasTargetAirborne = false;
 	m_resumeAttackMove = FALSE;
+	m_resumeAttackMoveCommandSource = (Int)CMD_FROM_AI;
 	m_resumeAttackMoveDestination.zero();
 	m_ejectPos.zero();
 //	m_ejectPilotDMI = nullptr;
@@ -223,7 +224,7 @@ void HijackerUpdate::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 2;
+	XferVersion currentVersion = 3;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -250,10 +251,15 @@ void HijackerUpdate::xfer( Xfer *xfer )
 	{
 		xfer->xferBool( &m_resumeAttackMove );
 		xfer->xferCoord3D( &m_resumeAttackMoveDestination );
+		if( version >= 3 )
+			xfer->xferInt( &m_resumeAttackMoveCommandSource );
+		else if( xfer->getXferMode() == XFER_LOAD )
+			m_resumeAttackMoveCommandSource = (Int)CMD_FROM_AI;
 	}
 	else if( xfer->getXferMode() == XFER_LOAD )
 	{
 		m_resumeAttackMove = FALSE;
+		m_resumeAttackMoveCommandSource = (Int)CMD_FROM_AI;
 		m_resumeAttackMoveDestination.zero();
 	}
 #endif
