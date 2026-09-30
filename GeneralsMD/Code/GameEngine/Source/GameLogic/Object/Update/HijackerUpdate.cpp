@@ -56,6 +56,8 @@ HijackerUpdate::HijackerUpdate( Thing *thing, const ModuleData *moduleData ) : U
 	setUpdate( FALSE );
 	setIsInVehicle( FALSE );
 	m_wasTargetAirborne = false;
+	m_resumeAttackMove = FALSE;
+	m_resumeAttackMoveDestination.zero();
 	m_ejectPos.zero();
 //	m_ejectPilotDMI = nullptr;
 }
@@ -242,6 +244,11 @@ void HijackerUpdate::xfer( Xfer *xfer )
 
 	// was target airborne
 	xfer->xferBool( &m_wasTargetAirborne );
+
+#if !RETAIL_COMPATIBLE_XFER_SAVE
+	xfer->xferBool( &m_resumeAttackMove );
+	xfer->xferCoord3D( &m_resumeAttackMoveDestination );
+#endif
 
 }
 
