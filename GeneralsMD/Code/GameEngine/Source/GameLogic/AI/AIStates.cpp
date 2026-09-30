@@ -3725,8 +3725,10 @@ static Object *findAttackMoveSpecialistTarget(Object *owner, const Coord3D *dest
 	if (range < 100.0f) range = 100.0f;
 
 	PartitionFilterRelationship enemies(owner, PartitionFilterRelationship::ALLOW_ENEMIES);
+	PartitionFilterAlive alive;
+	PartitionFilterOnMap onMap;
 	PartitionFilterStealthedAndUndetected visible(owner, false);
-	PartitionFilter *filters[] = { &enemies, &visible, nullptr };
+	PartitionFilter *filters[] = { &enemies, &alive, &onMap, &visible, nullptr };
 	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(owner, range, FROM_BOUNDINGSPHERE_2D, filters, ITER_SORTED_NEAR_TO_FAR);
 	MemoryPoolObjectHolder holder(iter);
 
