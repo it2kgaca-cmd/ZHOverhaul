@@ -510,7 +510,7 @@ Bool OCLUpdate::deliverSupplyManifest( const Coord3D& edgePoint )
 			if( cash )
 			{
 				static const NameKeyType key_MoneyCrateCollide = NAMEKEY( "MoneyCrateCollide" );
-				MoneyCrateCollide *money = (MoneyCrateCollide*)cash->findModule( key_MoneyCrateCollide );
+				MoneyCrateCollide *money = (MoneyCrateCollide*)cash->findCollideModule( key_MoneyCrateCollide );
 				if( money ) money->setMoneyProvidedOverride( (UnsignedInt)cashRemainder );
 				attachSupplyDropPayload( transport, cash, "AmericaCrateParachute", startPos );
 			}
@@ -762,7 +762,13 @@ void OCLUpdate::xfer( Xfer *xfer )
 				xfer->xferAsciiString( &name );
 				xfer->xferUser( &productionID, sizeof( ProductionID ) );
 				const ThingTemplate *unitType = TheThingFactory->findTemplate( name );
-				if( unitType == nullptr ) throw SC_INVALID_DATA;
+				if( unitType == nullptr )
+				{
+					// A removed/renamed manifest unit should not make the whole save unloadable.
+					// The absent entry simply consumes no allowance on the next delivery, so that
+					// portion naturally falls back to cash.
+					continue;
+				}
 				ProductionEntry *entry = newInstance( ProductionEntry );
 				entry->m_type = PRODUCTION_UNIT;
 				entry->m_objectToProduce = unitType;

@@ -308,6 +308,7 @@ public:
 
 	UpdateModule* findUpdateModule(NameKeyType key) const { return (UpdateModule*)findModule(key); }
 	DamageModule* findDamageModule(NameKeyType key) const { return (DamageModule*)findModule(key); }
+	CollideModule* findCollideModule(NameKeyType key) const { return (CollideModule*)findModule(key); }
 
 	Bool isSalvageCrate() const;
 
