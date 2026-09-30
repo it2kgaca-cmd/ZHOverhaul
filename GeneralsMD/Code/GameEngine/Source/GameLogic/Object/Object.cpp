@@ -4684,9 +4684,10 @@ void Object::onDie( DamageInfo *damageInfo )
 
 	// FIRST, call our die modules.
 	Bool hasSalvageDie = FALSE;
+	static NameKeyType key_CreateCrateDie = NAMEKEY("CreateCrateDie");
 	for (BehaviorModule** d = m_behaviors; *d; ++d)
 	{
-		if ((*d)->getModuleNameKey() == NAMEKEY("CreateCrateDie"))
+		if ((*d)->getModuleNameKey() == key_CreateCrateDie)
 		{
 			CreateCrateDie *crateDie = (CreateCrateDie*)(*d);
 			if (crateDie->isSalvageCrateDie())
