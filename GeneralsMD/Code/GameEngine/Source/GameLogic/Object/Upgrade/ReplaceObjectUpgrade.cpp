@@ -37,6 +37,7 @@
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Module/CreateModule.h"
+#include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Object.h"
 #include "GameClient/InGameUI.h"
 
@@ -75,6 +76,7 @@ void ReplaceObjectUpgrade::upgradeImplementation()
 
 	Bool oldObjectSelected;
 	Int oldObjectSquadNumber;
+	Int oldHealthPercent = 100;
 	Matrix3D myMatrix;
 	Team* myTeam;
 
@@ -83,6 +85,13 @@ void ReplaceObjectUpgrade::upgradeImplementation()
 
 		myMatrix = *me->getTransformMatrix();
 		myTeam = me->getTeam();// Team implies player.  It is a subset.
+
+		BodyModuleInterface *oldBody = me->getBodyModule();
+		if( oldBody != nullptr && oldBody->getMaxHealth() > 0.0f )
+		{
+			oldHealthPercent = REAL_TO_INT_FLOOR( 100.0f * oldBody->getHealth() / oldBody->getMaxHealth() + 0.5f );
+			oldHealthPercent = MAX( 1, MIN( 100, oldHealthPercent ) );
+		}
 
 		if (replacementTemplate == nullptr)
 		{
@@ -102,6 +111,9 @@ void ReplaceObjectUpgrade::upgradeImplementation()
 
 	Object *replacementObject = TheThingFactory->newObject(replacementTemplate, myTeam);
 	replacementObject->setTransformMatrix(&myMatrix);
+	BodyModuleInterface *replacementBody = replacementObject->getBodyModule();
+	if( replacementBody != nullptr )
+		replacementBody->setInitialHealth( oldHealthPercent );
 	TheAI->pathfinder()->addObjectToPathfindMap( replacementObject );
 
 	// Now onCreates were called at the constructor.  This magically created
