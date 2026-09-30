@@ -5583,16 +5583,28 @@ void Object::doCommandButton( const CommandButton *commandButton, CommandSourceT
 				{
 					if( !BitIsSet( commandButton->getOptions(), COMMAND_OPTION_NEED_OBJECT_TARGET ) && !BitIsSet( commandButton->getOptions(), NEED_TARGET_POS ) )
 					{
-						if( isCurWeaponLocked() && ai->getCurrentStateID() == AI_ATTACK_POSITION )
+						const Bool toxinContaminate =
+							commandButton->getName().compareNoCase("Command_GLAToxinTractorContaminateGround") == 0;
+						if( toxinContaminate )
 						{
-							releaseWeaponLock( LOCKED_PERMANENTLY );
-							releaseWeaponLock( LOCKED_TEMPORARILY );
-							ai->aiIdle( cmdSource );
+							if( isCurWeaponLocked() && ai->getCurrentStateID() == AI_ATTACK_POSITION )
+							{
+								releaseWeaponLock( LOCKED_PERMANENTLY );
+								releaseWeaponLock( LOCKED_TEMPORARILY );
+								ai->aiIdle( cmdSource );
+							}
+							else
+							{
+								setWeaponLock( commandButton->getWeaponSlot(), LOCKED_PERMANENTLY );
+								ai->aiAttackPosition( getPosition(), NO_MAX_SHOTS_LIMIT, cmdSource );
+							}
 						}
 						else
 						{
-							setWeaponLock( commandButton->getWeaponSlot(), LOCKED_PERMANENTLY );
-							ai->aiAttackPosition( getPosition(), NO_MAX_SHOTS_LIMIT, cmdSource );
+							// Preserve retail semantics for ordinary immediate no-target
+							// FIRE_WEAPON commands such as Bomb Truck detonation.
+							setWeaponLock( commandButton->getWeaponSlot(), LOCKED_TEMPORARILY );
+							ai->aiAttackPosition( getPosition(), commandButton->getMaxShotsToFire(), cmdSource );
 						}
 					}
 					else
