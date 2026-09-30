@@ -4686,9 +4686,12 @@ void Object::onDie( DamageInfo *damageInfo )
 	Bool hasSalvageDie = FALSE;
 	for (BehaviorModule** d = m_behaviors; *d; ++d)
 	{
-		CreateCrateDie *crateDie = dynamic_cast<CreateCrateDie*>(*d);
-		if (crateDie && crateDie->isSalvageCrateDie())
-			hasSalvageDie = TRUE;
+		if ((*d)->getModuleNameKey() == NAMEKEY("CreateCrateDie"))
+		{
+			CreateCrateDie *crateDie = (CreateCrateDie*)(*d);
+			if (crateDie->isSalvageCrateDie())
+				hasSalvageDie = TRUE;
+		}
 
 		DieModuleInterface* die = (*d)->getDie();
 		if (die)
