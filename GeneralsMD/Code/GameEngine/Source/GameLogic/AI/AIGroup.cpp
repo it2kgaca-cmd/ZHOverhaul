@@ -2494,8 +2494,8 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 				member->findSpecialPowerModuleInterface( SPECIAL_HACKER_DISABLE_BUILDING ) != nullptr ||
 				member->findSpecialPowerModuleInterface( SPECIAL_BLACKLOTUS_CAPTURE_BUILDING ) != nullptr ||
 				member->findSpecialPowerModuleInterface( SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK ) != nullptr ||
-				member->getCommandSetString().find( "Hijacker" ) != AsciiString::npos ||
-				member->getCommandSetString().find( "Saboteur" ) != AsciiString::npos;
+				strstr( member->getCommandSetString().str(), "Hijacker" ) != nullptr ||
+				strstr( member->getCommandSetString().str(), "Saboteur" ) != nullptr;
 
 			if (member->isAbleToAttack() || specialistAttackMove)
 				ai->aiAttackMoveToPosition(&dest, maxShotsToFire, cmdSource);
