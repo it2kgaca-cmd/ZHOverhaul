@@ -2510,8 +2510,9 @@ void ControlBar::setControlCommand( GameWindow *button, const CommandButton *com
 	// the states of these buttons we would add additional lines to the INI for a command
 	// button and store those additional images in the command button
 	//
-	if( commandButton->getButtonImage() )
-		GadgetButtonSetEnabledImage( button, commandButton->getButtonImage() );
+	// Always assign the image, including nullptr.  Otherwise a command with no
+	// ButtonImage inherits whatever artwork occupied this physical slot before it.
+	GadgetButtonSetEnabledImage( button, commandButton->getButtonImage() );
 
 	//if( commandButton->getDisabledImage() )
 	//{
