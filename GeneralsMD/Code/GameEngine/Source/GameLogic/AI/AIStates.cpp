@@ -65,6 +65,8 @@
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/ContainModule.h"
+#include "GameLogic/Module/EjectPilotDie.h"
+#include "GameLogic/Module/HijackerUpdate.h"
 #include "GameLogic/Module/JetAIUpdate.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "GameLogic/Module/StealthUpdate.h"
@@ -6713,8 +6715,45 @@ StateReturnType AIEnterState::update()
 							player->getMoney()->deposit( recycleValue, TRUE, FALSE );
 						}
 
+						// Recover a legitimate crew member before administrative removal.
+						// Hijacker-origin vehicles take priority: the hidden Hijacker already
+						// exists and will restore itself as soon as its target disappears.
+						Bool hasHijackerDriver = FALSE;
+						if( obj->testStatus( OBJECT_STATUS_HIJACKED ) )
+						{
+							for( Object *driver = TheGameLogic->getFirstObject(); driver; driver = driver->getNextObject() )
+							{
+								static NameKeyType key_HijackerUpdate = NAMEKEY( "HijackerUpdate" );
+								HijackerUpdate *hu = (HijackerUpdate*)driver->findUpdateModule( key_HijackerUpdate );
+								if( hu && hu->getTargetObject() == obj )
+								{
+									hasHijackerDriver = TRUE;
+									break;
+								}
+							}
+						}
+
+						// If this is not a Hijacker ride, a veteran American vehicle may recover
+						// the same Pilot its normal EjectPilotDie behavior would create.  Invoke
+						// only that OCL, never the vehicle's death pipeline.
+						if( !hasHijackerDriver && obj->getVeterancyLevel() != LEVEL_REGULAR &&
+								obj->getTemplate()->getSide().compareNoCase( "America" ) == 0 )
+						{
+							for( BehaviorModule **bm = obj->getBehaviorModules(); *bm; ++bm )
+							{
+								DieModuleInterface *eject = (*bm)->getEjectPilotDieInterface();
+								if( eject )
+								{
+									EjectPilotDie *pilotDie = (EjectPilotDie*)eject;
+									pilotDie->ejectPilotForRecycle();
+									break;
+								}
+							}
+						}
+
 						// Recycle through destruction rather than death so this does not trigger
-						// death weapons, salvage crates, pilots, XP, rebuild holes, or similar.
+						// death weapons, salvage crates, XP, rebuild holes, or similar.  A hidden
+						// Hijacker sees its target vanish on the next update and safely reappears.
 						TheGameLogic->destroyObject( obj );
 						return STATE_SUCCESS;
 					}
