@@ -36,23 +36,42 @@ if errorlevel 1 (
 )
 
 set /a COPIED=0
-for /f "usebackq delims=" %%F in (`git diff --name-only "%BASE_DATA_COMMIT%" HEAD -- "GameData/INI"`) do (
-    set "SRC=%%F"
-    if exist "!SRC!" (
-        set "REL=!SRC:GameData/=!"
-        set "DST=%GAME_ROOT%\Data\!REL!"
-        for %%D in ("!DST!") do (
-            if not exist "%%~dpD" mkdir "%%~dpD" >nul 2>&1
-        )
-        copy /Y "!SRC!" "!DST!" >nul
+for /f "usebackq delims=" %%F in (`git diff --diff-filter=ACMRT --name-only "%BASE_DATA_COMMIT%" HEAD -- "GameData/INI"`) do (
+    set "SRC_REL=%%F"
+    set "SRC_REL=!SRC_REL:/=\!"
+    set "SRC=%REPO_ROOT%\!SRC_REL!"
+    set "REL=!SRC_REL:GameData\=!"
+    set "DST=%GAME_ROOT%\Data\!REL!"
+
+    if not exist "!SRC!" (
+        echo ERROR: Source INI was not found:
+        echo   !SRC!
+        popd >nul
+        exit /b 1
+    )
+
+    for %%D in ("!DST!") do set "DST_DIR=%%~dpD"
+    if not exist "!DST_DIR!" (
+        mkdir "!DST_DIR!" >nul 2>&1
         if errorlevel 1 (
-            echo ERROR copying "!SRC!" to "!DST!".
+            echo ERROR: Could not create destination directory:
+            echo   !DST_DIR!
             popd >nul
             exit /b 1
         )
-        echo Installed !REL!
-        set /a COPIED+=1
     )
+
+    copy /Y "!SRC!" "!DST!" >nul
+    if errorlevel 1 (
+        echo ERROR copying:
+        echo   FROM: !SRC!
+        echo     TO: !DST!
+        popd >nul
+        exit /b 1
+    )
+
+    echo Installed !REL!
+    set /a COPIED+=1
 )
 
 popd >nul
