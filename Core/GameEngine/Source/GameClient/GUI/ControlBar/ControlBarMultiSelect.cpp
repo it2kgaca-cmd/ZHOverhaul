@@ -79,9 +79,13 @@ void ControlBar::addCommonCommands( Drawable *draw, Bool firstDrawable )
 	if (obj->isKindOf(KINDOF_IGNORED_IN_GUI)) // ignore these guys
 		return;
 
-	// get the command set of this drawable
-	const CommandSet *commandSet = findCommandSet( obj->getCommandSetString() );
-	if( commandSet == nullptr )
+	// Supply Drop Zones expose an engine-owned manifest instead of an INI CommandSet.
+	Bool sourceDrivenSupplyDrop = FALSE;
+#if !RETAIL_COMPATIBLE_CRC
+	sourceDrivenSupplyDrop = obj->isKindOf( KINDOF_FS_SUPPLY_DROPZONE );
+#endif
+	const CommandSet *commandSet = sourceDrivenSupplyDrop ? nullptr : findCommandSet( obj->getCommandSetString() );
+	if( commandSet == nullptr && !sourceDrivenSupplyDrop )
 	{
 
 		//
@@ -121,13 +125,18 @@ void ControlBar::addCommonCommands( Drawable *draw, Bool firstDrawable )
 			if (! m_commandWindows[ i ]) continue;
 
 			// get command
+#if !RETAIL_COMPATIBLE_CRC
+			command = sourceDrivenSupplyDrop ? getSupplyDropManifestCommand( obj, i ) : commandSet->getCommandButton(i);
+#else
 			command = commandSet->getCommandButton(i);
+#endif
 
 			// Structures can expose commands that have meaningful group semantics. Selling a
 			// multi-selection is intentional: one click should sell every selected structure
 			// that exposes the common Sell command.
 			const Bool structureGroupCommand = command && obj->isKindOf(KINDOF_STRUCTURE) &&
 				(command->getCommandType() == GUI_COMMAND_UNIT_BUILD ||
+				 command->getCommandType() == GUI_COMMAND_PLAYER_UPGRADE ||
 				 command->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE ||
 				 command->getCommandType() == GUI_COMMAND_TOGGLE_OVERCHARGE ||
 				 command->getCommandType() == GUI_COMMAND_SELL);
@@ -164,7 +173,11 @@ void ControlBar::addCommonCommands( Drawable *draw, Bool firstDrawable )
 			if (! m_commandWindows[ i ]) continue;
 
 			// get the command
+#if !RETAIL_COMPATIBLE_CRC
+			command = sourceDrivenSupplyDrop ? getSupplyDropManifestCommand( obj, i ) : commandSet->getCommandButton(i);
+#else
 			command = commandSet->getCommandButton(i);
+#endif
 
 			Bool attackMove = (command && command->getCommandType() == GUI_COMMAND_ATTACK_MOVE) ||
 												(m_commonCommands[ i ] && m_commonCommands[ i ]->getCommandType() == GUI_COMMAND_ATTACK_MOVE);
@@ -452,6 +465,15 @@ void ControlBar::updateContextMultiSelect()
 
 			// can we do the command
 			CommandAvailability availability = getCommandAvailability( command, obj, win );
+			if( (command->getCommandType() == GUI_COMMAND_PLAYER_UPGRADE ||
+					 command->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE) &&
+					(availability == COMMAND_AVAILABLE || availability == COMMAND_ACTIVE) )
+			{
+				ProductionUpdateInterface *upgradePU = obj->getProductionUpdateInterface();
+				if( upgradePU == nullptr ||
+						upgradePU->canQueueUpgrade( command->getUpgradeTemplate() ) != CANMAKE_OK )
+					availability = COMMAND_RESTRICTED;
+			}
 
 			win->winClearStatus( WIN_STATUS_NOT_READY );
 			win->winClearStatus( WIN_STATUS_ALWAYS_COLOR );
@@ -460,7 +482,8 @@ void ControlBar::updateContextMultiSelect()
 			switch( availability )
 			{
 				case COMMAND_HIDDEN:
-					if (command->getCommandType() != GUI_COMMAND_OBJECT_UPGRADE &&
+					if (command->getCommandType() != GUI_COMMAND_PLAYER_UPGRADE &&
+							command->getCommandType() != GUI_COMMAND_OBJECT_UPGRADE &&
 							command->getCommandType() != GUI_COMMAND_DOZER_CONSTRUCT &&
 							command->getCommandType() != GUI_COMMAND_UNIT_BUILD)
 						win->winHide( TRUE );
@@ -538,17 +561,13 @@ void ControlBar::updateContextMultiSelect()
 			continue;
 		}
 
-		if (m_commonCommands[i]->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE)
+		if (m_commonCommands[i]->getCommandType() == GUI_COMMAND_PLAYER_UPGRADE ||
+				m_commonCommands[i]->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE)
 		{
-			if (objectsThatCanDoCommand[i] > 0)
-			{
-				m_commandWindows[i]->winHide(FALSE);
-				m_commandWindows[i]->winEnable(TRUE);
-			}
-			else
-			{
-				m_commandWindows[i]->winHide(TRUE);
-			}
+			// Keep research visible in a mass selection even when every selected
+			// building is temporarily busy; disable it until one can accept it.
+			m_commandWindows[i]->winHide(FALSE);
+			m_commandWindows[i]->winEnable(objectsThatCanDoCommand[i] > 0);
 			continue;
 		}
 

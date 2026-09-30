@@ -83,6 +83,102 @@ struct PopulateInvButtonData
 
 //-------------------------------------------------------------------------------------------------
 #if !RETAIL_COMPATIBLE_CRC
+// Supply Drop Zones have an engine-owned command layout rather than an INI CommandSet.
+const CommandButton *ControlBar::getSupplyDropManifestCommand( Object *creatorObject, Int commandIndex )
+{
+	if( creatorObject == nullptr || !creatorObject->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) )
+		return nullptr;
+
+	if( commandIndex == 13 )
+		return findCommandButton( "Command_Sell" );
+
+	if( commandIndex < 0 || commandIndex >= 11 )
+		return nullptr;
+
+	static const char *const baseButtons[] =
+	{
+		"Command_ConstructAmericaInfantryRanger",
+		"Command_ConstructAmericaInfantryMissileDefender",
+		"Command_ConstructAmericaInfantryPathfinder",
+		"Command_ConstructAmericaTankCrusader",
+		"Command_ConstructAmericaVehicleTomahawk",
+		"Command_ConstructAmericaVehicleHumvee",
+		"Command_ConstructAmericaVehicleMedic",
+		"Command_ConstructAmericaVehiclePaladin",
+		"Command_ConstructAmericaVehicleSentryDrone",
+		"Command_ConstructAmericaVehicleAvenger",
+		"Command_ConstructAmericaVehicleMicrowave"
+	};
+	static const char *const airForceButtons[] =
+	{
+		"AirF_Command_ConstructAmericaInfantryRanger",
+		"AirF_Command_ConstructAmericaInfantryMissileDefender",
+		"AirF_Command_ConstructAmericaInfantryPathfinder",
+		"AirF_Command_ConstructAmericaVehicleTomahawk",
+		"AirF_Command_ConstructAmericaVehicleHumvee",
+		"AirF_Command_ConstructAmericaVehicleMedic",
+		"AirF_Command_ConstructAmericaVehicleSentryDrone",
+		"AirF_Command_ConstructAmericaVehicleAvenger",
+		"AirF_Command_ConstructAmericaVehicleMicrowave"
+	};
+	static const char *const laserButtons[] =
+	{
+		"Lazr_Command_ConstructAmericaInfantryRanger",
+		"Lazr_Command_ConstructAmericaInfantryMissileDefender",
+		"Lazr_Command_ConstructAmericaInfantryPathfinder",
+		"Lazr_Command_ConstructAmericaTankCrusader",
+		"Lazr_Command_ConstructAmericaVehicleHumvee",
+		"Lazr_Command_ConstructAmericaVehicleMedic",
+		"Lazr_Command_ConstructAmericaVehicleSentryDrone",
+		"Lazr_Command_ConstructAmericaVehicleAvenger",
+		"Lazr_Command_ConstructAmericaVehicleMicrowave"
+	};
+	static const char *const superWeaponButtons[] =
+	{
+		"SupW_Command_ConstructAmericaInfantryRanger",
+		"SupW_Command_ConstructAmericaInfantryMissileDefender",
+		"SupW_Command_ConstructAmericaInfantryPathfinder",
+		"SupW_Command_ConstructAmericaVehicleTomahawk",
+		"SupW_Command_ConstructAmericaVehicleHumvee",
+		"SupW_Command_ConstructAmericaVehicleMedic",
+		"SupW_Command_ConstructAmericaVehicleSentryDrone",
+		"SupW_Command_ConstructAmericaVehicleAvenger",
+		"SupW_Command_ConstructAmericaVehicleMicrowave"
+	};
+
+	const char *const *buttonNames = nullptr;
+	UnsignedInt buttonCount = 0;
+	Player *player = creatorObject->getControllingPlayer();
+	const PlayerTemplate *playerTemplate = player ? player->getPlayerTemplate() : nullptr;
+	const AsciiString& side = playerTemplate ? playerTemplate->getSide() : AsciiString::TheEmptyString;
+
+	if( side.compareNoCase( "AmericaAirForceGeneral" ) == 0 )
+	{
+		buttonNames = airForceButtons;
+		buttonCount = (UnsignedInt)(sizeof( airForceButtons ) / sizeof( airForceButtons[0] ));
+	}
+	else if( side.compareNoCase( "AmericaLaserGeneral" ) == 0 )
+	{
+		buttonNames = laserButtons;
+		buttonCount = (UnsignedInt)(sizeof( laserButtons ) / sizeof( laserButtons[0] ));
+	}
+	else if( side.compareNoCase( "AmericaSuperWeaponGeneral" ) == 0 )
+	{
+		buttonNames = superWeaponButtons;
+		buttonCount = (UnsignedInt)(sizeof( superWeaponButtons ) / sizeof( superWeaponButtons[0] ));
+	}
+	else if( side.compareNoCase( "America" ) == 0 )
+	{
+		buttonNames = baseButtons;
+		buttonCount = (UnsignedInt)(sizeof( baseButtons ) / sizeof( baseButtons[0] ));
+	}
+
+	if( buttonNames == nullptr || (UnsignedInt)commandIndex >= buttonCount )
+		return nullptr;
+
+	return findCommandButton( buttonNames[ commandIndex ] );
+}
+
 // Supply Drop Zones use the normal command grid for their standing manifest.  The stock
 // OCL timer is a full alternate control-bar context, so displaying it at the same time
 // would cover the command grid and intercept its mouse input.  Keep the countdown inside
@@ -337,119 +433,29 @@ void ControlBar::populateCommand( Object *obj )
 	// CommandSet.ini files being installed beside the executable.
 	if( obj->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) )
 	{
-		static const char *const baseButtons[] =
-		{
-			"Command_ConstructAmericaInfantryRanger",
-			"Command_ConstructAmericaInfantryMissileDefender",
-			"Command_ConstructAmericaInfantryPathfinder",
-			"Command_ConstructAmericaTankCrusader",
-			"Command_ConstructAmericaVehicleTomahawk",
-			"Command_ConstructAmericaVehicleHumvee",
-			"Command_ConstructAmericaVehicleMedic",
-			"Command_ConstructAmericaVehiclePaladin",
-			"Command_ConstructAmericaVehicleSentryDrone",
-			"Command_ConstructAmericaVehicleAvenger",
-			"Command_ConstructAmericaVehicleMicrowave"
-		};
-		static const char *const airForceButtons[] =
-		{
-			"AirF_Command_ConstructAmericaInfantryRanger",
-			"AirF_Command_ConstructAmericaInfantryMissileDefender",
-			"AirF_Command_ConstructAmericaInfantryPathfinder",
-			"AirF_Command_ConstructAmericaVehicleTomahawk",
-			"AirF_Command_ConstructAmericaVehicleHumvee",
-			"AirF_Command_ConstructAmericaVehicleMedic",
-			"AirF_Command_ConstructAmericaVehicleSentryDrone",
-			"AirF_Command_ConstructAmericaVehicleAvenger",
-			"AirF_Command_ConstructAmericaVehicleMicrowave"
-		};
-		static const char *const laserButtons[] =
-		{
-			"Lazr_Command_ConstructAmericaInfantryRanger",
-			"Lazr_Command_ConstructAmericaInfantryMissileDefender",
-			"Lazr_Command_ConstructAmericaInfantryPathfinder",
-			"Lazr_Command_ConstructAmericaTankCrusader",
-			"Lazr_Command_ConstructAmericaVehicleHumvee",
-			"Lazr_Command_ConstructAmericaVehicleMedic",
-			"Lazr_Command_ConstructAmericaVehicleSentryDrone",
-			"Lazr_Command_ConstructAmericaVehicleAvenger",
-			"Lazr_Command_ConstructAmericaVehicleMicrowave"
-		};
-		static const char *const superWeaponButtons[] =
-		{
-			"SupW_Command_ConstructAmericaInfantryRanger",
-			"SupW_Command_ConstructAmericaInfantryMissileDefender",
-			"SupW_Command_ConstructAmericaInfantryPathfinder",
-			"SupW_Command_ConstructAmericaVehicleTomahawk",
-			"SupW_Command_ConstructAmericaVehicleHumvee",
-			"SupW_Command_ConstructAmericaVehicleMedic",
-			"SupW_Command_ConstructAmericaVehicleSentryDrone",
-			"SupW_Command_ConstructAmericaVehicleAvenger",
-			"SupW_Command_ConstructAmericaVehicleMicrowave"
-		};
-
-		const char *const *buttonNames = nullptr;
-		UnsignedInt buttonCount = 0;
-		const PlayerTemplate *playerTemplate = player ? player->getPlayerTemplate() : nullptr;
-		const AsciiString& side = playerTemplate ? playerTemplate->getSide() : AsciiString::TheEmptyString;
-		if( side.compareNoCase( "AmericaAirForceGeneral" ) == 0 )
-		{
-			buttonNames = airForceButtons;
-			buttonCount = (UnsignedInt)(sizeof( airForceButtons ) / sizeof( airForceButtons[0] ));
-		}
-		else if( side.compareNoCase( "AmericaLaserGeneral" ) == 0 )
-		{
-			buttonNames = laserButtons;
-			buttonCount = (UnsignedInt)(sizeof( laserButtons ) / sizeof( laserButtons[0] ));
-		}
-		else if( side.compareNoCase( "AmericaSuperWeaponGeneral" ) == 0 )
-		{
-			buttonNames = superWeaponButtons;
-			buttonCount = (UnsignedInt)(sizeof( superWeaponButtons ) / sizeof( superWeaponButtons[0] ));
-		}
-		else if( side.compareNoCase( "America" ) == 0 )
-		{
-			buttonNames = baseButtons;
-			buttonCount = (UnsignedInt)(sizeof( baseButtons ) / sizeof( baseButtons[0] ));
-		}
-
 		for( i = 0; i < MAX_COMMANDS_PER_SET; ++i )
 		{
 			if( m_commandWindows[i] )
 				m_commandWindows[i]->winHide( TRUE );
 		}
 
-		for( UnsignedInt buttonIndex = 0;
-				buttonNames != nullptr && buttonIndex < buttonCount && buttonIndex < MAX_COMMANDS_PER_SET;
-				++buttonIndex )
+		for( i = 0; i < MAX_COMMANDS_PER_SET; ++i )
 		{
-			if( m_commandWindows[buttonIndex] == nullptr )
+			if( m_commandWindows[i] == nullptr )
 				continue;
 
-			const CommandButton *button = findCommandButton( buttonNames[buttonIndex] );
+			const CommandButton *button = getSupplyDropManifestCommand( obj, i );
 			if( button == nullptr )
 				continue;
 
-			m_commandWindows[buttonIndex]->winHide( FALSE );
-			m_commandWindows[buttonIndex]->winEnable( TRUE );
-			setControlCommand( m_commandWindows[buttonIndex], button );
+			m_commandWindows[i]->winHide( FALSE );
+			m_commandWindows[i]->winEnable( TRUE );
+			setControlCommand( m_commandWindows[i], button );
 		}
 
 		// Slot 12 is a compact, non-interactive countdown tile.  The stock OCL timer
 		// window cannot coexist with this command grid because it covers the same area.
 		updateSupplyDropCooldownTile( obj );
-
-		// Keep the normal sell action in the familiar slot 14.
-		if( m_commandWindows[13] )
-		{
-			const CommandButton *sellButton = findCommandButton( "Command_Sell" );
-			if( sellButton )
-			{
-				m_commandWindows[13]->winHide( FALSE );
-				m_commandWindows[13]->winEnable( TRUE );
-				setControlCommand( m_commandWindows[13], sellButton );
-			}
-		}
 
 		updateContextCommand();
 		return;

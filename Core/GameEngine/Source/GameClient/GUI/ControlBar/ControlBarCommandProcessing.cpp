@@ -137,7 +137,21 @@ static Drawable *findAvailableSelectedProducerFor( const ThingTemplate *whatToBu
 			continue;
 
 		ProductionUpdateInterface *pu = candidate->getProductionUpdateInterface();
-		if (pu == nullptr || !TheBuildAssistant->isPossibleToMakeUnit(candidate, whatToBuild))
+		if (pu == nullptr)
+			continue;
+
+#if !RETAIL_COMPATIBLE_CRC
+		if (candidate->isKindOf(KINDOF_FS_SUPPLY_DROPZONE))
+		{
+			if (fallback == nullptr)
+				fallback = draw;
+			if (pu->canQueueCreateUnit(whatToBuild) == CANMAKE_OK)
+				return draw;
+			continue;
+		}
+#endif
+
+		if (!TheBuildAssistant->isPossibleToMakeUnit(candidate, whatToBuild))
 			continue;
 
 		if (fallback == nullptr)
@@ -150,6 +164,99 @@ static Drawable *findAvailableSelectedProducerFor( const ThingTemplate *whatToBu
 	// Return an eligible producer even when none can build this instant; the normal
 	// canMakeUnit feedback path will then explain money/queue/cap state correctly.
 	return fallback;
+}
+
+
+//-------------------------------------------------------------------------------------------------
+Object *ControlBar::findAvailableSelectedUpgradeProducer( const CommandButton *commandButton, GameWindow *control )
+{
+	if( commandButton == nullptr ||
+			(commandButton->getCommandType() != GUI_COMMAND_PLAYER_UPGRADE &&
+			 commandButton->getCommandType() != GUI_COMMAND_OBJECT_UPGRADE) )
+		return nullptr;
+
+	const UpgradeTemplate *upgrade = commandButton->getUpgradeTemplate();
+	const DrawableList *selectedDrawables = TheInGameUI->getAllSelectedDrawables();
+	if( upgrade == nullptr || selectedDrawables == nullptr )
+		return nullptr;
+
+	Object *fallback = nullptr;
+	Object *best = nullptr;
+	Int bestPriority = -1;
+
+	for( DrawableListCIt it = selectedDrawables->begin(); it != selectedDrawables->end(); ++it )
+	{
+		Drawable *draw = *it;
+		Object *candidate = draw ? draw->getObject() : nullptr;
+		if( candidate == nullptr || !candidate->isLocallyControlled() )
+			continue;
+
+		const CommandSet *commandSet = findCommandSet( candidate->getCommandSetString() );
+		Bool exposesCommand = FALSE;
+		if( commandSet )
+		{
+			for( Int i = 0; i < MAX_COMMANDS_PER_SET; ++i )
+			{
+				if( commandSet->getCommandButton(i) == commandButton )
+				{
+					exposesCommand = TRUE;
+					break;
+				}
+			}
+		}
+		if( !exposesCommand )
+			continue;
+
+		if( commandButton->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE &&
+				(candidate->hasUpgrade(upgrade) || !candidate->affectedByUpgrade(upgrade)) )
+			continue;
+
+		CommandAvailability availability = getCommandAvailability( commandButton, candidate, control );
+		if( availability != COMMAND_AVAILABLE && availability != COMMAND_ACTIVE )
+			continue;
+
+		ProductionUpdateInterface *pu = candidate->getProductionUpdateInterface();
+		if( pu == nullptr )
+			continue;
+
+		if( fallback == nullptr )
+			fallback = candidate;
+
+		if( pu->canQueueUpgrade(upgrade) != CANMAKE_OK )
+			continue;
+
+		Int priority = 0;
+		const ProductionEntry *production = pu->firstProduction();
+		if( production == nullptr )
+		{
+			priority = 2; // Completely idle: start this research immediately.
+		}
+		else
+		{
+			Bool hasQueuedUpgrade = FALSE;
+			for( ; production; production = pu->nextProduction(production) )
+			{
+				if( production->getProductionUpgrade() != nullptr )
+				{
+					hasQueuedUpgrade = TRUE;
+					break;
+				}
+			}
+			priority = hasQueuedUpgrade ? 0 : 1;
+		}
+
+		if( priority > bestPriority )
+		{
+			best = candidate;
+			bestPriority = priority;
+			if( priority == 2 )
+				break;
+		}
+	}
+
+	// If every eligible producer is temporarily blocked, return one so the normal
+	// feedback path can still report a full/busy queue instead of silently doing nothing.
+	return best ? best : fallback;
 }
 
 
@@ -645,8 +752,12 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			const UpgradeTemplate *upgradeT = commandButton->getUpgradeTemplate();
 			DEBUG_ASSERTCRASH( upgradeT, ("Undefined upgrade '%s' in player upgrade command", "UNKNOWN") );
 
+			Object *upgradeObj = obj;
+			if( m_currContext == CB_CONTEXT_MULTI_SELECT )
+				upgradeObj = findAvailableSelectedUpgradeProducer( commandButton, control );
+
 			// sanity
-			if( obj == nullptr || upgradeT == nullptr )
+			if( upgradeObj == nullptr || upgradeT == nullptr )
 				break;
 
 			// make sure the player can really make this
@@ -655,7 +766,7 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 				break;
 			}
 
-			ProductionUpdateInterface* pu = obj ? obj->getProductionUpdateInterface() : nullptr;
+			ProductionUpdateInterface* pu = upgradeObj->getProductionUpdateInterface();
 			if (pu != nullptr)
 			{
 				CanMakeType cmt = pu->canQueueUpgrade(upgradeT);
@@ -668,7 +779,7 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 
 			// send the message
 			GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_QUEUE_UPGRADE );
-			msg->appendObjectIDArgument( obj->getID() );
+			msg->appendObjectIDArgument( upgradeObj->getID() );
 			msg->appendIntegerArgument( upgradeT->getUpgradeNameKey() );
 
 			break;
@@ -687,26 +798,8 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 				break;
 
 			Object *upgradeObj = obj;
-			if (upgradeObj == nullptr && m_currContext == CB_CONTEXT_MULTI_SELECT)
-			{
-				const DrawableList *selectedDrawables = TheInGameUI->getAllSelectedDrawables();
-				for (DrawableListCIt it = selectedDrawables->begin(); it != selectedDrawables->end(); ++it)
-				{
-					Drawable *draw = *it;
-					Object *candidate = draw ? draw->getObject() : nullptr;
-					if (candidate == nullptr || !candidate->isLocallyControlled())
-						continue;
-					if (candidate->hasUpgrade(upgradeT) || !candidate->affectedByUpgrade(upgradeT))
-						continue;
-
-					CommandAvailability availability = getCommandAvailability(commandButton, candidate, control);
-					if (availability == COMMAND_AVAILABLE || availability == COMMAND_ACTIVE)
-					{
-						upgradeObj = candidate;
-						break;
-					}
-				}
-			}
+			if( m_currContext == CB_CONTEXT_MULTI_SELECT )
+				upgradeObj = findAvailableSelectedUpgradeProducer( commandButton, control );
 
 			if (upgradeObj == nullptr ||
 					upgradeObj->hasUpgrade(upgradeT) ||

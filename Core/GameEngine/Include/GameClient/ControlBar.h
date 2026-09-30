@@ -811,6 +811,7 @@ protected:
 
 	/// add the common commands of this drawable to the common command set
 	void addCommonCommands( Drawable *draw, Bool firstDrawable );
+	Object *findAvailableSelectedUpgradeProducer( const CommandButton *commandButton, GameWindow *control );
 
 	/// switch the interface context to the new mode and populate as needed
 	void switchToContext( ControlBarContext context, Drawable *draw );
@@ -875,6 +876,7 @@ protected:
 	void updateConstructionTextDisplay( Object *obj );
 	void updateOCLTimerTextDisplay( UnsignedInt totalSeconds, Real percent );
 #if !RETAIL_COMPATIBLE_CRC
+	const CommandButton *getSupplyDropManifestCommand( Object *creatorObject, Int commandIndex );
 	void updateSupplyDropCooldownTile( Object *creatorObject );
 #endif
 

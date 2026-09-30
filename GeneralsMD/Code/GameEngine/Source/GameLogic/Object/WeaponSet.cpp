@@ -622,9 +622,11 @@ CanAttackResult WeaponSet::getAbleToAttackSpecificObject( AbleToAttackType attac
 CanAttackResult WeaponSet::getAbleToUseWeaponAgainstTarget( AbleToAttackType attackType, const Object *source, const Object *victim, const Coord3D *pos, CommandSourceType commandSource, WeaponSlotType specificSlot ) const
 {
 
-	// ZHOverhaul: passenger-fired weapons are ground-only.  The unit's normal
-	// anti-air capability returns as soon as it leaves its container/garrison.
-	if( victim != nullptr && victim->isAirborneTarget() && source != nullptr && source->getContainedBy() != nullptr )
+	// ZHOverhaul: infantry firing from a garrison/transport is ground-only.  Do not
+	// apply this to attached/contained vehicle weapon objects (Avenger PDL, Overlord
+	// add-ons, etc.), which legitimately need to retain their anti-air capability.
+	if( victim != nullptr && victim->isAirborneTarget() && source != nullptr &&
+			source->isKindOf( KINDOF_INFANTRY ) && source->getContainedBy() != nullptr )
 		return ATTACKRESULT_NOT_POSSIBLE;
 
 	//First determine if we are attacking an object or the ground and get the

@@ -2709,10 +2709,53 @@ bool GameLogic::onQueueUpgrade(MAYBE_UNUSED GameMessage *msg, AIGroupPtr &curren
 	if (!upgradeT)	// sanity
 		return false;
 
+#if !RETAIL_COMPATIBLE_CRC
+	// The client names the selected producer that should perform this research.  Honor
+	// that choice so a multi-selection can distribute distinct upgrades across idle
+	// buildings instead of queueing the same upgrade on every selected producer.
+	Object *producer = findObjectByID( msg->getArgument( 0 )->objectID );
+	Player *msgPlayer = getMessagePlayer(msg);
+	if( producer == nullptr || msgPlayer == nullptr || producer->getControllingPlayer() != msgPlayer ||
+			!currentlySelectedGroup )
+		return false;
+
+#if RETAIL_COMPATIBLE_AIGROUP
+	const AIGroup *selection = currentlySelectedGroup;
+#else
+	const AIGroup *selection = currentlySelectedGroup.Peek();
+#endif
+	if( selection == nullptr )
+		return false;
+
+	VecObjectID selectedObjects = selection->getAllIDs();
+	if( std::find( selectedObjects.begin(), selectedObjects.end(), producer->getID() ) == selectedObjects.end() )
+		return false;
+
+	if( !TheUpgradeCenter->canAffordUpgrade( msgPlayer, upgradeT, FALSE ) )
+		return false;
+
+	if( upgradeT->getUpgradeType() == UPGRADE_TYPE_PLAYER &&
+			(msgPlayer->hasUpgradeComplete(upgradeT) || msgPlayer->hasUpgradeInProduction(upgradeT)) )
+		return false;
+
+	if( upgradeT->getUpgradeType() == UPGRADE_TYPE_OBJECT &&
+			(producer->hasUpgrade(upgradeT) || !producer->affectedByUpgrade(upgradeT)) )
+		return false;
+
+	if( !producer->canProduceUpgrade(upgradeT) )
+		return false;
+
+	ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
+	if( pu == nullptr || pu->canQueueUpgrade(upgradeT) != CANMAKE_OK )
+		return false;
+
+	return pu->queueUpgrade( upgradeT );
+#else
 	if (currentlySelectedGroup)
 		currentlySelectedGroup->queueUpgrade( upgradeT );
 
 	return true;
+#endif
 }
 
 bool GameLogic::onCancelUpgrade(MAYBE_UNUSED GameMessage *msg, AIGroupPtr &currentlySelectedGroup)
