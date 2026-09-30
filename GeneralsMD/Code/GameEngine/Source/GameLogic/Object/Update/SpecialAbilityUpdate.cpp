@@ -402,9 +402,15 @@ UpdateSleepTime SpecialAbilityUpdate::update()
 
   if ( shouldAbort || spm == nullptr )
   {
-    // doh, a colleague has already captured it. just stop.
-    ai->aiIdle( CMD_FROM_AI );
+    // If this special was an opportunistic Attack Move interaction, losing the
+    // target resumes the original march instead of stranding the specialist.
+    const Bool resumeAttackMove = m_resumeAttackMove;
+    const Coord3D resumeDestination = m_resumeAttackMoveDestination;
+    if( !resumeAttackMove )
+      ai->aiIdle( CMD_FROM_AI );
     onExit( false );
+    if( resumeAttackMove && !getObject()->isEffectivelyDead() )
+      ai->aiAttackMoveToPosition( &resumeDestination, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
     return calcSleepTime();
   }
 
@@ -529,7 +535,7 @@ UpdateSleepTime SpecialAbilityUpdate::update()
 
         // Lorenzen added this additional flag to support the NapalmBombDrop
         // It causes this update to force a recharge of the SPM between drops
-        if( isPersistentAbility() && getDoesPersistenceRequireRecharge())
+        if( isPersistentAbility() && getDoesPersistenceRequireRecharge() && !m_attackMoveOneShotPersistent)
         {
           //VARIATION -- PERSISTENCE (repeats preparation)
           resetPreparation();
@@ -1864,6 +1870,8 @@ void SpecialAbilityUpdate::validateSpecialObjects()
 void SpecialAbilityUpdate::finishAbility()
 {
   const SpecialAbilityUpdateModuleData* data = getSpecialAbilityUpdateModuleData();
+  const Bool resumeAttackMove = m_resumeAttackMove;
+  const Coord3D resumeDestination = m_resumeAttackMoveDestination;
 
   m_withinStartAbilityRange = false;
   m_packingState = STATE_NONE;
@@ -1937,7 +1945,7 @@ void SpecialAbilityUpdate::finishAbility()
 	{
 		//Clear any old AI before ending this special ability.
 		AIUpdateInterface *ai = getObject()->getAIUpdateInterface();
-		if (ai)
+		if (ai && !resumeAttackMove)
 	  	ai->aiIdle(CMD_FROM_AI);
 	}
 
@@ -1958,6 +1966,13 @@ void SpecialAbilityUpdate::finishAbility()
 	}
 
 	onExit( false );
+
+	if( resumeAttackMove && !getObject()->isEffectivelyDead() )
+	{
+		AIUpdateInterface *ai = getObject()->getAIUpdateInterface();
+		if( ai )
+			ai->aiAttackMoveToPosition( &resumeDestination, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
