@@ -3776,7 +3776,7 @@ static Bool executeAttackMoveSpecialistAction(Object *owner, Object *target, con
 				static NameKeyType key_HijackerUpdate = NAMEKEY("HijackerUpdate");
 				HijackerUpdate *hu = (HijackerUpdate*)owner->findUpdateModule(key_HijackerUpdate);
 				if (hu && resumeDestination)
-					hu->setResumeAttackMoveDestination(resumeDestination);
+					hu->setResumeAttackMoveDestination(resumeDestination, (Int)source);
 			}
 			ai->aiEnter(target, CMD_FROM_AI);
 		}
@@ -3802,7 +3802,7 @@ static Bool executeAttackMoveSpecialistAction(Object *owner, Object *target, con
 			// unit, so attach the continuation immediately afterwards using the
 			// destination captured by the outer Attack Move state.
 			owner->doSpecialPowerAtObject(sp->getSpecialPowerTemplate(), target, COMMAND_FIRED_BY_SCRIPT, TRUE);
-			ability->setAttackMoveContinuation(resumeDestination, type == SPECIAL_HACKER_DISABLE_BUILDING);
+			ability->setAttackMoveContinuation(resumeDestination, type == SPECIAL_HACKER_DISABLE_BUILDING, (Int)source);
 			return TRUE;
 		}
 	}
