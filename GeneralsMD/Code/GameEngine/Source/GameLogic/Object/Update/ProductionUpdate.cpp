@@ -244,6 +244,12 @@ CanMakeType ProductionUpdate::canQueueUpgrade( const UpgradeTemplate *upgrade ) 
 //-------------------------------------------------------------------------------------------------
 CanMakeType ProductionUpdate::canQueueCreateUnit( const ThingTemplate *unitType ) const
 {
+	// ZHOverhaul: an unfinished structure is never a valid producer.  Keep this
+	// here as the authoritative simulation-side guard so malformed/replayed
+	// commands cannot bypass the control bar's producer filtering.
+	if( getObject()->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
+		return CANMAKE_UNBUILDABLE;
+
 	/// @todo srj -- this is horrible, but the "right" way to do it is to move
 	// ProductionUpdate to be part of ParkingPlaceBehavior, which I don't currently
 	// have time for...
@@ -451,6 +457,11 @@ Bool ProductionUpdate::cancelUpgrade( const UpgradeTemplate *upgrade )
 Bool ProductionUpdate::queueCreateUnit( const ThingTemplate *unitType, ProductionID productionID )
 {
 	const ProductionUpdateModuleData *data = getProductionUpdateModuleData();
+
+	// Defense in depth: direct queue callers must not be able to produce from a
+	// structure whose construction has not completed.
+	if( getObject()->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
+		return FALSE;
 
 	// if we can't create the unit do nothing
 	if( TheBuildAssistant->canMakeUnit( getObject(), unitType ) != CANMAKE_OK )
