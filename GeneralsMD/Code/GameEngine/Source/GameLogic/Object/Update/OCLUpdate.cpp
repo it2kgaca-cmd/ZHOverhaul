@@ -374,7 +374,10 @@ Bool OCLUpdate::deliverSupplyManifest( const Coord3D& edgePoint )
 	{
 		Coord3D startingForce = *transport->getUnitDirectionVector2D();
 		const Real maxSpeed = ai->getCurLocomotor()->getMaxSpeedForCondition( transport->getBodyModule()->getDamageState() );
-		startingForce.scale( maxSpeed * physics->getMass() );
+		const Real factor = maxSpeed * physics->getMass();
+		startingForce.x *= factor;
+		startingForce.y *= factor;
+		startingForce.z *= factor;
 		physics->applyMotiveForce( &startingForce );
 	}
 
