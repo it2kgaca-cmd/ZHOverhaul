@@ -49,6 +49,8 @@
 #include "GameClient/InGameUI.h"
 
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/AI.h"
+#include "GameLogic/AIPathfind.h"
 #include "GameLogic/Module/CreateModule.h"
 #include "GameLogic/Module/ParkingPlaceBehavior.h"
 #include "GameLogic/Module/ProductionUpdate.h"
@@ -950,17 +952,62 @@ UpdateSleepTime ProductionUpdate::update()
 			}
 			else
 			{
+#if !RETAIL_COMPATIBLE_CRC
+				const char *producerName = creationBuilding->getTemplate()->getName().str();
+				const char *productName = production->m_objectToProduce->getName().str();
+				const Bool blackMarketSedan =
+					producerName != nullptr && productName != nullptr &&
+					strstr( producerName, "BlackMarket" ) != nullptr &&
+					strcmp( productName, "CarSedan01" ) == 0;
 
-				// there is no exit interface, this is an error
-				DEBUG_CRASH( ("Cannot create '%s', there is no ExitUpdate interface defined for producer object '%s'",
-															production->m_objectToProduce->getName().str(),
-															creationBuilding->getTemplate()->getName().str()) );
+				if( blackMarketSedan )
+				{
+					Object *newObj = TheThingFactory->newObject( production->m_objectToProduce,
+						creationBuilding->getControllingPlayer()->getDefaultTeam() );
+					newObj->setProducer( creationBuilding );
 
-				// remove this item from the production queue
-				removeFromProductionQueue( production );
+					// Black Markets historically produce only upgrades and therefore have no
+					// ProductionExitUpdate.  Put the purchased sedan just beyond the footprint.
+					const Matrix3D *transform = creationBuilding->getTransformMatrix();
+					Vector3 loc;
+					loc.Set( creationBuilding->getGeometryInfo().getMajorRadius() +
+						newObj->getGeometryInfo().getBoundingCircleRadius() + 12.0f, 0.0f, 0.0f );
+					transform->Transform_Vector( *transform, loc, &loc );
 
-				// delete the production entry
-				deleteInstance(production);
+					Coord3D createPoint;
+					createPoint.x = loc.X;
+					createPoint.y = loc.Y;
+					createPoint.z = creationBuilding->getPosition()->z;
+					newObj->setPosition( &createPoint );
+					newObj->setOrientation( creationBuilding->getOrientation() );
+					newObj->setLayer( creationBuilding->getLayer() );
+					TheAI->pathfinder()->addObjectToPathfindMap( newObj );
+
+					creationBuilding->getControllingPlayer()->onUnitCreated( creationBuilding, newObj );
+					for( BehaviorModule **m = newObj->getBehaviorModules(); *m; ++m )
+					{
+						CreateModuleInterface *create = (*m)->getCreate();
+						if( create )
+							create->onBuildComplete();
+					}
+					creationBuilding->getControllingPlayer()->getAcademyStats()->recordProduction( newObj, creationBuilding );
+					production->oneProductionSuccessful();
+
+					if( production->getProductionQuantityRemaining() == 0 )
+					{
+						removeFromProductionQueue( production );
+						deleteInstance( production );
+					}
+				}
+				else
+#endif
+				{
+					DEBUG_CRASH( ("Cannot create '%s', there is no ExitUpdate interface defined for producer object '%s'",
+						production->m_objectToProduce->getName().str(),
+						creationBuilding->getTemplate()->getName().str()) );
+					removeFromProductionQueue( production );
+					deleteInstance(production);
+				}
 
 			}
 
