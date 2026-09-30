@@ -3622,6 +3622,8 @@ AIAttackMoveToState::AIAttackMoveToState( StateMachine *machine ) : AIMoveToStat
 	m_isMoveTo = false;
 	m_frameToSleepUntil = 0;
 	m_retryCount = ATTACK_RETRY_COUNT;
+	m_specialistDestination.zero();
+	m_specialistResumePending = FALSE;
 	m_attackMoveMachine = newInstance(AIAttackMoveStateMachine)(getMachineOwner(), "AIAttackMoveMachine");
 	m_attackMoveMachine->initDefaultState();
 }
@@ -3688,6 +3690,8 @@ StateReturnType AIAttackMoveToState::onEnter()
 	m_commandSrc = ai->getLastCommandSource();
 	m_retryCount = ATTACK_RETRY_COUNT;
 	m_frameToSleepUntil = 0;
+	m_specialistDestination = *getMachineGoalPosition();
+	m_specialistResumePending = FALSE;
 
 	return AIMoveToState::onEnter();
 }
