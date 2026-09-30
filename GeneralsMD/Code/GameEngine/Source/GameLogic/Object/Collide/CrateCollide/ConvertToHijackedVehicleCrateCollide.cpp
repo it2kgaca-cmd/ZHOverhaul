@@ -216,6 +216,11 @@ Bool ConvertToHijackedVehicleCrateCollide::executeCrateBehavior( Object *other )
 	HijackerUpdate *hijackerUpdate = (HijackerUpdate*)obj->findUpdateModule( key_HijackerUpdate );
 	if( hijackerUpdate )
 	{
+		// Specialist Attack Move stores its original destination on the Hijacker AI.
+		// Carry that intent into the captured vehicle before hiding the driver.
+		if( ai && ai->getLastCommandSource() == CMD_FROM_AI && ai->getGoalPosition() )
+			hijackerUpdate->setResumeAttackMoveDestination(ai->getGoalPosition());
+
 		hijackerUpdate->setTargetObject( other );
 		hijackerUpdate->setIsInVehicle( TRUE );
 		hijackerUpdate->setUpdate( TRUE );
@@ -244,6 +249,9 @@ Bool ConvertToHijackedVehicleCrateCollide::executeCrateBehavior( Object *other )
 	// hide the drawable associated with rider
 	if( obj->getDrawable() )
 		obj->getDrawable()->setDrawableHidden( true );
+
+	if( hijackerUpdate && hijackerUpdate->hasResumeAttackMoveDestination() && targetAI )
+		targetAI->aiAttackMoveToPosition(hijackerUpdate->getResumeAttackMoveDestination(), NO_MAX_SHOTS_LIMIT, CMD_FROM_AI);
 
 	// By returning FALSE, we will not remove the object (Hijacker)
 	return FALSE;
