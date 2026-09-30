@@ -83,7 +83,7 @@ public:
 
 	virtual RebuildHoleBehaviorInterface* getRebuildHoleBehaviorInterface() override { return this; }
 
-	static Int getInterfaceMask() { return TunnelContain::getInterfaceMask(); }
+	static Int getInterfaceMask() { return TunnelContain::getInterfaceMask() | MODULEINTERFACE_DIE; }
 
 	// BehaviorModule
 	virtual DieModuleInterface* getDie() override { return this; }
