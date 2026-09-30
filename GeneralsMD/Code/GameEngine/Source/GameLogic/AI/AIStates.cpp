@@ -3730,7 +3730,8 @@ static Object *findAttackMoveSpecialistTarget(Object *owner, const Coord3D *dest
 	PartitionFilterAlive alive;
 	PartitionFilterOnMap onMap;
 	PartitionFilterStealthedAndUndetected visible(owner, false);
-	PartitionFilter *filters[] = { &enemies, &alive, &onMap, &visible, nullptr };
+	PartitionFilterFreeOfFog unfogged(owner->getControllingPlayer()->getPlayerIndex());
+	PartitionFilter *filters[] = { &enemies, &alive, &onMap, &visible, &unfogged, nullptr };
 	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(owner, range, FROM_BOUNDINGSPHERE_2D, filters, ITER_SORTED_NEAR_TO_FAR);
 	MemoryPoolObjectHolder holder(iter);
 
@@ -3835,10 +3836,13 @@ StateReturnType AIAttackMoveToState::update()
 
 	if (isAttackMoveSpecialist(owner))
 	{
-		Object *specialTarget = findAttackMoveSpecialistTarget(owner, &m_specialistDestination, m_commandSrc);
-		if (specialTarget && executeAttackMoveSpecialistAction(owner, specialTarget, &m_specialistDestination, m_commandSrc))
+		// Specialist scans are deliberately throttled; the unit keeps following
+		// the normal move path on intervening frames.
+		if (((TheGameLogic->getFrame() + owner->getID()) % 4) == 0)
 		{
-			return STATE_CONTINUE;
+			Object *specialTarget = findAttackMoveSpecialistTarget(owner, &m_specialistDestination, m_commandSrc);
+			if (specialTarget && executeAttackMoveSpecialistAction(owner, specialTarget, &m_specialistDestination, m_commandSrc))
+				return STATE_CONTINUE;
 		}
 
 		return AIMoveToState::update();
