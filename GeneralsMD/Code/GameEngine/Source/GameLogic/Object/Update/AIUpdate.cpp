@@ -284,10 +284,6 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_movementComplete = FALSE;
 	m_isMoving = FALSE;
 	m_isBlocked = FALSE;
-	m_groundSafeAnchorValid = FALSE;
-	m_groundSafeAnchor.zero();
-	m_groundTerrainEscapeActive = FALSE;
-	m_groundTerrainEscapeUntil = 0;
 	m_trafficDisplaced = FALSE;
 	m_trafficAnchor.zero();
 	m_trafficPushTarget.zero();
@@ -2650,23 +2646,9 @@ void AIUpdateInterface::destroyPath()
  */
 void AIUpdateInterface::friend_startingMove()
 {
-	const Bool continuingMove = m_isMoving;
-
 	m_movementComplete = FALSE; // we aren't finished moving.
 	m_isMoving = TRUE;
 	m_blockedFrames = 0;
-	m_groundTerrainEscapeActive = FALSE;
-	m_groundTerrainEscapeUntil = 0;
-
-	// This method is called both for a brand-new order and for repaths inside an
-	// existing move.  Preserve the last legal terrain anchor across a repath;
-	// clearing it while already wedged throws away the one position we know the
-	// unit can safely retreat toward.
-	if (!continuingMove)
-		m_groundSafeAnchorValid = FALSE;
-
-	if (isDoingGroundMovement())
-		refreshGroundSafeAnchor();
 	m_trafficDisplaced = FALSE;
 	m_trafficPushUntil = 0;
 	m_trafficReturnAfter = 0;
@@ -2681,9 +2663,6 @@ void AIUpdateInterface::friend_endingMove()
 {
 	m_movementComplete = TRUE;
 	m_isMoving = FALSE;
-	m_groundTerrainEscapeActive = FALSE;
-	m_groundTerrainEscapeUntil = 0;
-	m_groundSafeAnchorValid = FALSE;
 
 	// Arrival is terminal. Local crowd handling must never start a second, cosmetic
 	// "parking" move after the commanded move has completed.
@@ -2869,35 +2848,6 @@ Bool AIUpdateInterface::isValidLocomotorPosition(const Coord3D* pos) const
 }
 
 //-------------------------------------------------------------------------------------------------
-// Keep the most recent position that is legal for this locomotor.  Recovery needs a
-// nearby point behind the unit, not an arbitrarily distant "roomy" point.  The previous
-// four-direction clearance test made narrow ramps retain an anchor from before the ramp,
-// so a one-second escape could time out while still wedged.  Locomotor-aware legality
-// already preserves cliff-capable units: a cliff is a valid anchor for them and invalid
-// for ordinary ground units.
-Bool AIUpdateInterface::isGroundSafeAnchorPosition(const Coord3D& pos) const
-{
-	if (!isDoingGroundMovement() || m_curLocomotor == nullptr)
-		return FALSE;
-
-	return isValidLocomotorPosition(&pos);
-}
-
-//-------------------------------------------------------------------------------------------------
-void AIUpdateInterface::refreshGroundSafeAnchor()
-{
-	if (m_groundTerrainEscapeActive || !isDoingGroundMovement())
-		return;
-
-	const Coord3D pos = *getObject()->getPosition();
-	if (isGroundSafeAnchorPosition(pos))
-	{
-		m_groundSafeAnchor = pos;
-		m_groundSafeAnchorValid = TRUE;
-	}
-}
-
-//-------------------------------------------------------------------------------------------------
 DECLARE_PERF_TIMER(doLocomotor)
 /**
  * Compute drive forces
@@ -2925,9 +2875,6 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 		m_trafficReturnAfter = 0;
 		m_cachedTrafficGoalValid = FALSE;
 		m_nextTrafficSolveFrame = 0;
-		m_groundTerrainEscapeActive = FALSE;
-		m_groundTerrainEscapeUntil = 0;
-		m_groundSafeAnchorValid = FALSE;
 		obj->clearModelConditionState(MODELCONDITION_MOVING);
 
 		PhysicsBehavior *physics = obj->getPhysics();
@@ -3025,26 +2972,11 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 						if( speed == FAST_AS_POSSIBLE || speed > myMaxSpeed )
 							speed = myMaxSpeed;
 
-						// When repeated terrain probes wedge us against an incompatible edge, first back
-						// toward the last footprint-clear anchor.  Keep the strategic path intact; once
-						// the short retreat completes we mark ourselves stuck so the move state patches
-						// or recomputes that original path from a safer position.
-						Bool terrainEscapeThisFrame = FALSE;
-						if (isDoingGroundMovement() && m_groundTerrainEscapeActive && m_groundSafeAnchorValid)
-						{
-							goalPos = m_groundSafeAnchor;
-							const Real escapeDx = goalPos.x - getObject()->getPosition()->x;
-							const Real escapeDy = goalPos.y - getObject()->getPosition()->y;
-							onPathDistToGoal = sqrtf(escapeDx*escapeDx + escapeDy*escapeDy);
-							blocked = FALSE;
-							terrainEscapeThisFrame = TRUE;
-						}
-
 						Coord3D trafficGoal;
-						if (!terrainEscapeThisFrame && computeBlobTrafficGoal(goalPos, &trafficGoal))
+						if (computeBlobTrafficGoal(goalPos, &trafficGoal))
 							goalPos = trafficGoal;
 
-						if (!terrainEscapeThisFrame && blocked && speed>m_curMaxBlockedSpeed)
+						if (blocked && speed>m_curMaxBlockedSpeed)
 						{
 							// Retail stop/decay remains only for genuine hard blockers.
 							speed = m_curMaxBlockedSpeed;
@@ -3119,77 +3051,10 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 			}
 		}
 
-		if (isDoingGroundMovement() && m_groundTerrainEscapeActive)
-		{
-			Real settleDist = getObject()->getGeometryInfo().getBoundingCircleRadius() * 0.35f;
-			if (settleDist < PATHFIND_CELL_SIZE_F * 0.20f)
-				settleDist = PATHFIND_CELL_SIZE_F * 0.20f;
-			if (settleDist > PATHFIND_CELL_SIZE_F * 0.75f)
-				settleDist = PATHFIND_CELL_SIZE_F * 0.75f;
-
-			const Real escapeDx = m_groundSafeAnchor.x - getObject()->getPosition()->x;
-			const Real escapeDy = m_groundSafeAnchor.y - getObject()->getPosition()->y;
-			const Bool reachedAnchor = escapeDx*escapeDx + escapeDy*escapeDy <= sqr(settleDist);
-			const Bool escapeTimedOut = TheGameLogic->getFrame() >= m_groundTerrainEscapeUntil;
-
-			if (blocked || reachedAnchor || escapeTimedOut)
-			{
-				m_groundTerrainEscapeActive = FALSE;
-				m_groundTerrainEscapeUntil = 0;
-
-				// Re-enter the normal repath machinery from the safer location.  If retreat itself
-				// was blocked we still stop retrying it and let the pathfinder make the next choice.
-				m_isBlocked = TRUE;
-				m_blockedFrames = LOGICFRAMES_PER_SECOND / 2;
-				m_isBlockedAndStuck = TRUE;
-			}
-			else
-			{
-				m_isBlocked = FALSE;
-				m_isBlockedAndStuck = FALSE;
-			}
-		}
-		else if (isDoingGroundMovement() && blocked)
-		{
-			// Locomotor terrain probes now report cliffs/shorelines as real blockers.  After a
-			// short sustained block, prefer one bounded physical retreat to our last roomy anchor
-			// before patching the path.  This avoids the pathological "repath from the exact same
-			// wedged lip" loop without teleporting the unit.
-			m_isBlocked = TRUE;
-			if (m_blockedFrames >= LOGICFRAMES_PER_SECOND / 2)
-			{
-				Bool canEscape = m_groundSafeAnchorValid;
-				if (canEscape)
-				{
-					const Real dx = m_groundSafeAnchor.x - getObject()->getPosition()->x;
-					const Real dy = m_groundSafeAnchor.y - getObject()->getPosition()->y;
-					Real minEscapeDist = getObject()->getGeometryInfo().getBoundingCircleRadius() * 0.35f;
-					if (minEscapeDist < PATHFIND_CELL_SIZE_F * 0.25f)
-						minEscapeDist = PATHFIND_CELL_SIZE_F * 0.25f;
-					canEscape = dx*dx + dy*dy > sqr(minEscapeDist);
-				}
-
-				if (canEscape)
-				{
-					m_groundTerrainEscapeActive = TRUE;
-					m_groundTerrainEscapeUntil = TheGameLogic->getFrame() + 2 * LOGICFRAMES_PER_SECOND;
-					m_isBlocked = FALSE;
-					m_isBlockedAndStuck = FALSE;
-				}
-				else
-				{
-					m_isBlockedAndStuck = TRUE;
-				}
-			}
-		}
-		else if (!blocked)
-		{
-			if (m_blockedFrames > 1)
-				m_blockedFrames = 1;
-			m_isBlockedAndStuck = FALSE;
-			if (isDoingGroundMovement())
-				refreshGroundSafeAnchor();
-		}
+		// Natural terrain is handled by path construction, not by manufacturing a
+		// local stuck event when the unit reaches a cliff or shoreline.
+		if (!blocked && m_blockedFrames > 1)
+			m_blockedFrames = 1;
 
 		// After our movement for the frame, update our AirborneTarget flag.
 		if(getObject()->getHeightAboveTerrain() > m_curLocomotor->getAirborneTargetingHeight() )

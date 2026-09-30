@@ -662,8 +662,6 @@ protected:
 	Bool needToRotate(); ///< Returns true if we are not pointing in the right direction for movement.
 	LocalTrafficClass classifyLocalTraffic(const Object *other) const;
 	Bool computeBlobTrafficGoal(const Coord3D& pathGoal, Coord3D *outGoal);
-	Bool isGroundSafeAnchorPosition(const Coord3D& pos) const;
-	void refreshGroundSafeAnchor();
 	void receiveTrafficPush(const Object *pusher);
 	Bool applyIdleTrafficDisplacement();
 	Real calculateMaxBlockedSpeed(Object *other) const;
@@ -848,10 +846,6 @@ private:
 	Bool				m_movementComplete;					///< True if we finished an AIInternalMoveToState.
 	Bool				m_isMoving;									///< True if we are in an AIInternalMoveToState.
 	Bool				m_isBlocked;
-	Bool				m_groundSafeAnchorValid;		///< Last locomotor-legal ground position, preserved across repaths.
-	Coord3D			m_groundSafeAnchor;			///< Nearby retreat point used when a cliff/shore approach wedges the unit.
-	Bool				m_groundTerrainEscapeActive;	///< Temporarily back out before asking the pathfinder to retry.
-	UnsignedInt	m_groundTerrainEscapeUntil;	///< Safety timeout for the local retreat.
 	Bool				m_trafficDisplaced;				///< Idle unit has been locally pushed aside by friendly traffic.
 	Coord3D			m_trafficAnchor;				///< Idle unit's position before traffic displaced it.
 	Coord3D			m_trafficPushTarget;			///< Current local displacement target.

@@ -990,25 +990,12 @@ void Locomotor::locoUpdate_moveTowardsPosition(Object* obj, const Coord3D& goalP
 			!TheAI->pathfinder()->validMovementTerrain(obj->getLayer(), this, obj->getPosition()) &&
 			!getFlag(ALLOW_INVALID_POSITION))
 	{
-		// We are already standing on terrain this locomotor cannot use.  Always tell
-		// the AI that movement is blocked; the old correction-force path returned
-		// early without doing so, leaving the move state unaware that it needed to
-		// escape/repath and allowing units to sit forever on a cliff/water lip.
-		*blocked = true;
-
+		// If external displacement leaves us on terrain that the current locomotor
+		// cannot use, allow the locomotor's ordinary correction force to nudge us
+		// back to legal ground. Do not turn terrain into a generic "blocked" event:
+		// route legality belongs to the pathfinder and the whole locomotor set.
 		if (fixInvalidPosition(obj, physics))
-		{
-			// The corrective force may get us out this frame, but keeping 'blocked'
-			// asserted lets sustained failures graduate into terrain recovery.
 			return;
-		}
-
-		// Dozers intentionally skip fixInvalidPosition(), and a correction can also
-		// fail when the surrounding cells are ambiguous.  Do not drive farther into
-		// illegal terrain; the AIUpdate safe-anchor recovery will handle the retreat.
-		physics->scrubVelocity2D(0);
-		handleBehaviorZ(obj, physics, goalPos);
-		return;
 	}
 
 	// If the actual distance is farther, then use the actual distance so we get there.
@@ -1017,67 +1004,10 @@ void Locomotor::locoUpdate_moveTowardsPosition(Object* obj, const Coord3D& goalP
 	Real dz = goalPos.z - obj->getPosition()->z;
 	Real dist = sqrt(dx*dx+dy*dy);
 
-	// ZHOverhaul: don't let a ground unit grind its footprint into a cliff/shoreline forever.
-	// The old locomotors often checked only the center point (or noticed danger only while turning),
-	// then simply withheld motive force and retried the same bad approach forever. Probe a short
-	// footprint-wide corridor ahead. Mark it blocked so AI path recovery can repath decisively.
-	if (dist > 0.01f &&
-		BitIsSet(m_template->m_surfaces, LOCOMOTORSURFACE_AIR) == false &&
-		!getFlag(ALLOW_INVALID_POSITION))
-	{
-		const Coord3D *curPos = obj->getPosition();
-		const Real invDist = 1.0f / dist;
-		const Real dirX = dx * invDist;
-		const Real dirY = dy * invDist;
-
-		Real footprint = obj->getGeometryInfo().getBoundingCircleRadius();
-		if (footprint < 2.0f)
-			footprint = 2.0f;
-
-		Real lookAhead = footprint * 0.75f;
-		if (lookAhead < PATHFIND_CELL_SIZE_F * 0.45f)
-			lookAhead = PATHFIND_CELL_SIZE_F * 0.45f;
-		if (lookAhead > PATHFIND_CELL_SIZE_F * 1.25f)
-			lookAhead = PATHFIND_CELL_SIZE_F * 1.25f;
-		if (lookAhead > dist)
-			lookAhead = dist;
-
-		const Real sideClearance = footprint * 0.60f;
-		const Real leftX = -dirY;
-		const Real leftY = dirX;
-
-		Coord3D probeCenter = *curPos;
-		probeCenter.x += dirX * lookAhead;
-		probeCenter.y += dirY * lookAhead;
-
-		Coord3D probeLeft = probeCenter;
-		probeLeft.x += leftX * sideClearance;
-		probeLeft.y += leftY * sideClearance;
-
-		Coord3D probeRight = probeCenter;
-		probeRight.x -= leftX * sideClearance;
-		probeRight.y -= leftY * sideClearance;
-
-		const Bool corridorValid =
-			TheAI->pathfinder()->validMovementTerrain(obj->getLayer(), this, &probeCenter) &&
-			TheAI->pathfinder()->validMovementTerrain(obj->getLayer(), this, &probeLeft) &&
-			TheAI->pathfinder()->validMovementTerrain(obj->getLayer(), this, &probeRight);
-
-		if (!corridorValid)
-		{
-			*blocked = true;
-			physics->scrubVelocity2D(0);
-
-			// Keep facing the intended route so a freshly computed path can take over cleanly,
-			// but do not continue applying motive force into forbidden terrain this frame.
-			physics->setTurning(rotateTowardsPosition(obj, goalPos));
-			Coord3D force;
-			force.zero();
-			physics->applyMotiveForce(&force);
-			handleBehaviorZ(obj, physics, goalPos);
-			return;
-		}
-	}
+	// Terrain routing is decided by AIPathfind using the complete locomotor set.
+	// Do not veto the next path segment using only the currently active locomotor;
+	// cliff-capable units often approach a cliff on their ground locomotor and switch
+	// only at the transition.
 	if (dist>onPathDistToGoal)
 	{
 		if (!obj->isKindOf(KINDOF_PROJECTILE) && dist>2*onPathDistToGoal)
