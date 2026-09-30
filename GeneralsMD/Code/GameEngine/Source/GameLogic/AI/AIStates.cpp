@@ -55,6 +55,7 @@
 #include "GameLogic/AIStateMachine.h"
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/Locomotor.h"
+#include "GameLogic/ObjectIter.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/PolygonTrigger.h"
 #include "GameLogic/ScriptEngine.h"
@@ -70,6 +71,7 @@
 #include "GameLogic/Module/JetAIUpdate.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "GameLogic/Module/StealthUpdate.h"
+#include "GameLogic/Module/SpecialAbilityUpdate.h"
 #include "GameLogic/Module/SpecialPowerModule.h"
 
 
@@ -3756,7 +3758,7 @@ static Object *findAttackMoveSpecialistTarget(Object *owner, const Coord3D *dest
 	return nullptr;
 }
 
-static Bool executeAttackMoveSpecialistAction(Object *owner, Object *target, CommandSourceType source)
+static Bool executeAttackMoveSpecialistAction(Object *owner, Object *target, const Coord3D *resumeDestination, CommandSourceType source)
 {
 	if (!owner || !target) return FALSE;
 
@@ -3770,8 +3772,8 @@ static Bool executeAttackMoveSpecialistAction(Object *owner, Object *target, Com
 			{
 				static NameKeyType key_HijackerUpdate = NAMEKEY("HijackerUpdate");
 				HijackerUpdate *hu = (HijackerUpdate*)owner->findUpdateModule(key_HijackerUpdate);
-				if (hu && ai->getGoalPosition())
-					hu->setResumeAttackMoveDestination(ai->getGoalPosition());
+				if (hu && resumeDestination)
+					hu->setResumeAttackMoveDestination(resumeDestination);
 			}
 			ai->aiEnter(target, CMD_FROM_AI);
 		}
@@ -3789,9 +3791,14 @@ static Bool executeAttackMoveSpecialistAction(Object *owner, Object *target, Com
 	if (type != SPECIAL_INVALID)
 	{
 		SpecialPowerModuleInterface *sp = owner->findSpecialPowerModuleInterface(type);
-		if (sp && sp->getPercentReady() >= 1.0f)
+		SpecialAbilityUpdate *ability = owner->findSpecialAbilityUpdate(type);
+		if (sp && ability && sp->getPercentReady() >= 1.0f)
 		{
+			// doSpecialPowerAtObject synchronously starts the special and idles the
+			// unit, so attach the continuation immediately afterwards using the
+			// destination captured by the outer Attack Move state.
 			owner->doSpecialPowerAtObject(sp->getSpecialPowerTemplate(), target, COMMAND_FIRED_BY_SCRIPT, TRUE);
+			ability->setAttackMoveContinuation(resumeDestination, type == SPECIAL_HACKER_DISABLE_BUILDING);
 			return TRUE;
 		}
 	}
@@ -3829,7 +3836,7 @@ StateReturnType AIAttackMoveToState::update()
 	if (isAttackMoveSpecialist(owner))
 	{
 		Object *specialTarget = findAttackMoveSpecialistTarget(owner, &m_specialistDestination, m_commandSrc);
-		if (specialTarget && executeAttackMoveSpecialistAction(owner, specialTarget, m_commandSrc))
+		if (specialTarget && executeAttackMoveSpecialistAction(owner, specialTarget, &m_specialistDestination, m_commandSrc))
 		{
 			return STATE_CONTINUE;
 		}
