@@ -186,6 +186,9 @@ public:
 	ObjectID getProducerID() const { return m_producerID; }
 	void setProducer(const Object* obj);
 
+	Int getRecycleValue() const { return m_recycleValue; }
+	void setRecycleValue( Int value ) { m_recycleValue = value > 0 ? value : 0; }
+
 	ObjectID getBuilderID() const { return m_builderID; }
 	void setBuilder( const Object *obj );
 
@@ -700,6 +703,7 @@ private:
 	ObjectID			m_id;												///< this object's unique ID
 	ObjectID			m_producerID;								///< object that produced us, if any
 	ObjectID			m_builderID;								///< object that is building or has built us (dozers or workers are builders)
+	Int					m_recycleValue;						///< actual cash paid for this unit's share of its production batch
 	Drawable*			m_drawable;									///< drawable (if any) for this object
 	AsciiString		m_name;										///< internal name
 

@@ -622,6 +622,19 @@ Bool ActionManager::canEnterObject( const Object *obj, const Object *objectToEnt
 		return FALSE;
 	}
 
+#if !RETAIL_COMPATIBLE_CRC
+	// ZHOverhaul: Black Markets double as unit recyclers. A friendly Black Market
+	// is an enter target even though the stock building has no contain module;
+	// AIEnterState performs the liquidation when the unit arrives.
+	if( objectToEnter->isKindOf( KINDOF_FS_BLACK_MARKET ) &&
+			obj->getControllingPlayer() == objectToEnter->getControllingPlayer() &&
+			(obj->isKindOf( KINDOF_INFANTRY ) || obj->isKindOf( KINDOF_VEHICLE )) &&
+			!obj->isKindOf( KINDOF_AIRCRAFT ) )
+	{
+		return TRUE;
+	}
+#endif
+
 	// first, see if we'd like to collide with 'other'
 	for (BehaviorModule** m = obj->getBehaviorModules(); *m; ++m)
 	{

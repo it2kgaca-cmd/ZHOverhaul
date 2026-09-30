@@ -87,6 +87,14 @@ public:
 
 	Int getProductionQuantity() const { return m_productionQuantityTotal; } //How many I try to make
 	Int getProductionQuantityRemaining() const { return m_productionQuantityTotal - m_productionQuantityProduced; }//How many I have made
+	Int getRecycleValueForNextUnit() const
+	{
+		if( m_productionQuantityTotal <= 0 || m_purchaseCostTotal <= 0 )
+			return 0;
+		const Int baseShare = m_purchaseCostTotal / m_productionQuantityTotal;
+		const Int remainder = m_purchaseCostTotal % m_productionQuantityTotal;
+		return baseShare + (m_productionQuantityProduced < remainder ? 1 : 0);
+	}
 
 	void oneProductionSuccessful() { ++m_productionQuantityProduced; m_exitDoor = DOOR_NONE_AVAILABLE; }//increment, and mark door to re-reserve
 
@@ -106,6 +114,7 @@ protected:
 	Int m_framesUnderConstruction;										///< counter for how many frames we've been under construction (incremented once per update)
 	Int m_productionQuantityTotal;										///< it is now possible to construct multiple units simultaneously.
 	Int m_productionQuantityProduced;									///< And we need to allow pausing within an entry, so we keep track of number of sub-successes
+	Int m_purchaseCostTotal;											///< actual cash withdrawn for the whole production transaction
 	ExitDoorType m_exitDoor;
 
 	ProductionEntry *m_next;													///< next in list

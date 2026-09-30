@@ -275,6 +275,7 @@ Object::Object( const ThingTemplate *tt, const ObjectStatusMaskType &objectStatu
 	m_id = INVALID_ID;
 	m_producerID = INVALID_ID;
 	m_builderID = INVALID_ID;
+	m_recycleValue = 0;
 
 	m_status = objectStatusMask;
 	m_layer = LAYER_GROUND;
@@ -3984,6 +3985,9 @@ void Object::crc( Xfer *xfer )
 
 
 	xfer->xferUser(&m_id,															sizeof(m_id));
+#if !RETAIL_COMPATIBLE_CRC
+	xfer->xferInt(&m_recycleValue);
+#endif
 #ifdef DEBUG_CRC
 	if (doLogging)
 	{
@@ -4082,7 +4086,7 @@ void Object::xfer( Xfer *xfer )
 
 	// version
 #if !RETAIL_COMPATIBLE_CRC && !RETAIL_COMPATIBLE_XFER_SAVE
-	const XferVersion currentVersion = 10; // v10 adds the ZHOverhaul contamination disabled timer.
+	const XferVersion currentVersion = 11; // v10 contamination timer; v11 per-unit recycle value.
 #else
 	const XferVersion currentVersion = 9;
 #endif
@@ -4235,6 +4239,13 @@ void Object::xfer( Xfer *xfer )
 	}
 #else
 	xfer->xferUser( m_disabledTillFrame, sizeof( UnsignedInt ) * DISABLED_COUNT );
+#endif
+
+#if !RETAIL_COMPATIBLE_CRC && !RETAIL_COMPATIBLE_XFER_SAVE
+	if( version >= 11 )
+		xfer->xferInt( &m_recycleValue );
+	else if( xfer->getXferMode() == XFER_LOAD )
+		m_recycleValue = 0;
 #endif
 
 	// OK, now that we have xferred our status bits and disabled data, it's safe to set the team...

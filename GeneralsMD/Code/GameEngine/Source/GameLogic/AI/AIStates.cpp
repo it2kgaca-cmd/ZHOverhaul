@@ -38,6 +38,7 @@
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/RandomValue.h"
+#include "Common/ScoreKeeper.h"
 #include "Common/Team.h"
 #include "Common/ThingTemplate.h"
 #include "Common/ThingFactory.h"
@@ -6697,6 +6698,26 @@ StateReturnType AIEnterState::update()
 				}
 				Bool closeEnough = dx*dx+dy*dy < sqr(radius);
 				if (closeEnough) {
+#if !RETAIL_COMPATIBLE_CRC
+					if( goal->isKindOf( KINDOF_FS_BLACK_MARKET ) &&
+							obj->getControllingPlayer() == goal->getControllingPlayer() &&
+							(obj->isKindOf( KINDOF_INFANTRY ) || obj->isKindOf( KINDOF_VEHICLE )) &&
+							!obj->isKindOf( KINDOF_AIRCRAFT ) )
+					{
+						Player *player = obj->getControllingPlayer();
+						const Int recycleValue = obj->getRecycleValue();
+						if( player && recycleValue > 0 )
+						{
+							player->getMoney()->deposit( recycleValue );
+							player->getScoreKeeper()->addMoneyEarned( recycleValue );
+						}
+
+						// Recycle through destruction rather than death so this does not trigger
+						// death weapons, salvage crates, pilots, XP, rebuild holes, or similar.
+						TheGameLogic->destroyObject( obj );
+						return STATE_SUCCESS;
+					}
+#endif
 					// Grab the container and force ourselves into it.
 					// This case is primarily to handle transports on the map border for scripted setup.
 					// The partition manager doesn't generate collisions in the border area, so we have to

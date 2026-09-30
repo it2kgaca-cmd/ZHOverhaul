@@ -168,6 +168,7 @@ ProductionEntry::ProductionEntry()
 	m_prev = nullptr;
 	m_productionQuantityProduced = 0;
 	m_productionQuantityTotal = 0;
+	m_purchaseCostTotal = 0;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -490,7 +491,8 @@ Bool ProductionUpdate::queueCreateUnit( const ThingTemplate *unitType, Productio
 	// take the cost for the build away from the player
 	Player *player = getObject()->getControllingPlayer();
 	Money *money = player->getMoney();
-	money->withdraw( unitType->calcCostToBuild( player ) );
+	const Int purchaseCost = unitType->calcCostToBuild( player );
+	money->withdraw( purchaseCost );
 
 	// allocate a new production entry
 	ProductionEntry *production = newInstance(ProductionEntry);
@@ -515,6 +517,7 @@ Bool ProductionUpdate::queueCreateUnit( const ThingTemplate *unitType, Productio
 	production->m_type = PRODUCTION_UNIT;
 	production->m_objectToProduce = unitType;
 	production->m_productionID = productionID;
+	production->m_purchaseCostTotal = purchaseCost;
 	production->m_exitDoor = exitDoor;
 
 	// tie to the end of the production queue
@@ -894,6 +897,9 @@ UpdateSleepTime ProductionUpdate::update()
 																	creationBuilding->getControllingPlayer()->getDefaultTeam() );
 
 							newObj->setProducer(creationBuilding);
+#if !RETAIL_COMPATIBLE_CRC
+							newObj->setRecycleValue( production->getRecycleValueForNextUnit() );
+#endif
 
 							// call the exit interface to do the rally point and position stuff
 							exitInterface->exitObjectViaDoor( newObj, exitDoor );
@@ -965,6 +971,7 @@ UpdateSleepTime ProductionUpdate::update()
 					Object *newObj = TheThingFactory->newObject( production->m_objectToProduce,
 						creationBuilding->getControllingPlayer()->getDefaultTeam() );
 					newObj->setProducer( creationBuilding );
+					newObj->setRecycleValue( production->getRecycleValueForNextUnit() );
 
 					// Black Markets historically produce only upgrades and therefore have no
 					// ProductionExitUpdate.  Put the purchased sedan just beyond the footprint.
@@ -1258,9 +1265,13 @@ Bool ProductionUpdate::cancelUnitCreate( ProductionEntry *production )
 		return FALSE;
 #endif
 
-	// give the player the cost of the object back
+	// give the player the exact cash originally withdrawn for this production entry
 	Money *money = player->getMoney();
+#if !RETAIL_COMPATIBLE_CRC
+	money->deposit( production->m_purchaseCostTotal, TRUE, FALSE );
+#else
 	money->deposit( production->m_objectToProduce->calcCostToBuild( player ), TRUE, FALSE );
+#endif
 
 	// remove from queue list
 	removeFromProductionQueue( production );
@@ -1430,13 +1441,18 @@ void ProductionUpdate::crc( Xfer *xfer )
 /** Xfer method
 	* Version Info:
 	* 1: Initial version
-	* 2: Added standing repeat-production sequence */
+	* 2: Added standing repeat-production sequence
+	* 3: Store actual unit-production purchase cost for recycling */
 // ------------------------------------------------------------------------------------------------
 void ProductionUpdate::xfer( Xfer *xfer )
 {
 
 	// version
+#if RETAIL_COMPATIBLE_XFER_SAVE
 	XferVersion currentVersion = 2;
+#else
+	XferVersion currentVersion = 3;
+#endif
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -1483,6 +1499,11 @@ void ProductionUpdate::xfer( Xfer *xfer )
 
 			// production quantity in progress
 			xfer->xferInt( &production->m_productionQuantityProduced );
+
+#if !RETAIL_COMPATIBLE_XFER_SAVE
+			// actual cash paid for this unit production entry
+			xfer->xferInt( &production->m_purchaseCostTotal );
+#endif
 
 			// exit door
 			xfer->xferInt( (Int*)&production->m_exitDoor );
@@ -1572,6 +1593,18 @@ void ProductionUpdate::xfer( Xfer *xfer )
 
 			// production quantity in progress
 			xfer->xferInt( &production->m_productionQuantityProduced );
+
+#if !RETAIL_COMPATIBLE_XFER_SAVE
+			if( version >= 3 )
+			{
+				xfer->xferInt( &production->m_purchaseCostTotal );
+			}
+			else if( production->m_type == PRODUCTION_UNIT && production->m_objectToProduce )
+			{
+				production->m_purchaseCostTotal =
+					production->m_objectToProduce->calcCostToBuild( getObject()->getControllingPlayer() );
+			}
+#endif
 
 			// exit door
 			xfer->xferInt( (Int*)&production->m_exitDoor );
