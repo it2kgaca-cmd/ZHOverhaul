@@ -91,6 +91,15 @@ Object *CreateCrateDie::createSalvageCrateForObject( Object *obj )
 	crate->setPosition(&pos);
 	crate->setOrientation(GameLogicRandomValueReal(0, 2*PI));
 	crate->setLayer(obj->getLayer());
+
+	Drawable *crateDrawable = crate->getDrawable();
+	if( crateDrawable )
+	{
+		crateDrawable->setTerrainDecal(TERRAIN_DECAL_CRATE);
+		crateDrawable->setTerrainDecalSize(2.5f * crate->getGeometryInfo().getMajorRadius(),
+			2.5f * crate->getGeometryInfo().getMajorRadius());
+		crateDrawable->setTerrainDecalFadeTarget(1.0f, 0.03f);
+	}
 	return crate;
 }
 
