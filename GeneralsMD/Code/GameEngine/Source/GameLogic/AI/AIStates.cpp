@@ -3807,6 +3807,17 @@ StateReturnType AIAttackMoveToState::update()
 	Bool forceRetargetThisFrame = false;
 	Bool shouldRepathThisFrame = false;
 
+	if (isAttackMoveSpecialist(owner))
+	{
+		Object *specialTarget = findAttackMoveSpecialistTarget(owner, &m_goalPosition, m_commandSrc);
+		if (specialTarget && executeAttackMoveSpecialistAction(owner, specialTarget, m_commandSrc))
+			return STATE_CONTINUE;
+
+		// No legal local encounter: keep marching. Cash stealing is intentionally
+		// never considered here and remains a manual Black Lotus order.
+		return AIMoveToState::update();
+	}
+
 	JetAIUpdate *jetAI = ai->getJetAIUpdate();
 	if( jetAI && jetAI->isOutOfSpecialReloadAmmo() )
 	{
