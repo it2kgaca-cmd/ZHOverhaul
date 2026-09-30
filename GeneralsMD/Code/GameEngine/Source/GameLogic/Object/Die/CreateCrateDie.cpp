@@ -121,7 +121,8 @@ void CreateCrateDie::onDie( const DamageInfo * damageInfo )
 	// salvage. Administrative recycle/sell/delete never call onDie, so they stay
 	// excluded automatically.
 	const Bool glaOwnedVehicleSalvage =
-		me && me->isKindOf(KINDOF_VEHICLE) && me->getControllingPlayer() &&
+		me && me->isKindOf(KINDOF_VEHICLE) && !me->isKindOf(KINDOF_AIRCRAFT) &&
+		me->getControllingPlayer() &&
 		me->getControllingPlayer()->getBaseSide().compareNoCase("GLA") == 0 &&
 		getCreateCrateDieModuleData()->m_crateNameList.size() == 1 &&
 		getCreateCrateDieModuleData()->m_crateNameList.front().compareNoCase("SalvageCrateData") == 0;
