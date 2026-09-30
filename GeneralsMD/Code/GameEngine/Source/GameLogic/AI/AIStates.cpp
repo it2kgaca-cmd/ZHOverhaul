@@ -3647,7 +3647,7 @@ void AIAttackMoveToState::crc( Xfer *xfer )
 void AIAttackMoveToState::xfer( Xfer *xfer )
 {
   // version
-  XferVersion currentVersion = 2;
+  XferVersion currentVersion = 3;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
@@ -3657,6 +3657,13 @@ void AIAttackMoveToState::xfer( Xfer *xfer )
 	if (version>=2) {
 		xfer->xferUnsignedInt(&m_frameToSleepUntil);
 		xfer->xferInt(&m_retryCount);
+	}
+	if (version>=3) {
+		xfer->xferCoord3D(&m_specialistDestination);
+		xfer->xferBool(&m_specialistResumePending);
+	} else if (xfer->getXferMode() == XFER_LOAD) {
+		m_specialistDestination.zero();
+		m_specialistResumePending = FALSE;
 	}
 	xfer->xferSnapshot(m_attackMoveMachine);
 }
