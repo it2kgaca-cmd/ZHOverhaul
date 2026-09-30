@@ -132,6 +132,12 @@ void ControlBar::addCommonCommands( Drawable *draw, Bool firstDrawable )
 			command = commandSet->getCommandButton(i);
 #endif
 
+			// Script-only UNIT_BUILD entries are implementation/detail commands, not factory
+			// recipes.  Do not let grouped-factory support surface them.
+			if( command && command->getCommandType() == GUI_COMMAND_UNIT_BUILD &&
+					BitIsSet( command->getOptions(), SCRIPT_ONLY ) )
+				command = nullptr;
+
 			// Structures can expose commands that have meaningful group semantics. Selling a
 			// multi-selection is intentional: one click should sell every selected structure
 			// that exposes the common Sell command.
@@ -451,6 +457,11 @@ void ControlBar::updateContextMultiSelect()
 			Bool repeatActiveForObject = FALSE;
 			if (command->getCommandType() == GUI_COMMAND_UNIT_BUILD)
 			{
+				// Under-construction structures do not count as producers in aggregate
+				// availability or standing-repeat state.
+				if (obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ))
+					continue;
+
 				ProductionUpdateInterface *pu = obj->getProductionUpdateInterface();
 				const ThingTemplate *repeatThing = command->getThingTemplate();
 				if (pu && repeatThing)
