@@ -216,11 +216,6 @@ Bool ConvertToHijackedVehicleCrateCollide::executeCrateBehavior( Object *other )
 	HijackerUpdate *hijackerUpdate = (HijackerUpdate*)obj->findUpdateModule( key_HijackerUpdate );
 	if( hijackerUpdate )
 	{
-		// Specialist Attack Move stores its original destination on the Hijacker AI.
-		// Carry that intent into the captured vehicle before hiding the driver.
-		if( ai && ai->getLastCommandSource() == CMD_FROM_AI && ai->getGoalPosition() )
-			hijackerUpdate->setResumeAttackMoveDestination(ai->getGoalPosition());
-
 		hijackerUpdate->setTargetObject( other );
 		hijackerUpdate->setIsInVehicle( TRUE );
 		hijackerUpdate->setUpdate( TRUE );
