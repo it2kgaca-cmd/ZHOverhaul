@@ -72,8 +72,8 @@ Object *CreateCrateDie::createSalvageCrateForObject( Object *obj )
 
 	// SalvageCrateData has one deterministic crate entry. Reuse the same placement
 	// rules as CreateCrateDie without requiring a per-template die module.
-	const crateCreationEntry &entry = data->m_possibleCrates.front();
-	ThingTemplate const *crateType = TheThingFactory->findTemplate(entry.crateName);
+	crateCreationEntryConstIterator entry = data->m_possibleCrates.begin();
+	ThingTemplate const *crateType = TheThingFactory->findTemplate(entry->crateName);
 	if (!crateType)
 		return nullptr;
 
