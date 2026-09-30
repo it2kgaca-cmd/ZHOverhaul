@@ -248,7 +248,7 @@ CanMakeType ProductionUpdate::canQueueCreateUnit( const ThingTemplate *unitType 
 	// here as the authoritative simulation-side guard so malformed/replayed
 	// commands cannot bypass the control bar's producer filtering.
 	if( getObject()->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
-		return CANMAKE_UNBUILDABLE;
+		return CANMAKE_FACTORY_IS_DISABLED;
 
 	/// @todo srj -- this is horrible, but the "right" way to do it is to move
 	// ProductionUpdate to be part of ParkingPlaceBehavior, which I don't currently
