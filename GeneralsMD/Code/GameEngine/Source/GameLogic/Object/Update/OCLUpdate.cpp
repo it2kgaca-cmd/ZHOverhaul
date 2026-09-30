@@ -310,7 +310,7 @@ Int OCLUpdate::getSupplyManifestCost() const
 	return total;
 }
 
-CanMakeType OCLUpdate::canQueueUpgrade( const UpgradeTemplate *upgrade ) const
+CanMakeType OCLUpdate::canQueueUpgrade( const UpgradeTemplate * ) const
 {
 	return CANMAKE_NO_PREREQ;
 }
