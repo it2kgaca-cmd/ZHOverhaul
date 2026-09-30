@@ -3726,7 +3726,8 @@ static Object *findAttackMoveSpecialistTarget(Object *owner, const Coord3D *dest
 	if (range > 220.0f) range = 220.0f;
 	if (range < 100.0f) range = 100.0f;
 
-	PartitionFilterRelationship enemies(owner, PartitionFilterRelationship::ALLOW_ENEMIES);
+	PartitionFilterRelationship enemies(owner,
+		PartitionFilterRelationship::ALLOW_ENEMIES | PartitionFilterRelationship::ALLOW_NEUTRAL);
 	PartitionFilterAlive alive;
 	PartitionFilterOnMap onMap;
 	PartitionFilterStealthedAndUndetected visible(owner, false);
@@ -3743,22 +3744,17 @@ static Object *findAttackMoveSpecialistTarget(Object *owner, const Coord3D *dest
 
 	for (Object *target = iter->first(); target; target = iter->next())
 	{
-		// Attack Move should not immediately latch back onto a target whose
-		// hacking disable is already running. Manual abilities remain free to
-		// refresh/retarget according to their normal ActionManager rules.
-		if( target->isDisabledByType( DISABLED_HACKED ) )
-			continue;
-
 		Real dx = target->getPosition()->x - p->x;
 		Real dy = target->getPosition()->y - p->y;
 		Real along = dx*rx + dy*ry;
 		Real lateral = fabs(dx*ry - dy*rx);
 		if (along < -16.0f || along > range || lateral > 72.0f) continue;
 
+		const Bool alreadyHacked = target->isDisabledByType( DISABLED_HACKED );
 		if (TheActionManager->canHijackVehicle(owner,target,source) ||
 			TheActionManager->canSabotageBuilding(owner,target,source) ||
-			TheActionManager->canDisableBuildingViaHacking(owner,target,source) ||
-			TheActionManager->canDisableVehicleViaHacking(owner,target,source) ||
+			(!alreadyHacked && TheActionManager->canDisableBuildingViaHacking(owner,target,source)) ||
+			(!alreadyHacked && TheActionManager->canDisableVehicleViaHacking(owner,target,source)) ||
 			(owner->hasSpecialPower(SPECIAL_BLACKLOTUS_CAPTURE_BUILDING) && TheActionManager->canCaptureBuilding(owner,target,source)))
 			return target;
 	}
@@ -3788,9 +3784,10 @@ static Bool executeAttackMoveSpecialistAction(Object *owner, Object *target, con
 	}
 
 	SpecialPowerType type = SPECIAL_INVALID;
-	if (TheActionManager->canDisableBuildingViaHacking(owner,target,source))
+	const Bool alreadyHacked = target->isDisabledByType( DISABLED_HACKED );
+	if (!alreadyHacked && TheActionManager->canDisableBuildingViaHacking(owner,target,source))
 		type = SPECIAL_HACKER_DISABLE_BUILDING;
-	else if (TheActionManager->canDisableVehicleViaHacking(owner,target,source))
+	else if (!alreadyHacked && TheActionManager->canDisableVehicleViaHacking(owner,target,source))
 		type = SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK;
 	else if (owner->hasSpecialPower(SPECIAL_BLACKLOTUS_CAPTURE_BUILDING) && TheActionManager->canCaptureBuilding(owner,target,source))
 		type = SPECIAL_BLACKLOTUS_CAPTURE_BUILDING;
