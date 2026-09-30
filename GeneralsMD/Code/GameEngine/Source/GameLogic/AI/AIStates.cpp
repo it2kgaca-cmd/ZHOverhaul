@@ -3813,12 +3813,24 @@ StateReturnType AIAttackMoveToState::update()
 
 	if (isAttackMoveSpecialist(owner))
 	{
-		Object *specialTarget = findAttackMoveSpecialistTarget(owner, &m_goalPosition, m_commandSrc);
-		if (specialTarget && executeAttackMoveSpecialistAction(owner, specialTarget, m_commandSrc))
-			return STATE_CONTINUE;
+		// If a prior specialist interaction temporarily replaced our AI state
+		// (hacking/capture), resume the original Attack Move as soon as that action
+		// releases us. Hijackers are special: the infantry is hidden inside the
+		// captured vehicle, so continuation is transferred to that vehicle below.
+		if (m_specialistResumePending)
+		{
+			if (owner->testStatus(OBJECT_STATUS_MASKED))
+				return STATE_CONTINUE;
+			m_specialistResumePending = FALSE;
+		}
 
-		// No legal local encounter: keep marching. Cash stealing is intentionally
-		// never considered here and remains a manual Black Lotus order.
+		Object *specialTarget = findAttackMoveSpecialistTarget(owner, &m_specialistDestination, m_commandSrc);
+		if (specialTarget && executeAttackMoveSpecialistAction(owner, specialTarget, m_commandSrc))
+		{
+			m_specialistResumePending = TRUE;
+			return STATE_CONTINUE;
+		}
+
 		return AIMoveToState::update();
 	}
 
