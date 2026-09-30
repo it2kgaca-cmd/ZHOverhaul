@@ -100,11 +100,16 @@
 // Use RETAIL_COMPATIBLE_CRC and RETAIL_COMPATIBLE_XFER_SAVE to guard breaking changes.
 
 #ifndef RETAIL_COMPATIBLE_CRC
-#define RETAIL_COMPATIBLE_CRC (1) // Game is expected to be CRC compatible with retail Generals 1.08, Zero Hour 1.04
+// ZHOverhaul is an intentionally gameplay-incompatible fork.  Keeping this at retail
+// compatibility silently compiles out the overhaul systems that add simulation state
+// (Supply Drop manifests, contamination, rebuild-hole tunnel access rules, etc.).
+#define RETAIL_COMPATIBLE_CRC (0)
 #endif
 
 #ifndef RETAIL_COMPATIBLE_XFER_SAVE
-#define RETAIL_COMPATIBLE_XFER_SAVE (1) // Game is expected to be Xfer Save compatible with retail Generals 1.08, Zero Hour 1.04
+// The overhaul adds serialized state guarded alongside RETAIL_COMPATIBLE_CRC, so its
+// normal build must use the matching non-retail save layout as well.
+#define RETAIL_COMPATIBLE_XFER_SAVE (0)
 #endif
 
 // This is here to easily toggle between the retail compatible with fixed pathfinding fallback and pure fixed pathfinding mode
