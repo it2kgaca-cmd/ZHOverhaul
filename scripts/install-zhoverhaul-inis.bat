@@ -1,9 +1,9 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-rem Install only the INI files changed by ZHOverhaul since the stock Zero Hour
-rem gameplay-data import. Do NOT copy the entire GameData\INI source tree into
-rem the game installation: stock BIG archives continue to provide unchanged data.
+rem Install only the gameplay overrides/assets changed by ZHOverhaul since the
+rem stock Zero Hour data import. Do NOT copy the entire GameData tree into the
+rem game installation: stock BIG archives continue to provide unchanged data.
 
 set "BASE_DATA_COMMIT=6199e32a7750a6f4394aab02c2fd8b23c010e522"
 set "REPO_ROOT=%~dp0.."
@@ -36,7 +36,7 @@ if errorlevel 1 (
 )
 
 set /a COPIED=0
-for /f "usebackq delims=" %%F in (`git diff --diff-filter=ACMRT --name-only "%BASE_DATA_COMMIT%" HEAD -- "GameData/INI"`) do (
+for /f "usebackq delims=" %%F in (`git diff --diff-filter=ACMRT --name-only "%BASE_DATA_COMMIT%" HEAD -- "GameData/INI" "GameData/Art/Textures"`) do (
     set "SRC_REL=%%F"
     set "SRC_REL=!SRC_REL:/=\!"
     set "SRC=%REPO_ROOT%\!SRC_REL!"
@@ -77,6 +77,6 @@ for /f "usebackq delims=" %%F in (`git diff --diff-filter=ACMRT --name-only "%BA
 popd >nul
 
 echo.
-echo Installed !COPIED! ZHOverhaul INI override file(s).
+echo Installed !COPIED! ZHOverhaul gameplay override/asset file(s).
 echo Stock data continues to come from the game's BIG archives.
 exit /b 0
