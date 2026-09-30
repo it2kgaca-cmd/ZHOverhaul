@@ -161,6 +161,7 @@ SpecialAbilityUpdate::SpecialAbilityUpdate( Thing *thing, const ModuleData* modu
   m_doDisableFXParticles = TRUE;// true always, unless small unit causes it to toggle on-off
   m_resumeAttackMove = FALSE;
   m_attackMoveOneShotPersistent = FALSE;
+  m_resumeAttackMoveCommandSource = (Int)CMD_FROM_AI;
   m_resumeAttackMoveDestination.zero();
   setWakeFrame(getObject(), UPDATE_SLEEP_FOREVER);
 //  This is the althernate way to one-at-a-time BlackLotus' specials; we'll keep it commented her until Dustin decides, or until 12/10/02
@@ -406,11 +407,12 @@ UpdateSleepTime SpecialAbilityUpdate::update()
     // target resumes the original march instead of stranding the specialist.
     const Bool resumeAttackMove = m_resumeAttackMove;
     const Coord3D resumeDestination = m_resumeAttackMoveDestination;
+    const CommandSourceType resumeSource = (CommandSourceType)m_resumeAttackMoveCommandSource;
     if( !resumeAttackMove )
       ai->aiIdle( CMD_FROM_AI );
     onExit( false );
     if( resumeAttackMove && !getObject()->isEffectivelyDead() )
-      ai->aiAttackMoveToPosition( &resumeDestination, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+      ai->aiAttackMoveToPosition( &resumeDestination, NO_MAX_SHOTS_LIMIT, resumeSource );
     return calcSleepTime();
   }
 
@@ -592,6 +594,7 @@ Bool SpecialAbilityUpdate::initiateIntentToDoSpecialPower( const SpecialPowerTem
   // reattaches its continuation immediately after this intent is accepted.
   m_resumeAttackMove = FALSE;
   m_attackMoveOneShotPersistent = FALSE;
+  m_resumeAttackMoveCommandSource = (Int)CMD_FROM_AI;
   m_resumeAttackMoveDestination.zero();
 
   //Clear target values
@@ -1875,6 +1878,7 @@ void SpecialAbilityUpdate::finishAbility()
   const SpecialAbilityUpdateModuleData* data = getSpecialAbilityUpdateModuleData();
   const Bool resumeAttackMove = m_resumeAttackMove;
   const Coord3D resumeDestination = m_resumeAttackMoveDestination;
+  const CommandSourceType resumeSource = (CommandSourceType)m_resumeAttackMoveCommandSource;
 
   m_withinStartAbilityRange = false;
   m_packingState = STATE_NONE;
@@ -1974,7 +1978,7 @@ void SpecialAbilityUpdate::finishAbility()
 	{
 		AIUpdateInterface *ai = getObject()->getAIUpdateInterface();
 		if( ai )
-			ai->aiAttackMoveToPosition( &resumeDestination, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+			ai->aiAttackMoveToPosition( &resumeDestination, NO_MAX_SHOTS_LIMIT, resumeSource );
 	}
 }
 
@@ -2149,7 +2153,7 @@ void SpecialAbilityUpdate::xfer( Xfer *xfer )
 
 	// version
 #if !RETAIL_COMPATIBLE_XFER_SAVE
-	XferVersion currentVersion = 2;
+	XferVersion currentVersion = 3;
 #else
 	XferVersion currentVersion = 1;
 #endif
@@ -2210,11 +2214,16 @@ void SpecialAbilityUpdate::xfer( Xfer *xfer )
     xfer->xferBool( &m_resumeAttackMove );
     xfer->xferBool( &m_attackMoveOneShotPersistent );
     xfer->xferCoord3D( &m_resumeAttackMoveDestination );
+    if( version >= 3 )
+      xfer->xferInt( &m_resumeAttackMoveCommandSource );
+    else if( xfer->getXferMode() == XFER_LOAD )
+      m_resumeAttackMoveCommandSource = (Int)CMD_FROM_AI;
   }
   else if( xfer->getXferMode() == XFER_LOAD )
   {
     m_resumeAttackMove = FALSE;
     m_attackMoveOneShotPersistent = FALSE;
+    m_resumeAttackMoveCommandSource = (Int)CMD_FROM_AI;
     m_resumeAttackMoveDestination.zero();
   }
 #endif
