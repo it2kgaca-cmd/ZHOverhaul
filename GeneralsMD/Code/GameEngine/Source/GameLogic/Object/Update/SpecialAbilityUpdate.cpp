@@ -729,6 +729,7 @@ void SpecialAbilityUpdate::onExit( Bool cleanup )
   m_packingState = STATE_NONE;
   m_resumeAttackMove = FALSE;
   m_attackMoveOneShotPersistent = FALSE;
+  m_resumeAttackMoveCommandSource = (Int)CMD_FROM_AI;
   m_resumeAttackMoveDestination.zero();
 
 //  This is the althernate way to one-at-a-time BlackLotus' specials; we'll keep it commented her until Dustin decides, or until 12/10/02
