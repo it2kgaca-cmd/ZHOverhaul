@@ -2236,6 +2236,15 @@ void ControlBar::switchToContext( ControlBarContext context, Drawable *draw )
 		//---------------------------------------------------------------------------------------------
 		case CB_CONTEXT_COMMAND:
 		{
+#if !RETAIL_COMPATIBLE_CRC
+			static const NameKeyType key_OCLUpdate = NAMEKEY( "OCLUpdate" );
+			const Bool showSupplyDropTimer =
+				obj != nullptr &&
+				obj->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) &&
+				obj->findUpdateModule( key_OCLUpdate ) != nullptr;
+#else
+			const Bool showSupplyDropTimer = FALSE;
+#endif
 
 			// show or hide the right window groups
 			//m_contextParent[ CP_PURCHASE_SCIENCE ]->winHide( TRUE );
@@ -2243,12 +2252,16 @@ void ControlBar::switchToContext( ControlBarContext context, Drawable *draw )
 			m_contextParent[ CP_BUILD_QUEUE ]->winHide( TRUE );
 			m_contextParent[ CP_BEACON ]->winHide( TRUE );
 			m_contextParent[ CP_UNDER_CONSTRUCTION ]->winHide( TRUE );
-			m_contextParent[ CP_OCL_TIMER ]->winHide( TRUE );
+			m_contextParent[ CP_OCL_TIMER ]->winHide( showSupplyDropTimer ? FALSE : TRUE );
 			m_contextParent[ CP_OBSERVER_INFO ]->winHide( TRUE );
 			m_contextParent[ CP_OBSERVER_LIST ]->winHide( TRUE );
 
 			// fill the specific UI info
 			populateCommand( draw->getObject() );
+#if !RETAIL_COMPATIBLE_CRC
+			if( showSupplyDropTimer )
+				populateOCLTimer( obj );
+#endif
 
 			//
 			// for objects that are able to create units, we show a build queue if we actually

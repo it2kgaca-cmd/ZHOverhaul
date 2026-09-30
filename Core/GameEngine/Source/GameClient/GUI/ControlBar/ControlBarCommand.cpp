@@ -703,6 +703,16 @@ void ControlBar::updateContextCommand()
 	if( m_currentSelectedDrawable )
 		obj = m_currentSelectedDrawable->getObject();
 
+#if !RETAIL_COMPATIBLE_CRC
+	if( obj && obj->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) &&
+			m_contextParent[ CP_OCL_TIMER ]->winIsHidden() == FALSE )
+	{
+		static const NameKeyType key_OCLUpdate = NAMEKEY( "OCLUpdate" );
+		if( obj->findUpdateModule( key_OCLUpdate ) )
+			updateContextOCLTimer();
+	}
+#endif
+
 	//
 	// the contents of objects are usually showed on the UI, when those contents change
 	// we always to update the UI
@@ -1240,13 +1250,15 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 			if( player->canBuild( command->getThingTemplate() ) == FALSE )
 				return COMMAND_RESTRICTED;
 
-			CanMakeType makeType;
 #if !RETAIL_COMPATIBLE_CRC
 			if( obj->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) && pu )
-				makeType = pu->canQueueCreateUnit( command->getThingTemplate() );
-			else
+			{
+				if( pu->canQueueCreateUnit( command->getThingTemplate() ) != CANMAKE_OK )
+					return COMMAND_RESTRICTED;
+				break;
+			}
 #endif
-				makeType = TheBuildAssistant->canMakeUnit( obj, command->getThingTemplate() );
+			CanMakeType makeType = TheBuildAssistant->canMakeUnit( obj, command->getThingTemplate() );
 			if( makeType == CANMAKE_MAXED_OUT_FOR_PLAYER || makeType == CANMAKE_PARKING_PLACES_FULL )
 			{
 				//Disable the button if the player has a max amount of these units in build queue or existence.

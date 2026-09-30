@@ -136,6 +136,99 @@ OCLUpdate::~OCLUpdate()
 static const Int SUPPLY_DROP_MANIFEST_BUDGET = 1500;
 static const UnsignedInt SUPPLY_DROP_MANIFEST_MAX_ENTRIES = 9;
 
+static Bool isSupplyManifestRosterUnit( const PlayerTemplate *playerTemplate, const ThingTemplate *unitType )
+{
+	if( playerTemplate == nullptr || unitType == nullptr )
+		return FALSE;
+
+	static const char *const baseRoster[] =
+	{
+		"AmericaInfantryRanger",
+		"AmericaInfantryMissileDefender",
+		"AmericaInfantryPathfinder",
+		"AmericaTankCrusader",
+		"AmericaVehicleTomahawk",
+		"AmericaVehicleHumvee",
+		"AmericaVehicleMedic",
+		"AmericaTankPaladin",
+		"AmericaVehicleSentryDrone",
+		"AmericaTankAvenger",
+		"AmericaTankMicrowave"
+	};
+	static const char *const airForceRoster[] =
+	{
+		"AirF_AmericaInfantryRanger",
+		"AirF_AmericaInfantryMissileDefender",
+		"AirF_AmericaInfantryPathfinder",
+		"AirF_AmericaVehicleTomahawk",
+		"AirF_AmericaVehicleHumvee",
+		"AirF_AmericaVehicleMedic",
+		"AirF_AmericaVehicleSentryDrone",
+		"AirF_AmericaTankAvenger",
+		"AirF_AmericaTankMicrowave"
+	};
+	static const char *const laserRoster[] =
+	{
+		"Lazr_AmericaInfantryRanger",
+		"Lazr_AmericaInfantryMissileDefender",
+		"Lazr_AmericaInfantryPathfinder",
+		"Lazr_AmericaTankCrusader",
+		"Lazr_AmericaVehicleHumvee",
+		"Lazr_AmericaVehicleMedic",
+		"Lazr_AmericaVehicleSentryDrone",
+		"Lazr_AmericaTankAvenger",
+		"Lazr_AmericaTankMicrowave"
+	};
+	static const char *const superWeaponRoster[] =
+	{
+		"SupW_AmericaInfantryRanger",
+		"SupW_AmericaInfantryMissileDefender",
+		"SupW_AmericaInfantryPathfinder",
+		"SupW_AmericaVehicleTomahawk",
+		"SupW_AmericaVehicleHumvee",
+		"SupW_AmericaVehicleMedic",
+		"SupW_AmericaVehicleSentryDrone",
+		"SupW_AmericaTankAvenger",
+		"SupW_AmericaTankMicrowave"
+	};
+
+	const char *const *roster = nullptr;
+	UnsignedInt rosterCount = 0;
+	const AsciiString& side = playerTemplate->getSide();
+	if( side.compareNoCase( "America" ) == 0 )
+	{
+		roster = baseRoster;
+		rosterCount = sizeof( baseRoster ) / sizeof( baseRoster[0] );
+	}
+	else if( side.compareNoCase( "AmericaAirForceGeneral" ) == 0 )
+	{
+		roster = airForceRoster;
+		rosterCount = sizeof( airForceRoster ) / sizeof( airForceRoster[0] );
+	}
+	else if( side.compareNoCase( "AmericaLaserGeneral" ) == 0 )
+	{
+		roster = laserRoster;
+		rosterCount = sizeof( laserRoster ) / sizeof( laserRoster[0] );
+	}
+	else if( side.compareNoCase( "AmericaSuperWeaponGeneral" ) == 0 )
+	{
+		roster = superWeaponRoster;
+		rosterCount = sizeof( superWeaponRoster ) / sizeof( superWeaponRoster[0] );
+	}
+	else
+	{
+		return FALSE;
+	}
+
+	const AsciiString& unitName = unitType->getName();
+	for( UnsignedInt i = 0; i < rosterCount; ++i )
+	{
+		if( unitName.compareNoCase( roster[i] ) == 0 )
+			return TRUE;
+	}
+	return FALSE;
+}
+
 static Bool attachSupplyDropPayload( Object *transport, Object *payload, const char *containerTemplateName, const Coord3D& startPos )
 {
 	if( transport == nullptr || payload == nullptr )
@@ -192,7 +285,14 @@ Bool OCLUpdate::isEligibleSupplyManifestUnit( const ThingTemplate *unitType ) co
 		return FALSE;
 
 	Player *player = getObject()->getControllingPlayer();
-	if( player == nullptr || !player->isPlayableSide() || !player->canBuild( unitType ) )
+	if( player == nullptr || !player->isPlayableSide() )
+		return FALSE;
+
+	const PlayerTemplate *playerTemplate = player->getPlayerTemplate();
+	if( !isSupplyManifestRosterUnit( playerTemplate, unitType ) )
+		return FALSE;
+
+	if( !player->canBuild( unitType ) )
 		return FALSE;
 
 	return TRUE;
@@ -598,14 +698,16 @@ void OCLUpdate::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 2: Supply Drop manifest plus serialized unique-ID counter
+	* 3: Supply Drop manifest with deterministic IDs derived from queue state */
 // ------------------------------------------------------------------------------------------------
 void OCLUpdate::xfer( Xfer *xfer )
 {
 
 	// version
 #if !RETAIL_COMPATIBLE_CRC && !RETAIL_COMPATIBLE_XFER_SAVE
-	XferVersion currentVersion = 2;
+	XferVersion currentVersion = 3;
 #else
 	XferVersion currentVersion = 1;
 #endif
@@ -663,6 +765,15 @@ void OCLUpdate::xfer( Xfer *xfer )
 				entry->m_exitDoor = DOOR_NONE_AVAILABLE;
 				appendManifestEntry( entry );
 			}
+		}
+
+		// v2 briefly serialized a mutable manifest ID counter. v3 derives IDs from
+		// the queue, but old v2 saves still need this field consumed to keep the
+		// module stream aligned.
+		if( version == 2 && xfer->getXferMode() == XFER_LOAD )
+		{
+			ProductionID legacyUniqueID = PRODUCTIONID_INVALID;
+			xfer->xferUser( &legacyUniqueID, sizeof( ProductionID ) );
 		}
 	}
 #endif

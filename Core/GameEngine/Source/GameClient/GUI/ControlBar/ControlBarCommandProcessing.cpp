@@ -581,7 +581,11 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			// Multi-factory commands defer ID generation to authoritative game logic so
 			// live play and replay consume exactly the same per-factory ID sequence.
 			ProductionID productionID = PRODUCTIONID_INVALID;
-			if (m_currContext != CB_CONTEXT_MULTI_SELECT)
+			if (m_currContext != CB_CONTEXT_MULTI_SELECT
+#if !RETAIL_COMPATIBLE_CRC
+					&& !factory->isKindOf( KINDOF_FS_SUPPLY_DROPZONE )
+#endif
+					)
 				productionID = pu->requestUniqueUnitID();
 
 			GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_QUEUE_UNIT_CREATE );
