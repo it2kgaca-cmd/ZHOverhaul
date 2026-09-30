@@ -55,6 +55,45 @@ CreateCrateDie::~CreateCrateDie()
 {
 }
 
+Bool CreateCrateDie::isSalvageCrateDie() const
+{
+	const AsciiStringList &names = getCreateCrateDieModuleData()->m_crateNameList;
+	return names.size() == 1 && names.front().compareNoCase("SalvageCrateData") == 0;
+}
+
+Object *CreateCrateDie::createSalvageCrateForObject( Object *obj )
+{
+	if (!obj)
+		return nullptr;
+
+	const CrateTemplate *data = TheCrateSystem->findCrateTemplate("SalvageCrateData");
+	if (!data || data->m_possibleCrates.empty())
+		return nullptr;
+
+	// SalvageCrateData has one deterministic crate entry. Reuse the same placement
+	// rules as CreateCrateDie without requiring a per-template die module.
+	const crateCreationEntry &entry = data->m_possibleCrates.front();
+	ThingTemplate const *crateType = TheThingFactory->findTemplate(entry.crateName);
+	if (!crateType)
+		return nullptr;
+
+	Coord3D center = *obj->getPosition();
+	Coord3D pos = center;
+	FindPositionOptions fp;
+	fp.minRadius = 0.0f;
+	fp.maxRadius = 5.0f;
+	fp.relationshipObject = obj;
+	fp.flags = FPF_IGNORE_ALLY_OR_NEUTRAL_UNITS;
+	if (obj->getLayer() == LAYER_GROUND)
+		ThePartitionManager->findPositionAround(&center, &fp, &pos);
+
+	Object *crate = TheThingFactory->newObject(crateType, nullptr);
+	crate->setPosition(&pos);
+	crate->setOrientation(GameLogicRandomValueReal(0, 2*PI));
+	crate->setLayer(obj->getLayer());
+	return crate;
+}
+
 void CreateCrateDieModuleData::parseCrateData( INI* ini, void *instance, void * /*store*/, const void* /*userData*/ )
 {
 	CreateCrateDieModuleData* self = (CreateCrateDieModuleData*)instance;
