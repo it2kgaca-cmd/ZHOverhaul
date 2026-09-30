@@ -43,8 +43,10 @@ class CreateCrateDieModuleData : public DieModuleData
 {
 public:
 	AsciiStringList m_crateNameList;
+	Bool m_allowAlliedKiller;
 
-	CreateCrateDieModuleData()
+	CreateCrateDieModuleData() :
+		m_allowAlliedKiller( FALSE )
 	{
 		m_crateNameList.clear();
 	}
@@ -60,6 +62,7 @@ public:
 		static const FieldParse dataFieldParse[] =
 		{
 			{ "CrateData",	CreateCrateDieModuleData::parseCrateData,		nullptr, 0 },
+			{ "AllowAlliedKiller", INI::parseBool, nullptr, offsetof( CreateCrateDieModuleData, m_allowAlliedKiller ) },
 			{ 0, 0, 0, 0 }
 		};
     p.add(dataFieldParse);

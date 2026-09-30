@@ -76,8 +76,9 @@ void CreateCrateDie::onDie( const DamageInfo * damageInfo )
 	Object *killer = TheGameLogic->findObjectByID( damageInfo->in.m_sourceID );
 	Object *me = getObject();
 
-	if( killer && killer->getRelationship( me ) == ALLIES )
-		return; //Nope, no crate for killing ally at all.
+	if( killer && killer->getRelationship( me ) == ALLIES &&
+			!getCreateCrateDieModuleData()->m_allowAlliedKiller )
+		return; // Stock behavior: no crate for killing an ally unless this die module opts in.
 
 	for( AsciiStringListConstIterator iter = getCreateCrateDieModuleData()->m_crateNameList.begin();
 				iter != getCreateCrateDieModuleData()->m_crateNameList.end();
