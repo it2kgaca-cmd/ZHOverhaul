@@ -1923,13 +1923,17 @@ void ControlBar::evaluateContextUI()
 			}
 			else if( update
 #if !RETAIL_COMPATIBLE_CRC
-					&& !(obj->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) && obj->getCommandSetString().isNotEmpty())
+					&& !obj->isKindOf( KINDOF_FS_SUPPLY_DROPZONE )
 #endif
 					)
 			{
 				switchToContext( CB_CONTEXT_OCL_TIMER, drawToEvaluateFor );
 			}
-			else if( obj->getCommandSetString().isEmpty() == FALSE )
+			else if(
+#if !RETAIL_COMPATIBLE_CRC
+					obj->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) ||
+#endif
+					obj->getCommandSetString().isEmpty() == FALSE )
 			{
 
 				switchToContext( CB_CONTEXT_COMMAND, drawToEvaluateFor );

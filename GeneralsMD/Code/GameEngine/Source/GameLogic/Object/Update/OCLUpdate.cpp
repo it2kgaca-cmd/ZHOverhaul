@@ -494,7 +494,10 @@ Bool OCLUpdate::deliverSupplyManifest( const Coord3D& edgePoint )
 	const Int cashRemainder = SUPPLY_DROP_MANIFEST_BUDGET - spent;
 	if( cashRemainder > 0 )
 	{
-		const ThingTemplate *cashTemplate = TheThingFactory->findTemplate( "SupplyDropManifestCashCrate" );
+		// Reuse the stock crate template so manifest delivery does not depend on an
+		// overhaul-only Crate.ini being installed. MoneyCrateCollide supplies the
+		// exact remainder value at runtime.
+		const ThingTemplate *cashTemplate = TheThingFactory->findTemplate( "SupplyDropZoneCrate" );
 		if( cashTemplate )
 		{
 			Object *cash = TheThingFactory->newObject( cashTemplate, player->getDefaultTeam() );
