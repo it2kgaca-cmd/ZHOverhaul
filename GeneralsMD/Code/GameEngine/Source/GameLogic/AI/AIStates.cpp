@@ -3750,7 +3750,7 @@ static Object *findAttackMoveSpecialistTarget(Object *owner, const Coord3D *dest
 			TheActionManager->canSabotageBuilding(owner,target,source) ||
 			TheActionManager->canDisableBuildingViaHacking(owner,target,source) ||
 			TheActionManager->canDisableVehicleViaHacking(owner,target,source) ||
-			TheActionManager->canCaptureBuilding(owner,target,source))
+			(owner->hasSpecialPower(SPECIAL_BLACKLOTUS_CAPTURE_BUILDING) && TheActionManager->canCaptureBuilding(owner,target,source)))
 			return target;
 	}
 	return nullptr;
@@ -3783,7 +3783,7 @@ static Bool executeAttackMoveSpecialistAction(Object *owner, Object *target, Com
 		type = SPECIAL_HACKER_DISABLE_BUILDING;
 	else if (TheActionManager->canDisableVehicleViaHacking(owner,target,source))
 		type = SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK;
-	else if (TheActionManager->canCaptureBuilding(owner,target,source))
+	else if (owner->hasSpecialPower(SPECIAL_BLACKLOTUS_CAPTURE_BUILDING) && TheActionManager->canCaptureBuilding(owner,target,source))
 		type = SPECIAL_BLACKLOTUS_CAPTURE_BUILDING;
 
 	if (type != SPECIAL_INVALID)
