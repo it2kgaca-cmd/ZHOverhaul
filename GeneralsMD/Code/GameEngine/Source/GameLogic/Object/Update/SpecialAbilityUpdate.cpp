@@ -2148,7 +2148,11 @@ void SpecialAbilityUpdate::xfer( Xfer *xfer )
 {
 
 	// version
+#if !RETAIL_COMPATIBLE_XFER_SAVE
+	XferVersion currentVersion = 2;
+#else
 	XferVersion currentVersion = 1;
+#endif
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -2199,6 +2203,21 @@ void SpecialAbilityUpdate::xfer( Xfer *xfer )
 
   // capture flash phase
   xfer->xferReal( &m_captureFlashPhase );
+
+#if !RETAIL_COMPATIBLE_XFER_SAVE
+  if( version >= 2 )
+  {
+    xfer->xferBool( &m_resumeAttackMove );
+    xfer->xferBool( &m_attackMoveOneShotPersistent );
+    xfer->xferCoord3D( &m_resumeAttackMoveDestination );
+  }
+  else if( xfer->getXferMode() == XFER_LOAD )
+  {
+    m_resumeAttackMove = FALSE;
+    m_attackMoveOneShotPersistent = FALSE;
+    m_resumeAttackMoveDestination.zero();
+  }
+#endif
 
 }
 
