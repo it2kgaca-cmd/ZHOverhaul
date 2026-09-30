@@ -3764,8 +3764,6 @@ static Bool executeAttackMoveSpecialistAction(Object *owner, Object *target, Com
 		AIUpdateInterface *ai = owner->getAIUpdateInterface();
 		if (ai)
 		{
-			// Preserve the original destination through the enter/hijack state.
-			ai->friend_setRequestedDestination(*ai->getGoalPosition());
 			ai->aiEnter(target, CMD_FROM_AI);
 		}
 		return ai != nullptr;
