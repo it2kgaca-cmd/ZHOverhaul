@@ -76,9 +76,20 @@ void CreateCrateDie::onDie( const DamageInfo * damageInfo )
 	Object *killer = TheGameLogic->findObjectByID( damageInfo->in.m_sourceID );
 	Object *me = getObject();
 
-	if( killer && killer->getRelationship( me ) == ALLIES &&
+	// ZHOverhaul salvage rule: if the dying object is currently owned by a GLA
+	// player and this module is the standard SalvageCrateData, the battlefield
+	// death itself is sufficient. Killer allegiance/type/science no longer gates
+	// salvage. Administrative recycle/sell/delete never call onDie, so they stay
+	// excluded automatically.
+	const Bool glaOwnedVehicleSalvage =
+		me && me->isKindOf(KINDOF_VEHICLE) && me->getControllingPlayer() &&
+		me->getControllingPlayer()->getBaseSide().compareNoCase("GLA") == 0 &&
+		getCreateCrateDieModuleData()->m_crateNameList.size() == 1 &&
+		getCreateCrateDieModuleData()->m_crateNameList.front().compareNoCase("SalvageCrateData") == 0;
+
+	if( !glaOwnedVehicleSalvage && killer && killer->getRelationship( me ) == ALLIES &&
 			!getCreateCrateDieModuleData()->m_allowAlliedKiller )
-		return; // Stock behavior: no crate for killing an ally unless this die module opts in.
+		return;
 
 	for( AsciiStringListConstIterator iter = getCreateCrateDieModuleData()->m_crateNameList.begin();
 				iter != getCreateCrateDieModuleData()->m_crateNameList.end();
@@ -94,11 +105,13 @@ void CreateCrateDie::onDie( const DamageInfo * damageInfo )
 			if( (currentCrateData->m_veterancyLevel != LEVEL_INVALID) && ! testVeterancyLevel( currentCrateData ) )
 				continue; //If this is set up to test and it fails
 
-			if( KINDOFMASK_ANY_SET(currentCrateData->m_killedByTypeKindof) && !testKillerType( currentCrateData, killer ) )
-				continue; //If this is set up to test and it fails
+			if( !glaOwnedVehicleSalvage &&
+					KINDOFMASK_ANY_SET(currentCrateData->m_killedByTypeKindof) && !testKillerType( currentCrateData, killer ) )
+				continue;
 
-			if( (currentCrateData->m_killerScience != SCIENCE_INVALID)  &&  !testKillerScience( currentCrateData, killer ) )
-				continue; //If this is set up to test and it fails
+			if( !glaOwnedVehicleSalvage &&
+					(currentCrateData->m_killerScience != SCIENCE_INVALID) && !testKillerScience( currentCrateData, killer ) )
+				continue;
 
 			Object *crate = createCrate( currentCrateData );//Make the crate
 			if( crate )
