@@ -76,9 +76,11 @@ public:
 	Object* getTargetObject() const;
 	void setUpdate(Bool u ) {m_update = u;}
 	void setIsInVehicle(Bool i ) {m_isInVehicle = i;}
-	void setResumeAttackMoveDestination(const Coord3D *pos) { if(pos){ m_resumeAttackMoveDestination=*pos; m_resumeAttackMove=TRUE; } }
+	void setResumeAttackMoveDestination(const Coord3D *pos, Int commandSource) { if(pos){ m_resumeAttackMoveDestination=*pos; m_resumeAttackMoveCommandSource=commandSource; m_resumeAttackMove=TRUE; } }
 	Bool hasResumeAttackMoveDestination() const { return m_resumeAttackMove; }
 	const Coord3D *getResumeAttackMoveDestination() const { return &m_resumeAttackMoveDestination; }
+	Int getResumeAttackMoveCommandSource() const { return m_resumeAttackMoveCommandSource; }
+	void clearResumeAttackMoveDestination() { m_resumeAttackMove=FALSE; m_resumeAttackMoveCommandSource=0; m_resumeAttackMoveDestination.zero(); }
 
 private:
 
@@ -88,6 +90,7 @@ private:
 	Bool		 m_isInVehicle;
 	Bool		 m_wasTargetAirborne;
 	Bool		 m_resumeAttackMove;
+	Int			 m_resumeAttackMoveCommandSource;
 	Coord3D	 m_resumeAttackMoveDestination;
 
 //	DieModuleInterface *m_ejectPilotDMI; // point to ejectpilotdiemodule
