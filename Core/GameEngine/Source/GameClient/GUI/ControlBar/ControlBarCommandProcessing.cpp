@@ -136,6 +136,10 @@ static Drawable *findAvailableSelectedProducerFor( const ThingTemplate *whatToBu
 		if (candidate == nullptr || !candidate->isLocallyControlled())
 			continue;
 
+		// Never route a mass-production order into an unfinished factory.
+		if (candidate->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ))
+			continue;
+
 		ProductionUpdateInterface *pu = candidate->getProductionUpdateInterface();
 		if (pu == nullptr)
 			continue;
