@@ -2650,12 +2650,21 @@ void AIUpdateInterface::destroyPath()
  */
 void AIUpdateInterface::friend_startingMove()
 {
+	const Bool continuingMove = m_isMoving;
+
 	m_movementComplete = FALSE; // we aren't finished moving.
 	m_isMoving = TRUE;
 	m_blockedFrames = 0;
 	m_groundTerrainEscapeActive = FALSE;
 	m_groundTerrainEscapeUntil = 0;
-	m_groundSafeAnchorValid = FALSE;
+
+	// This method is called both for a brand-new order and for repaths inside an
+	// existing move.  Preserve the last legal terrain anchor across a repath;
+	// clearing it while already wedged throws away the one position we know the
+	// unit can safely retreat toward.
+	if (!continuingMove)
+		m_groundSafeAnchorValid = FALSE;
+
 	if (isDoingGroundMovement())
 		refreshGroundSafeAnchor();
 	m_trafficDisplaced = FALSE;
@@ -2860,46 +2869,18 @@ Bool AIUpdateInterface::isValidLocomotorPosition(const Coord3D* pos) const
 }
 
 //-------------------------------------------------------------------------------------------------
-// Keep a retreat anchor only where the whole local footprint has breathing room.  A merely legal
-// center point at the lip of water or a cliff is not a useful escape target.  Cardinal clearance
-// probes intentionally make narrow ramps conservative: while crossing a tight ramp we retain the
-// last genuinely roomy anchor instead of "learning" the dangerous edge as safe.
+// Keep the most recent position that is legal for this locomotor.  Recovery needs a
+// nearby point behind the unit, not an arbitrarily distant "roomy" point.  The previous
+// four-direction clearance test made narrow ramps retain an anchor from before the ramp,
+// so a one-second escape could time out while still wedged.  Locomotor-aware legality
+// already preserves cliff-capable units: a cliff is a valid anchor for them and invalid
+// for ordinary ground units.
 Bool AIUpdateInterface::isGroundSafeAnchorPosition(const Coord3D& pos) const
 {
 	if (!isDoingGroundMovement() || m_curLocomotor == nullptr)
 		return FALSE;
 
-	if (!isValidLocomotorPosition(&pos))
-		return FALSE;
-
-	Real footprint = getObject()->getGeometryInfo().getBoundingCircleRadius();
-	if (footprint < 2.0f)
-		footprint = 2.0f;
-
-	Real clearance = footprint * 0.65f;
-	if (clearance < PATHFIND_CELL_SIZE_F * 0.30f)
-		clearance = PATHFIND_CELL_SIZE_F * 0.30f;
-	if (clearance > PATHFIND_CELL_SIZE_F * 0.90f)
-		clearance = PATHFIND_CELL_SIZE_F * 0.90f;
-
-	Coord3D probe = pos;
-	probe.x += clearance;
-	if (!isValidLocomotorPosition(&probe))
-		return FALSE;
-	probe = pos;
-	probe.x -= clearance;
-	if (!isValidLocomotorPosition(&probe))
-		return FALSE;
-	probe = pos;
-	probe.y += clearance;
-	if (!isValidLocomotorPosition(&probe))
-		return FALSE;
-	probe = pos;
-	probe.y -= clearance;
-	if (!isValidLocomotorPosition(&probe))
-		return FALSE;
-
-	return TRUE;
+	return isValidLocomotorPosition(&pos);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3191,7 +3172,7 @@ UpdateSleepTime AIUpdateInterface::doLocomotor()
 				if (canEscape)
 				{
 					m_groundTerrainEscapeActive = TRUE;
-					m_groundTerrainEscapeUntil = TheGameLogic->getFrame() + LOGICFRAMES_PER_SECOND;
+					m_groundTerrainEscapeUntil = TheGameLogic->getFrame() + 2 * LOGICFRAMES_PER_SECOND;
 					m_isBlocked = FALSE;
 					m_isBlockedAndStuck = FALSE;
 				}

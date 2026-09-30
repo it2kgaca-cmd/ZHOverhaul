@@ -990,12 +990,25 @@ void Locomotor::locoUpdate_moveTowardsPosition(Object* obj, const Coord3D& goalP
 			!TheAI->pathfinder()->validMovementTerrain(obj->getLayer(), this, obj->getPosition()) &&
 			!getFlag(ALLOW_INVALID_POSITION))
 	{
-		// Somehow, we have gotten to an invalid location.
+		// We are already standing on terrain this locomotor cannot use.  Always tell
+		// the AI that movement is blocked; the old correction-force path returned
+		// early without doing so, leaving the move state unaware that it needed to
+		// escape/repath and allowing units to sit forever on a cliff/water lip.
+		*blocked = true;
+
 		if (fixInvalidPosition(obj, physics))
 		{
-			// the we adjusted us toward a legal position, so just return.
+			// The corrective force may get us out this frame, but keeping 'blocked'
+			// asserted lets sustained failures graduate into terrain recovery.
 			return;
 		}
+
+		// Dozers intentionally skip fixInvalidPosition(), and a correction can also
+		// fail when the surrounding cells are ambiguous.  Do not drive farther into
+		// illegal terrain; the AIUpdate safe-anchor recovery will handle the retreat.
+		physics->scrubVelocity2D(0);
+		handleBehaviorZ(obj, physics, goalPos);
+		return;
 	}
 
 	// If the actual distance is farther, then use the actual distance so we get there.

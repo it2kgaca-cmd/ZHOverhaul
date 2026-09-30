@@ -848,8 +848,8 @@ private:
 	Bool				m_movementComplete;					///< True if we finished an AIInternalMoveToState.
 	Bool				m_isMoving;									///< True if we are in an AIInternalMoveToState.
 	Bool				m_isBlocked;
-	Bool				m_groundSafeAnchorValid;		///< Last position with footprint clearance from incompatible terrain.
-	Coord3D			m_groundSafeAnchor;			///< Retreat point used when a cliff/shore approach wedges the unit.
+	Bool				m_groundSafeAnchorValid;		///< Last locomotor-legal ground position, preserved across repaths.
+	Coord3D			m_groundSafeAnchor;			///< Nearby retreat point used when a cliff/shore approach wedges the unit.
 	Bool				m_groundTerrainEscapeActive;	///< Temporarily back out before asking the pathfinder to retry.
 	UnsignedInt	m_groundTerrainEscapeUntil;	///< Safety timeout for the local retreat.
 	Bool				m_trafficDisplaced;				///< Idle unit has been locally pushed aside by friendly traffic.
