@@ -3820,21 +3820,9 @@ StateReturnType AIAttackMoveToState::update()
 
 	if (isAttackMoveSpecialist(owner))
 	{
-		// If a prior specialist interaction temporarily replaced our AI state
-		// (hacking/capture), resume the original Attack Move as soon as that action
-		// releases us. Hijackers are special: the infantry is hidden inside the
-		// captured vehicle, so continuation is transferred to that vehicle below.
-		if (m_specialistResumePending)
-		{
-			if (owner->testStatus(OBJECT_STATUS_MASKED))
-				return STATE_CONTINUE;
-			m_specialistResumePending = FALSE;
-		}
-
 		Object *specialTarget = findAttackMoveSpecialistTarget(owner, &m_specialistDestination, m_commandSrc);
 		if (specialTarget && executeAttackMoveSpecialistAction(owner, specialTarget, m_commandSrc))
 		{
-			m_specialistResumePending = TRUE;
 			return STATE_CONTINUE;
 		}
 
