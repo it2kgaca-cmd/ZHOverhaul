@@ -63,6 +63,7 @@
 #include "GameLogic/ExperienceTracker.h"
 #include "GameLogic/FiringTracker.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/CrateSystem.h"
 #include "GameLogic/Locomotor.h"
 
 #include "GameLogic/Module/AIUpdate.h"
@@ -71,6 +72,7 @@
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/CollideModule.h"
 #include "GameLogic/Module/ContainModule.h"
+#include "GameLogic/Module/CreateCrateDie.h"
 #include "GameLogic/Module/CountermeasuresBehavior.h"
 #include "GameLogic/Module/CreateModule.h"
 #include "GameLogic/Module/DamageModule.h"
@@ -4682,11 +4684,25 @@ void Object::onDie( DamageInfo *damageInfo )
 	Bool selfInflicted = (damageInfo->in.m_sourceID == getID());
 
 	// FIRST, call our die modules.
+	Bool hasSalvageDie = FALSE;
 	for (BehaviorModule** d = m_behaviors; *d; ++d)
 	{
+		CreateCrateDie *crateDie = dynamic_cast<CreateCrateDie*>(*d);
+		if (crateDie && crateDie->isSalvageCrateDie())
+			hasSalvageDie = TRUE;
+
 		DieModuleInterface* die = (*d)->getDie();
 		if (die)
 			die->onDie(damageInfo);
+	}
+
+	// Hijacker-captured foreign vehicles do not carry GLA's INI CreateCrateDie,
+	// so attach the standard salvage result at the common battlefield-death
+	// boundary. Native GLA vehicles already handled above are not duplicated.
+	if (!hasSalvageDie && isKindOf(KINDOF_VEHICLE) && getControllingPlayer() &&
+			getControllingPlayer()->getBaseSide().compareNoCase("GLA") == 0)
+	{
+		CreateCrateDie::createSalvageCrateForObject(this);
 	}
 
 	// When objects die we remove from the radar as they're really not interesting anymore
