@@ -3730,8 +3730,6 @@ void AIUpdateInterface::privateMoveToPosition( const Coord3D *pos, CommandSource
  */
 void AIUpdateInterface::privateMoveToObject( Object *obj, CommandSourceType cmdSource )
 {
-	getObject()->releaseWeaponLock( LOCKED_PERMANENTLY );
-	getObject()->releaseWeaponLock( LOCKED_TEMPORARILY );
 	// the dead don't listen very well
 	if (m_isAiDead)
 		return;
