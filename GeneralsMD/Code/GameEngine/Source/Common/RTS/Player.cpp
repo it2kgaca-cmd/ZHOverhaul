@@ -3487,6 +3487,75 @@ Real Player::getBattlePlanStrengthScalar() const
 }
 
 //-------------------------------------------------------------------------------------------------
+struct PropagandaCenterCountData
+{
+	Int count;
+};
+
+static void countCompletedPropagandaCenters( Object *obj, void *userData )
+{
+	PropagandaCenterCountData *data = static_cast<PropagandaCenterCountData*>(userData);
+	if( obj == nullptr || data == nullptr || obj->isEffectivelyDead() )
+		return;
+	if( obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) || obj->testStatus( OBJECT_STATUS_SOLD ) )
+		return;
+
+	const char *name = obj->getTemplate()->getName().str();
+	if( name != nullptr && strstr(name, "PropagandaCenter") != nullptr )
+		++data->count;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real Player::getPropagandaBonusStrengthScalar() const
+{
+#if RETAIL_COMPATIBLE_CRC
+	return 1.0f;
+#else
+	// This is derived rather than serialized: captures, reconstruction, save/load and
+	// every General variant all resolve automatically.  Cache it for this logic frame
+	// because weapon bonus evaluation can be very hot.
+	static Bool cacheInitialized = FALSE;
+	static UnsignedInt cachedFrame[MAX_PLAYER_COUNT];
+	static Real cachedScalar[MAX_PLAYER_COUNT];
+	if( !cacheInitialized )
+	{
+		for( Int i = 0; i < MAX_PLAYER_COUNT; ++i )
+		{
+			cachedFrame[i] = 0xffffffffu;
+			cachedScalar[i] = 1.0f;
+		}
+		cacheInitialized = TRUE;
+	}
+
+	const Int index = getPlayerIndex();
+	const UnsignedInt now = TheGameLogic ? TheGameLogic->getFrame() : 0;
+	if( index >= 0 && index < MAX_PLAYER_COUNT && cachedFrame[index] == now )
+		return cachedScalar[index];
+
+	PropagandaCenterCountData data;
+	data.count = 0;
+	iterateObjects( countCompletedPropagandaCenters, &data );
+
+	// Each Center strengthens the BONUS, not raw stats:
+	// +15%, +12%, +9%, +6%, then +3% for every additional Center.
+	Real extra = 0.0f;
+	if( data.count >= 1 ) extra += 0.15f;
+	if( data.count >= 2 ) extra += 0.12f;
+	if( data.count >= 3 ) extra += 0.09f;
+	if( data.count >= 4 ) extra += 0.06f;
+	if( data.count >= 5 ) extra += 0.03f * (data.count - 4);
+
+	const Real result = 1.0f + extra;
+	if( index >= 0 && index < MAX_PLAYER_COUNT )
+	{
+		cachedFrame[index] = now;
+		cachedScalar[index] = result;
+	}
+	return result;
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
 void Player::changeBattlePlan( BattlePlanStatus plan, Int delta, const BattlePlanBonusesData *bonus )
 {
 	if( bonus == nullptr || delta == 0 )

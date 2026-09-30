@@ -1947,13 +1947,39 @@ void Weapon::computeBonus(const Object *source, WeaponBonusConditionFlags extraB
 		(1u << WEAPONBONUSCONDITION_BATTLEPLAN_BOMBARDMENT) |
 		(1u << WEAPONBONUSCONDITION_BATTLEPLAN_HOLDTHELINE) |
 		(1u << WEAPONBONUSCONDITION_BATTLEPLAN_SEARCHANDDESTROY);
+	const WeaponBonusConditionFlags propagandaMask =
+		(1u << WEAPONBONUSCONDITION_HORDE) |
+		(1u << WEAPONBONUSCONDITION_NATIONALISM) |
+		(1u << WEAPONBONUSCONDITION_FANATICISM) |
+		(1u << WEAPONBONUSCONDITION_ENTHUSIASTIC) |
+		(1u << WEAPONBONUSCONDITION_SUBLIMINAL);
+
 	const WeaponBonusConditionFlags planFlags = flags & battlePlanMask;
-	const WeaponBonusConditionFlags otherFlags = flags & ~battlePlanMask;
+	const WeaponBonusConditionFlags propagandaFlags = flags & propagandaMask;
+	const WeaponBonusConditionFlags otherFlags = flags & ~(battlePlanMask | propagandaMask);
 
 	if( TheGlobalData->m_weaponBonusSet )
 		TheGlobalData->m_weaponBonusSet->appendBonuses( otherFlags, bonus );
 	if( extra )
 		extra->appendBonuses( otherFlags, bonus );
+
+	const Player *owner = source->getControllingPlayer();
+
+	if( propagandaFlags != 0 )
+	{
+		WeaponBonus propagandaBonus;
+		if( TheGlobalData->m_weaponBonusSet )
+			TheGlobalData->m_weaponBonusSet->appendBonuses( propagandaFlags, propagandaBonus );
+		if( extra )
+			extra->appendBonuses( propagandaFlags, propagandaBonus );
+
+		const Real strength = owner ? owner->getPropagandaBonusStrengthScalar() : 1.0f;
+		for( Int field = 0; field < WeaponBonus::FIELD_COUNT; ++field )
+		{
+			const WeaponBonus::Field f = static_cast<WeaponBonus::Field>(field);
+			bonus.setField( f, bonus.getField(f) + (propagandaBonus.getField(f) - 1.0f) * strength );
+		}
+	}
 
 	if( planFlags != 0 )
 	{
@@ -1963,7 +1989,6 @@ void Weapon::computeBonus(const Object *source, WeaponBonusConditionFlags extraB
 		if( extra )
 			extra->appendBonuses( planFlags, planBonus );
 
-		const Player *owner = source->getControllingPlayer();
 		const Real strength = owner ? owner->getBattlePlanStrengthScalar() : 1.0f;
 		for( Int field = 0; field < WeaponBonus::FIELD_COUNT; ++field )
 		{

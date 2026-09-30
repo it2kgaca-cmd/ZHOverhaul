@@ -373,6 +373,7 @@ public:
 	Int getNumBattlePlansActive() const { return m_bombardBattlePlans + m_holdTheLineBattlePlans + m_searchAndDestroyBattlePlans; }
 	Int getNumDistinctBattlePlansActive() const;
 	Real getBattlePlanStrengthScalar() const;
+	Real getPropagandaBonusStrengthScalar() const;
 	Int getBattlePlansActiveSpecific( BattlePlanStatus plan ) const;
 	void applyBattlePlanBonusesForObject( Object *obj ) const;	//New object or converted object gaining our current battle plan bonuses.
 	void removeBattlePlanBonusesForObject( Object *obj ) const; //Object left team
