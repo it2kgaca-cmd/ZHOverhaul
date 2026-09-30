@@ -3747,6 +3747,38 @@ static Object *findAttackMoveSpecialistTarget(Object *owner, const Coord3D *dest
 	return nullptr;
 }
 
+static Bool executeAttackMoveSpecialistAction(Object *owner, Object *target, CommandSourceType source)
+{
+	if (!owner || !target) return FALSE;
+
+	if (TheActionManager->canHijackVehicle(owner,target,source) ||
+		TheActionManager->canSabotageBuilding(owner,target,source))
+	{
+		AIUpdateInterface *ai = owner->getAIUpdateInterface();
+		if (ai) ai->aiEnter(target, CMD_FROM_AI);
+		return ai != nullptr;
+	}
+
+	SpecialPowerType type = SPECIAL_INVALID;
+	if (TheActionManager->canDisableBuildingViaHacking(owner,target,source))
+		type = SPECIAL_HACKER_DISABLE_BUILDING;
+	else if (TheActionManager->canDisableVehicleViaHacking(owner,target,source))
+		type = SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK;
+	else if (TheActionManager->canCaptureBuilding(owner,target,source))
+		type = SPECIAL_BLACKLOTUS_CAPTURE_BUILDING;
+
+	if (type != SPECIAL_INVALID)
+	{
+		SpecialPowerModuleInterface *sp = owner->findSpecialPowerModuleInterface(type);
+		if (sp && sp->getPercentReady() >= 1.0f)
+		{
+			owner->doSpecialPowerAtObject(sp->getSpecialPowerTemplate(), target, COMMAND_FIRED_BY_SCRIPT, TRUE);
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 static Bool canAttackMoveFireWhileMoving(Object *owner, AIUpdateInterface *ai, Object *target)
 {
 	if (!owner || !ai || !target || !ai->isDoingGroundMovement())
