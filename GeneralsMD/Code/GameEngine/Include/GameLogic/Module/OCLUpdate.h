@@ -85,7 +85,7 @@ public:
 	virtual ProductionUpdateInterface* getProductionUpdateInterface() override;
 
 	virtual CanMakeType canQueueCreateUnit( const ThingTemplate *unitType ) const override;
-	virtual CanMakeType canQueueUpgrade( const UpgradeTemplate *upgrade ) const override { return CANMAKE_NO_PREREQ; }
+	virtual CanMakeType canQueueUpgrade( const UpgradeTemplate *upgrade ) const override;
 	virtual ProductionID requestUniqueUnitID() override;
 	virtual Bool queueUpgrade( const UpgradeTemplate *upgrade ) override { return FALSE; }
 	virtual Bool cancelUpgrade( const UpgradeTemplate *upgrade ) override { return FALSE; }
