@@ -4702,7 +4702,8 @@ void Object::onDie( DamageInfo *damageInfo )
 	// Hijacker-captured foreign vehicles do not carry GLA's INI CreateCrateDie,
 	// so attach the standard salvage result at the common battlefield-death
 	// boundary. Native GLA vehicles already handled above are not duplicated.
-	if (!hasSalvageDie && isKindOf(KINDOF_VEHICLE) && getControllingPlayer() &&
+	if (!hasSalvageDie && isKindOf(KINDOF_VEHICLE) && !isKindOf(KINDOF_AIRCRAFT) &&
+			getControllingPlayer() &&
 			getControllingPlayer()->getBaseSide().compareNoCase("GLA") == 0)
 	{
 		CreateCrateDie::createSalvageCrateForObject(this);
