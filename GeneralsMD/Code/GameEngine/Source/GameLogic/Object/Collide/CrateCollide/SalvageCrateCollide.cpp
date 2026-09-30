@@ -41,7 +41,9 @@
 #include "Common/Xfer.h"
 #include "GameClient/GameText.h"
 #include "GameClient/InGameUI.h"
+#include "GameLogic/AI.h"
 #include "GameLogic/ExperienceTracker.h"
+#include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
 
 //-------------------------------------------------------------------------------------------------
@@ -64,9 +66,17 @@ Bool SalvageCrateCollide::isValidToExecute( const Object *other ) const
 	if( ! CrateCollide::isValidToExecute( other ) )
 		return FALSE;
 
-	// Only salvage units can pick up a Salvage crate
+	// Only salvage units can pick up a Salvage crate.
 	if( ! other->getTemplate()->isKindOf( KINDOF_SALVAGER ) )
 		return FALSE;
+
+#if !RETAIL_COMPATIBLE_CRC
+	// A maxed/non-advancing unit in a moving group must leave the crate for a
+	// groupmate that can still improve. Once nobody in the group can advance,
+	// or this is effectively a lone unit, the crate may be converted to cash.
+	if( !canAdvanceSalvage( other ) && groupHasSalvageAdvanceCandidate( other ) )
+		return FALSE;
+#endif
 
 	return TRUE;
 }
@@ -74,11 +84,35 @@ Bool SalvageCrateCollide::isValidToExecute( const Object *other ) const
 //-------------------------------------------------------------------------------------------------
 Bool SalvageCrateCollide::executeCrateBehavior( Object *other )
 {
-	if( eligibleForArmorSet(other) )// No percent chance on this one, if you can get it, you get it.
+#if !RETAIL_COMPATIBLE_CRC
+	// Overhaul contract: salvage-upgrading units consume crates only to advance
+	// salvage. At peak salvage (or for units with no salvage progression), a
+	// leftover crate is cash. Group priority is enforced by isValidToExecute().
+	if( eligibleForArmorSet(other) )
 	{
 		doArmorSet(other);
-
-		//Play the salvage installation crate pickup sound.
+		AudioEventRTS soundToPlay = TheAudio->getMiscAudio()->m_crateSalvage;
+		soundToPlay.setObjectID( other->getID() );
+		TheAudio->addAudioEvent( &soundToPlay );
+	}
+	else if( eligibleForWeaponSet( other ) )
+	{
+		doWeaponSet( other );
+		AudioEventRTS soundToPlay = TheAudio->getMiscAudio()->m_crateSalvage;
+		soundToPlay.setObjectID( other->getID() );
+		TheAudio->addAudioEvent( &soundToPlay );
+	}
+	else
+	{
+		doMoney( other );
+		AudioEventRTS soundToPlay = TheAudio->getMiscAudio()->m_crateMoney;
+		soundToPlay.setObjectID( other->getID() );
+		TheAudio->addAudioEvent(&soundToPlay);
+	}
+#else
+	if( eligibleForArmorSet(other) )
+	{
+		doArmorSet(other);
 		AudioEventRTS soundToPlay = TheAudio->getMiscAudio()->m_crateSalvage;
 		soundToPlay.setObjectID( other->getID() );
 		TheAudio->addAudioEvent( &soundToPlay );
@@ -86,37 +120,75 @@ Bool SalvageCrateCollide::executeCrateBehavior( Object *other )
 	else if( eligibleForWeaponSet( other ) && testWeaponChance() )
 	{
 		doWeaponSet( other );
-
-		//Play the salvage installation crate pickup sound.
 		AudioEventRTS soundToPlay = TheAudio->getMiscAudio()->m_crateSalvage;
 		soundToPlay.setObjectID( other->getID() );
 		TheAudio->addAudioEvent( &soundToPlay );
-
-		//Play the unit voice acknowledgement for upgrading weapons.
-		//Already handled by the "move order"
-		//const AudioEventRTS *soundToPlayPtr = other->getTemplate()->getPerUnitSound( "VoiceSalvage" );
-		//soundToPlay = *soundToPlayPtr;
-		//soundToPlay.setObjectID( other->getID() );
-		//TheAudio->addAudioEvent( &soundToPlay );
 	}
 	else if( eligibleForLevel( other ) && testLevelChance() )
 	{
 		doLevelGain( other );
-
-		//Sound will play in
-		//soundToPlay = TheAudio->getMiscAudio()->m_unitPromoted;
 	}
-	else // just assume the testMoneyChance
+	else
 	{
 		doMoney( other );
 		AudioEventRTS soundToPlay = TheAudio->getMiscAudio()->m_crateMoney;
 		soundToPlay.setObjectID( other->getID() );
 		TheAudio->addAudioEvent(&soundToPlay);
 	}
+#endif
 
 	other->getControllingPlayer()->getAcademyStats()->recordSalvageCollected();
-
 	return TRUE;
+}
+
+// ------------------------------------------------------------------------------------------------
+Bool SalvageCrateCollide::canAdvanceSalvage( const Object *other ) const
+{
+	if( other == nullptr )
+		return FALSE;
+
+	if( other->isKindOf( KINDOF_ARMOR_SALVAGER ) &&
+			!other->testArmorSetFlag( ARMORSET_CRATE_UPGRADE_TWO ) )
+		return TRUE;
+
+	if( other->isKindOf( KINDOF_WEAPON_SALVAGER ) &&
+			!other->testWeaponSetFlag( WEAPONSET_CRATEUPGRADE_TWO ) )
+		return TRUE;
+
+	return FALSE;
+}
+
+// ------------------------------------------------------------------------------------------------
+Bool SalvageCrateCollide::groupHasSalvageAdvanceCandidate( const Object *other ) const
+{
+	if( other == nullptr )
+		return FALSE;
+
+	AIGroup *group = const_cast<Object*>(other)->getGroup();
+	if( group == nullptr )
+		return FALSE;
+
+	const VecObjectID& memberIDs = group->getAllIDs();
+	if( memberIDs.size() <= 1 )
+		return FALSE;
+
+	for( VecObjectID::const_iterator it = memberIDs.begin(); it != memberIDs.end(); ++it )
+	{
+		if( *it == other->getID() )
+			continue;
+
+		Object *member = TheGameLogic->findObjectByID( *it );
+		if( member == nullptr || member->isEffectivelyDead() )
+			continue;
+		if( member->getControllingPlayer() != other->getControllingPlayer() )
+			continue;
+		if( !member->isKindOf( KINDOF_SALVAGER ) )
+			continue;
+		if( canAdvanceSalvage( member ) )
+			return TRUE;
+	}
+
+	return FALSE;
 }
 
 // ------------------------------------------------------------------------------------------------
