@@ -352,7 +352,7 @@ Bool ParticleUplinkCannonUpdate::initiateIntentToDoSpecialPower(const SpecialPow
 		m_specialPowerModule->setReadyFrame( now );
 	}
 
-	m_startDecayFrame = m_startAttackFrame + data->m_totalFiringFrames;
+	m_startDecayFrame = m_startAttackFrame + data->m_totalFiringFrames * 2;
 
 	SpecialPowerModuleInterface *spmInterface = getObject()->getSpecialPowerModule( specialPowerTemplate );
 	if( spmInterface )
@@ -698,7 +698,7 @@ UpdateSleepTime ParticleUplinkCannonUpdate::update()
 
 				DamageInfo damageInfo;
 
-				Real totalFiringSeconds = data->m_totalFiringFrames / LOGICFRAMES_PER_SECOND;
+				Real totalFiringSeconds = (data->m_totalFiringFrames * 2.0f) / LOGICFRAMES_PER_SECOND;
 				Real damagePerPulse = (Real)(totalFiringSeconds * data->m_damagePerSecond) / (Real)data->m_totalDamagePulses;
 
 				damageInfo.in.m_amount = damagePerPulse;
@@ -716,6 +716,9 @@ UpdateSleepTime ParticleUplinkCannonUpdate::update()
 					BodyModuleInterface *body = obj->getBodyModule();
 					if( body )
 					{
+						// Twice the firing lifetime keeps unit-sweeping damage useful, while
+						// structures take half DPS so a full beam deals the old total.
+						damageInfo.in.m_amount = obj->isKindOf( KINDOF_STRUCTURE ) ? damagePerPulse * 0.5f : damagePerPulse;
 						body->attemptDamage( &damageInfo );
 					}
 				}
@@ -1505,7 +1508,7 @@ void ParticleUplinkCannonUpdate::xfer( Xfer *xfer )
 	}
 	else
 	{
-		m_startDecayFrame = m_startAttackFrame + data->m_totalFiringFrames;
+		m_startDecayFrame = m_startAttackFrame + data->m_totalFiringFrames * 2;
 	}
 
 	// the time of last manual target click

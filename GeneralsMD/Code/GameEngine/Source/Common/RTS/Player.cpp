@@ -3462,79 +3462,103 @@ Bool Player::doesObjectQualifyForBattlePlan( Object *obj ) const
 }
 
 //-------------------------------------------------------------------------------------------------
+Int Player::getNumDistinctBattlePlansActive() const
+{
+	Int count = 0;
+	if( m_bombardBattlePlans > 0 )
+		++count;
+	if( m_holdTheLineBattlePlans > 0 )
+		++count;
+	if( m_searchAndDestroyBattlePlans > 0 )
+		++count;
+	return count;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real Player::getBattlePlanStrengthScalar() const
+{
+	switch( getNumDistinctBattlePlansActive() )
+	{
+		case 1: return 1.5f;
+		case 2: return 1.0f;
+		case 3: return 0.5f;
+		default: return 0.0f;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
 void Player::changeBattlePlan( BattlePlanStatus plan, Int delta, const BattlePlanBonusesData *bonus )
 {
+	if( bonus == nullptr || delta == 0 )
+		return;
+
 	DUMPBATTLEPLANBONUSES(bonus, this, nullptr);
-	Bool addBonus = false;
-	Bool removeBonus = false;
+
+	const Bool oldBombard = m_bombardBattlePlans > 0;
+	const Bool oldHold = m_holdTheLineBattlePlans > 0;
+	const Bool oldSearch = m_searchAndDestroyBattlePlans > 0;
+	const Real oldStrength = getBattlePlanStrengthScalar();
+	const Real oldArmor = m_battlePlanBonuses ? m_battlePlanBonuses->m_armorScalar : 1.0f;
+	const Real oldSight = m_battlePlanBonuses ? m_battlePlanBonuses->m_sightRangeScalar : 1.0f;
+
+	// Only Hold The Line changes the player-wide armor scalar and only Search &
+	// Destroy changes the sight scalar, so recover their unscaled base from the
+	// currently applied aggregate before changing the distinct-plan strength.
+	Real holdBaseArmor = 1.0f;
+	if( oldHold && oldStrength > 0.0f )
+		holdBaseArmor = 1.0f + (oldArmor - 1.0f) / oldStrength;
+	else if( plan == PLANSTATUS_HOLDTHELINE && delta > 0 )
+		holdBaseArmor = bonus->m_armorScalar;
+
+	Real searchBaseSight = 1.0f;
+	if( oldSearch && oldStrength > 0.0f )
+		searchBaseSight = 1.0f + (oldSight - 1.0f) / oldStrength;
+	else if( plan == PLANSTATUS_SEARCHANDDESTROY && delta > 0 )
+		searchBaseSight = bonus->m_sightRangeScalar;
+
 	switch( plan )
 	{
 		case PLANSTATUS_BOMBARDMENT:
-		{
-			m_bombardBattlePlans += delta;
-			if( m_bombardBattlePlans == 1 && delta == 1 )
-			{
-				addBonus = true;
-			}
-			else if( m_bombardBattlePlans == 0 && delta == -1 )
-			{
-				removeBonus = true;
-			}
+			m_bombardBattlePlans = MAX( 0, m_bombardBattlePlans + delta );
 			break;
-		}
 		case PLANSTATUS_HOLDTHELINE:
-		{
-			m_holdTheLineBattlePlans += delta;
-			if( m_holdTheLineBattlePlans == 1 && delta == 1 )
-			{
-				addBonus = true;
-			}
-			else if( m_holdTheLineBattlePlans == 0 && delta == -1 )
-			{
-				removeBonus = true;
-			}
+			m_holdTheLineBattlePlans = MAX( 0, m_holdTheLineBattlePlans + delta );
 			break;
-		}
 		case PLANSTATUS_SEARCHANDDESTROY:
-		{
-			m_searchAndDestroyBattlePlans += delta;
-			if( m_searchAndDestroyBattlePlans == 1 && delta == 1 )
-			{
-				addBonus = true;
-			}
-			else if( m_searchAndDestroyBattlePlans == 0 && delta == -1 )
-			{
-				removeBonus = true;
-			}
+			m_searchAndDestroyBattlePlans = MAX( 0, m_searchAndDestroyBattlePlans + delta );
 			break;
-		}
+		default:
+			return;
 	}
-	if( addBonus )
-	{
-		applyBattlePlanBonusesForPlayerObjects( bonus );
-	}
-	else if( removeBonus )
-	{
-		//First, inverse the bonuses
-		BattlePlanBonusesData invertedBonus = *bonus;
 
-		invertedBonus.m_armorScalar = 1.0f / __max(bonus->m_armorScalar, 0.01f);
-		invertedBonus.m_sightRangeScalar = 1.0f / __max(bonus->m_sightRangeScalar, 0.01f);
-		if (invertedBonus.m_bombardment > 0)
-		{
-			invertedBonus.m_bombardment = -1;
-		}
-		if (invertedBonus.m_holdTheLine > 0)
-		{
-			invertedBonus.m_holdTheLine = -1;
-		}
-		if (invertedBonus.m_searchAndDestroy > 0)
-		{
-			invertedBonus.m_searchAndDestroy = -1;
-		}
+	const Bool newBombard = m_bombardBattlePlans > 0;
+	const Bool newHold = m_holdTheLineBattlePlans > 0;
+	const Bool newSearch = m_searchAndDestroyBattlePlans > 0;
+	const Real newStrength = getBattlePlanStrengthScalar();
 
-		applyBattlePlanBonusesForPlayerObjects(&invertedBonus);
-	}
+	// Duplicate centers on the same plan are deliberately only redundancy.  They
+	// change the reference count but not the player-wide bonus state.
+	if( oldBombard == newBombard && oldHold == newHold && oldSearch == newSearch && oldStrength == newStrength )
+		return;
+
+	if( !oldHold && newHold )
+		holdBaseArmor = bonus->m_armorScalar;
+	if( !oldSearch && newSearch )
+		searchBaseSight = bonus->m_sightRangeScalar;
+
+	const Real desiredArmor = newHold ? 1.0f + (holdBaseArmor - 1.0f) * newStrength : 1.0f;
+	const Real desiredSight = newSearch ? 1.0f + (searchBaseSight - 1.0f) * newStrength : 1.0f;
+
+	BattlePlanBonusesData adjustment;
+	adjustment.m_validKindOf = bonus->m_validKindOf;
+	adjustment.m_invalidKindOf = bonus->m_invalidKindOf;
+	adjustment.m_armorScalar = desiredArmor / __max( oldArmor, 0.01f );
+	adjustment.m_sightRangeScalar = desiredSight / __max( oldSight, 0.01f );
+	adjustment.m_bombardment = (newBombard ? 1 : 0) - (oldBombard ? 1 : 0);
+	adjustment.m_holdTheLine = (newHold ? 1 : 0) - (oldHold ? 1 : 0);
+	adjustment.m_searchAndDestroy = (newSearch ? 1 : 0) - (oldSearch ? 1 : 0);
+
+	applyBattlePlanBonusesForPlayerObjects( &adjustment );
 }
 
 //-------------------------------------------------------------------------------------------------

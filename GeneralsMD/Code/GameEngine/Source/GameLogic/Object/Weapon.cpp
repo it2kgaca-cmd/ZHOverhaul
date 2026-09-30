@@ -1940,11 +1940,43 @@ void Weapon::computeBonus(const Object *source, WeaponBonusConditionFlags extraB
 			flags |= theirContain->getWeaponBonusPassedToPassengers();
 	}
 
-	if (TheGlobalData->m_weaponBonusSet)
-		TheGlobalData->m_weaponBonusSet->appendBonuses(flags, bonus);
 	const WeaponBonusSet* extra = m_template->getExtraBonus();
-	if (extra)
-		extra->appendBonuses(flags, bonus);
+
+#if !RETAIL_COMPATIBLE_CRC
+	const WeaponBonusConditionFlags battlePlanMask =
+		(1u << WEAPONBONUSCONDITION_BATTLEPLAN_BOMBARDMENT) |
+		(1u << WEAPONBONUSCONDITION_BATTLEPLAN_HOLDTHELINE) |
+		(1u << WEAPONBONUSCONDITION_BATTLEPLAN_SEARCHANDDESTROY);
+	const WeaponBonusConditionFlags planFlags = flags & battlePlanMask;
+	const WeaponBonusConditionFlags otherFlags = flags & ~battlePlanMask;
+
+	if( TheGlobalData->m_weaponBonusSet )
+		TheGlobalData->m_weaponBonusSet->appendBonuses( otherFlags, bonus );
+	if( extra )
+		extra->appendBonuses( otherFlags, bonus );
+
+	if( planFlags != 0 )
+	{
+		WeaponBonus planBonus;
+		if( TheGlobalData->m_weaponBonusSet )
+			TheGlobalData->m_weaponBonusSet->appendBonuses( planFlags, planBonus );
+		if( extra )
+			extra->appendBonuses( planFlags, planBonus );
+
+		const Player *owner = source->getControllingPlayer();
+		const Real strength = owner ? owner->getBattlePlanStrengthScalar() : 1.0f;
+		for( Int field = 0; field < WeaponBonus::FIELD_COUNT; ++field )
+		{
+			const WeaponBonus::Field f = static_cast<WeaponBonus::Field>(field);
+			bonus.setField( f, bonus.getField(f) + (planBonus.getField(f) - 1.0f) * strength );
+		}
+	}
+#else
+	if( TheGlobalData->m_weaponBonusSet )
+		TheGlobalData->m_weaponBonusSet->appendBonuses( flags, bonus );
+	if( extra )
+		extra->appendBonuses( flags, bonus );
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
