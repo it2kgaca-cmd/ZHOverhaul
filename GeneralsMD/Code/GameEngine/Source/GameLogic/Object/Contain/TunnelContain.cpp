@@ -305,6 +305,15 @@ Bool TunnelContain::isValidContainerFor(const Object* obj, Bool checkCapacity) c
 		return false;
 
 	Player *owningPlayer = getObject()->getControllingPlayer();
+
+	// Rebuild holes are access points into their owner's tunnel network, never public
+	// doors into whichever TunnelTracker happens to own the endpoint.
+	if( getObject()->isKindOf( KINDOF_REBUILD_HOLE ) )
+	{
+		if( owningPlayer == nullptr || obj == nullptr || obj->getControllingPlayer() != owningPlayer )
+			return false;
+	}
+
 	if( owningPlayer && owningPlayer->getTunnelSystem() )
 	{
 		return owningPlayer->getTunnelSystem()->isValidContainerFor( obj, checkCapacity );

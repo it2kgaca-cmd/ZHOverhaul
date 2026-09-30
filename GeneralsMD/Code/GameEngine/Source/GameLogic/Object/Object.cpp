@@ -6224,6 +6224,16 @@ const AsciiString& Object::getCommandSetString() const
 	if (m_commandSetStringOverride.isNotEmpty())
 		return m_commandSetStringOverride;
 
+#if !RETAIL_COMPATIBLE_CRC
+	// Rebuild holes share the owner's TunnelTracker but need the stock tunnel UI
+	// so players can choose individual infantry and issue Evacuate.  The control
+	// bar hides tunnel-only upgrade/rally/sell controls for holes.
+	if( isKindOf( KINDOF_REBUILD_HOLE ) )
+	{
+		static const AsciiString rebuildHoleTunnelCommands( "GLATunnelNetworkCommandSet" );
+		return rebuildHoleTunnelCommands;
+	}
+#endif
 
 	return getTemplate()->friend_getCommandSetString();
 }

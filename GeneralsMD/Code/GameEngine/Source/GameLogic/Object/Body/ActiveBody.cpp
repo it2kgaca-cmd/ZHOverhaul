@@ -65,6 +65,25 @@
 
 #define YELLOW_DAMAGE_PERCENT (0.25f)
 
+#if !RETAIL_COMPATIBLE_CRC
+static Bool isZHOverhaulToxinField( const Object *obj )
+{
+	if( obj == nullptr || obj->getTemplate() == nullptr || !obj->isKindOf( KINDOF_CLEANUP_HAZARD ) )
+		return FALSE;
+
+	const AsciiString& name = obj->getTemplate()->getName();
+	return
+		name.compareNoCase( "PoisonFieldLarge" ) == 0 ||
+		name.compareNoCase( "PoisonFieldMedium" ) == 0 ||
+		name.compareNoCase( "PoisonFieldSmall" ) == 0 ||
+		name.compareNoCase( "PoisonFieldUpgradedLarge" ) == 0 ||
+		name.compareNoCase( "PoisonFieldUpgradedMedium" ) == 0 ||
+		name.compareNoCase( "PoisonFieldUpgradedSmall" ) == 0 ||
+		name.compareNoCase( "PoisonFieldAnthraxBomb" ) == 0 ||
+		name.compareNoCase( "PoisonFieldAnthraxGammaBomb" ) == 0;
+}
+#endif
+
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
 
 // ------------------------------------------------------------------------------------------------
@@ -367,6 +386,17 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 		return;
 
 #if !RETAIL_COMPATIBLE_CRC
+	// Fire physically purges toxin/anthrax field objects even when the installed
+	// retail INI still gives generic cleanup hazards 0% flame damage. Radiation
+	// fields are deliberately excluded.
+	if( damageInfo->in.m_damageType == DAMAGE_FLAME &&
+			!damageInfo->in.m_kill &&
+			isZHOverhaulToxinField( obj ) )
+	{
+		obj->kill( DAMAGE_UNRESISTABLE, DEATH_NORMAL );
+		return;
+	}
+
 	// ZHOverhaul building contamination: poison exposure refreshes a timed shutdown.
 	// Flame and dedicated cleanup streams purge the state immediately.  The cleanup
 	// hit is sanitation-only and therefore does not damage the structure itself.

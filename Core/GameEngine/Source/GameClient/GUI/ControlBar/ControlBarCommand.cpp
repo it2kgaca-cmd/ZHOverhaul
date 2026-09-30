@@ -1282,6 +1282,15 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 		}
 	}
 
+#if !RETAIL_COMPATIBLE_CRC
+	if( obj->isKindOf( KINDOF_REBUILD_HOLE ) )
+	{
+		const GUICommandType holeCommandType = command->getCommandType();
+		if( holeCommandType != GUI_COMMAND_EXIT_CONTAINER && holeCommandType != GUI_COMMAND_EVACUATE )
+			return COMMAND_HIDDEN;
+	}
+#endif
+
 	ProductionUpdateInterface *pu = obj->getProductionUpdateInterface();
 	if( pu && pu->firstProduction() && BitIsSet( command->getOptions(), NOT_QUEUEABLE ) )
 	{
