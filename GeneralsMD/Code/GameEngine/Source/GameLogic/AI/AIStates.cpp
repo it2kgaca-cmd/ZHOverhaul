@@ -3700,6 +3700,53 @@ void AIAttackMoveToState::onExit( StateExitType status )
 }
 
 //----------------------------------------------------------------------------------------------------------
+static Bool isAttackMoveSpecialist(Object *owner)
+{
+	if (!owner) return FALSE;
+	const char *setName = owner->getCommandSetString().str();
+	return owner->findSpecialPowerModuleInterface(SPECIAL_HACKER_DISABLE_BUILDING) ||
+		owner->findSpecialPowerModuleInterface(SPECIAL_BLACKLOTUS_CAPTURE_BUILDING) ||
+		owner->findSpecialPowerModuleInterface(SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK) ||
+		(setName && (strstr(setName, "Hijacker") || strstr(setName, "Saboteur")));
+}
+
+static Object *findAttackMoveSpecialistTarget(Object *owner, const Coord3D *destination, CommandSourceType source)
+{
+	if (!owner || !destination) return nullptr;
+	Real range = TheAI->getAdjustedVisionRangeForObject(owner, AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
+	if (range > 220.0f) range = 220.0f;
+	if (range < 100.0f) range = 100.0f;
+
+	PartitionFilterLiveMapEnemies enemies(owner);
+	PartitionFilterStealthedAndUndetected visible(owner, false);
+	PartitionFilter *filters[] = { &enemies, &visible, nullptr };
+	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(owner, range, FROM_BOUNDINGSPHERE_2D, filters, ITER_SORTED_NEAR_TO_FAR);
+	MemoryPoolObjectHolder holder(iter);
+
+	const Coord3D *p = owner->getPosition();
+	Real rx = destination->x - p->x, ry = destination->y - p->y;
+	Real len = sqrt(rx*rx + ry*ry);
+	if (len < 1.0f) return nullptr;
+	rx /= len; ry /= len;
+
+	for (Object *target = iter->first(); target; target = iter->next())
+	{
+		Real dx = target->getPosition()->x - p->x;
+		Real dy = target->getPosition()->y - p->y;
+		Real along = dx*rx + dy*ry;
+		Real lateral = fabs(dx*ry - dy*rx);
+		if (along < -16.0f || along > range || lateral > 72.0f) continue;
+
+		if (TheActionManager->canHijackVehicle(owner,target,source) ||
+			TheActionManager->canSabotageBuilding(owner,target,source) ||
+			TheActionManager->canDisableBuildingViaHacking(owner,target,source) ||
+			TheActionManager->canDisableVehicleViaHacking(owner,target,source) ||
+			TheActionManager->canCaptureBuilding(owner,target,source))
+			return target;
+	}
+	return nullptr;
+}
+
 static Bool canAttackMoveFireWhileMoving(Object *owner, AIUpdateInterface *ai, Object *target)
 {
 	if (!owner || !ai || !target || !ai->isDoingGroundMovement())
