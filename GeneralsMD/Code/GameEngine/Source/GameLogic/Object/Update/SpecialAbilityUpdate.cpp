@@ -431,14 +431,25 @@ UpdateSleepTime SpecialAbilityUpdate::update()
       triggerAbilityEffect();
       if( isPersistentAbility() )
       {
-        //VARIATION -- PERSISTENCE (repeats preparation)
-        resetPreparation();
+        if( m_attackMoveOneShotPersistent )
+        {
+          // Attack-move specialists should perform one real disable pulse and
+          // continue marching instead of remaining latched to the first target.
+          endPreparation();
+          if( needToPack() )
+            startPacking(true);
+          else
+            finishAbility();
+        }
+        else
+        {
+          //VARIATION -- PERSISTENCE (repeats preparation)
+          resetPreparation();
 
-        //tell the special power module to restart the recharge timer
-        if ( getDoesPersistenceRequireRecharge() )
-          spm->startPowerRecharge();
-
-
+          //tell the special power module to restart the recharge timer
+          if ( getDoesPersistenceRequireRecharge() )
+            spm->startPowerRecharge();
+        }
       }
       else
       {
