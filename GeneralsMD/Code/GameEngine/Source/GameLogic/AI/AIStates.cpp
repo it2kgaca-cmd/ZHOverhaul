@@ -3764,6 +3764,13 @@ static Bool executeAttackMoveSpecialistAction(Object *owner, Object *target, Com
 		AIUpdateInterface *ai = owner->getAIUpdateInterface();
 		if (ai)
 		{
+			if (TheActionManager->canHijackVehicle(owner,target,source))
+			{
+				static NameKeyType key_HijackerUpdate = NAMEKEY("HijackerUpdate");
+				HijackerUpdate *hu = (HijackerUpdate*)owner->findUpdateModule(key_HijackerUpdate);
+				if (hu && ai->getGoalPosition())
+					hu->setResumeAttackMoveDestination(ai->getGoalPosition());
+			}
 			ai->aiEnter(target, CMD_FROM_AI);
 		}
 		return ai != nullptr;
