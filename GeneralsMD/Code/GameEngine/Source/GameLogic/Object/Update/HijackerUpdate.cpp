@@ -223,7 +223,7 @@ void HijackerUpdate::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 1;
+	XferVersion currentVersion = 2;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -246,8 +246,16 @@ void HijackerUpdate::xfer( Xfer *xfer )
 	xfer->xferBool( &m_wasTargetAirborne );
 
 #if !RETAIL_COMPATIBLE_XFER_SAVE
-	xfer->xferBool( &m_resumeAttackMove );
-	xfer->xferCoord3D( &m_resumeAttackMoveDestination );
+	if( version >= 2 )
+	{
+		xfer->xferBool( &m_resumeAttackMove );
+		xfer->xferCoord3D( &m_resumeAttackMoveDestination );
+	}
+	else if( xfer->getXferMode() == XFER_LOAD )
+	{
+		m_resumeAttackMove = FALSE;
+		m_resumeAttackMoveDestination.zero();
+	}
 #endif
 
 }
