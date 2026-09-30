@@ -49,6 +49,10 @@ const char* const DisabledMaskType::s_bitNameList[] =
 	"DISABLED_SCRIPT_DISABLED",
 	"DISABLED_SCRIPT_UNDERPOWERED",
 
+#if !RETAIL_COMPATIBLE_CRC
+	"DISABLED_CONTAMINATED",
+#endif
+
 	nullptr
 };
 static_assert(ARRAY_SIZE(DisabledMaskType::s_bitNameList) == DisabledMaskType::NumBits + 1, "Incorrect array size");

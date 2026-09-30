@@ -556,6 +556,12 @@ Bool GarrisonContain::isValidContainerFor(const Object* obj, Bool checkCapacity)
 	if( OpenContain::isValidContainerFor( obj, checkCapacity ) == false )
 		return false;
 
+#if !RETAIL_COMPATIBLE_CRC
+	// Toxin-contaminated structures remain physically present but cannot accept occupants.
+	if( getObject()->isDisabledByType( DISABLED_CONTAMINATED ) )
+		return false;
+#endif
+
 	// zero-health buildings are not garrisonable.
 	if (getObject()->getBodyModule()->getHealth() <= 0.0f)
 		return false;

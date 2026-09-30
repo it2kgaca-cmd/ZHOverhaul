@@ -47,6 +47,27 @@
 #include "GameLogic/Module/AIUpdate.h"
 
 
+#if !RETAIL_COMPATIBLE_CRC
+// Cleanup units normally search only KINDOF_CLEANUP_HAZARD objects.  A contaminated
+// structure is a temporary sanitation target without permanently changing its KindOf.
+class PartitionFilterCleanupHazardOrContaminatedStructure : public PartitionFilter
+{
+public:
+	virtual Bool allow( Object *objOther ) override
+	{
+		if( objOther == nullptr || objOther->isEffectivelyDead() )
+			return FALSE;
+		if( objOther->isKindOf( KINDOF_CLEANUP_HAZARD ) )
+			return TRUE;
+		return objOther->isKindOf( KINDOF_STRUCTURE ) &&
+			objOther->isDisabledByType( DISABLED_CONTAMINATED );
+	}
+#if defined(RTS_DEBUG)
+	virtual const char* debugGetName() override { return "PartitionFilterCleanupHazardOrContaminatedStructure"; }
+#endif
+};
+#endif
+
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 CleanupHazardUpdateModuleData::CleanupHazardUpdateModuleData()
@@ -264,9 +285,13 @@ Object* CleanupHazardUpdate::scanClosestTarget()
 	Object *bestTargetInRange = nullptr;
 	m_bestTargetID = INVALID_ID;
 
-	PartitionFilterAcceptByKindOf kindFilter(MAKE_KINDOF_MASK(KINDOF_CLEANUP_HAZARD), KINDOFMASK_NONE);
+#if !RETAIL_COMPATIBLE_CRC
+	PartitionFilterCleanupHazardOrContaminatedStructure cleanupFilter;
+#else
+	PartitionFilterAcceptByKindOf cleanupFilter(MAKE_KINDOF_MASK(KINDOF_CLEANUP_HAZARD), KINDOFMASK_NONE);
+#endif
 	PartitionFilterSameMapStatus filterMapStatus(getObject());
-	PartitionFilter* filters[] = { &kindFilter, &filterMapStatus, nullptr };
+	PartitionFilter* filters[] = { &cleanupFilter, &filterMapStatus, nullptr };
 
 	if( m_moveRange > 0.0f )
 	{

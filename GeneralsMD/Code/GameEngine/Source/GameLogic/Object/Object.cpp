@@ -2181,6 +2181,10 @@ void Object::setDisabledUntil( DisabledType type, UnsignedInt frame )
 				{
 					m_drawable->setTintStatus( TINT_STATUS_DISABLED );
 				}
+#if !RETAIL_COMPATIBLE_CRC
+				if( type == DISABLED_CONTAMINATED )
+					m_drawable->setTintStatus( TINT_STATUS_POISONED );
+#endif
 			}
 		}
 
@@ -2348,6 +2352,11 @@ Bool Object::clearDisabled( DisabledType type )
 
 	m_disabledTillFrame[ type ] = NEVER;
 	m_disabledMask.set( type, 0 );
+
+#if !RETAIL_COMPATIBLE_CRC
+	if( type == DISABLED_CONTAMINATED && m_drawable )
+		m_drawable->clearTintStatus( TINT_STATUS_POISONED );
+#endif
 
 	DisabledMaskType exceptions;
 	exceptions.set(DISABLED_HELD);
@@ -4071,7 +4080,11 @@ void Object::xfer( Xfer *xfer )
 {
 
 	// version
+#if !RETAIL_COMPATIBLE_CRC && !RETAIL_COMPATIBLE_XFER_SAVE
+	const XferVersion currentVersion = 10; // v10 adds the ZHOverhaul contamination disabled timer.
+#else
 	const XferVersion currentVersion = 9;
+#endif
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -4207,7 +4220,21 @@ void Object::xfer( Xfer *xfer )
 	}
 
 	// disabled till frame
+#if !RETAIL_COMPATIBLE_CRC
+	if( version >= 10 )
+	{
+		xfer->xferUser( m_disabledTillFrame, sizeof( UnsignedInt ) * DISABLED_COUNT );
+	}
+	else
+	{
+		// v9 and earlier predate DISABLED_CONTAMINATED.  Keep their byte layout intact.
+		xfer->xferUser( m_disabledTillFrame, sizeof( UnsignedInt ) * (DISABLED_COUNT - 1) );
+		if( xfer->getXferMode() == XFER_LOAD )
+			m_disabledTillFrame[ DISABLED_CONTAMINATED ] = NEVER;
+	}
+#else
 	xfer->xferUser( m_disabledTillFrame, sizeof( UnsignedInt ) * DISABLED_COUNT );
+#endif
 
 	// OK, now that we have xferred our status bits and disabled data, it's safe to set the team...
 	// TheSuperHackers @todo Refactor so that this code can be moved to loadPostProcess.
@@ -4485,6 +4512,14 @@ void Object::loadPostProcess()
 	else
 		m_containedBy = nullptr;
 
+#if !RETAIL_COMPATIBLE_CRC
+	// Disabled timers are restored directly by xfer, so re-apply the visual layer after load.
+	if( isDisabledByType( DISABLED_CONTAMINATED ) && m_drawable )
+	{
+		m_drawable->setTintStatus( TINT_STATUS_DISABLED );
+		m_drawable->setTintStatus( TINT_STATUS_POISONED );
+	}
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------

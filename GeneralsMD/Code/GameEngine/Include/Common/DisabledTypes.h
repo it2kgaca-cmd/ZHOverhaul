@@ -56,6 +56,10 @@ enum DisabledType CPP_11(: Int)
 	DISABLED_SCRIPT_DISABLED,
 	DISABLED_SCRIPT_UNDERPOWERED,
 
+#if !RETAIL_COMPATIBLE_CRC
+	DISABLED_CONTAMINATED,	///< Structure is temporarily shut down by toxin contamination.
+#endif
+
 	DISABLED_COUNT,
 
 	DISABLED_ANY = 65535		///< Do not use this value for setting disabled types (read-only)

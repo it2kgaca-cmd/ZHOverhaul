@@ -32,6 +32,7 @@
 #include "Common/BitFlagsIO.h"
 #include "Common/CRCDebug.h"
 #include "Common/DamageFX.h"
+#include "Common/GameCommon.h"
 #include "Common/Player.h"
 #include "Common/GameState.h"
 #include "Common/GlobalData.h"
@@ -297,6 +298,17 @@ Real ActiveBody::estimateDamage( DamageInfoInput& damageInfo ) const
 			return 0.0f;
 	}
 
+#if !RETAIL_COMPATIBLE_CRC
+	if( damageInfo.m_damageType == DAMAGE_HAZARD_CLEANUP &&
+			getObject()->isKindOf( KINDOF_STRUCTURE ) &&
+			getObject()->isDisabledByType( DISABLED_CONTAMINATED ) )
+	{
+		// Cleanup streams do not need to damage a building; this nonzero estimate lets
+		// CleanupHazardUpdate deliberately target a contaminated structure.
+		return 1.0f;
+	}
+#endif
+
 	if( damageInfo.m_damageType == DAMAGE_SNIPER )
 	{
 		if( getObject()->isKindOf( KINDOF_STRUCTURE ) && getObject()->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
@@ -345,9 +357,6 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 	if( damageInfo == nullptr )
 		return;
 
-	if ( m_indestructible )
-		return;
-
 	// initialize these, just in case we bail out early
 	damageInfo->out.m_actualDamageDealt = 0.0f;
 	damageInfo->out.m_actualDamageClipped = 0.0f;
@@ -355,6 +364,33 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 	// we cannot damage again objects that are already dead
 	Object* obj = getObject();
 	if( obj->isEffectivelyDead() )
+		return;
+
+#if !RETAIL_COMPATIBLE_CRC
+	// ZHOverhaul building contamination: poison exposure refreshes a timed shutdown.
+	// Flame and dedicated cleanup streams purge the state immediately.  The cleanup
+	// hit is sanitation-only and therefore does not damage the structure itself.
+	if( obj->isKindOf( KINDOF_STRUCTURE ) && !obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
+	{
+		const DamageType damageType = damageInfo->in.m_damageType;
+		if( damageType == DAMAGE_HAZARD_CLEANUP && obj->isDisabledByType( DISABLED_CONTAMINATED ) )
+		{
+			obj->clearDisabled( DISABLED_CONTAMINATED );
+			return;
+		}
+
+		if( damageType == DAMAGE_FLAME && obj->isDisabledByType( DISABLED_CONTAMINATED ) )
+			obj->clearDisabled( DISABLED_CONTAMINATED );
+
+		if( damageType == DAMAGE_POISON )
+		{
+			const UnsignedInt contaminationDuration = LOGICFRAMES_PER_SECOND * 10;
+			obj->setDisabledUntil( DISABLED_CONTAMINATED, TheGameLogic->getFrame() + contaminationDuration );
+		}
+	}
+#endif
+
+	if ( m_indestructible )
 		return;
 
 	Object *damager = TheGameLogic->findObjectByID( damageInfo->in.m_sourceID );
