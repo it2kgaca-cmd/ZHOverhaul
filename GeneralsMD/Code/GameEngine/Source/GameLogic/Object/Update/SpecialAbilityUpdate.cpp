@@ -159,6 +159,9 @@ SpecialAbilityUpdate::SpecialAbilityUpdate( Thing *thing, const ModuleData* modu
   m_facingComplete = false;
   m_withinStartAbilityRange = false;
   m_doDisableFXParticles = TRUE;// true always, unless small unit causes it to toggle on-off
+  m_resumeAttackMove = FALSE;
+  m_attackMoveOneShotPersistent = FALSE;
+  m_resumeAttackMoveDestination.zero();
   setWakeFrame(getObject(), UPDATE_SLEEP_FOREVER);
 //  This is the althernate way to one-at-a-time BlackLotus' specials; we'll keep it commented her until Dustin decides, or until 12/10/02
 //  setBusy( FALSE );
@@ -567,6 +570,12 @@ Bool SpecialAbilityUpdate::initiateIntentToDoSpecialPower( const SpecialPowerTem
     //Check to make sure our modules are connected.
     return FALSE;
   }
+
+  // A manually initiated special supersedes any stale continuation. Attack-move
+  // reattaches its continuation immediately after this intent is accepted.
+  m_resumeAttackMove = FALSE;
+  m_attackMoveOneShotPersistent = FALSE;
+  m_resumeAttackMoveDestination.zero();
 
   //Clear target values
   m_targetID = INVALID_ID;
