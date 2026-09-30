@@ -2487,7 +2487,17 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 			Coord3D dest;
 			computeIndividualDestination(&dest, pos, member, &center, isFormation);
 
-			if (member->isAbleToAttack())
+			// Specialist infantry deliberately have no conventional weapon, but they
+			// still need the attack-move state so it can opportunistically invoke
+			// their legal ActionManager abilities along the route.
+			const Bool specialistAttackMove =
+				member->findSpecialPowerModuleInterface( SPECIAL_HACKER_DISABLE_BUILDING ) != nullptr ||
+				member->findSpecialPowerModuleInterface( SPECIAL_BLACKLOTUS_CAPTURE_BUILDING ) != nullptr ||
+				member->findSpecialPowerModuleInterface( SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK ) != nullptr ||
+				member->getCommandSetString().find( "Hijacker" ) != AsciiString::npos ||
+				member->getCommandSetString().find( "Saboteur" ) != AsciiString::npos;
+
+			if (member->isAbleToAttack() || specialistAttackMove)
 				ai->aiAttackMoveToPosition(&dest, maxShotsToFire, cmdSource);
 			else
 				ai->aiMoveToPosition(&dest, cmdSource);
