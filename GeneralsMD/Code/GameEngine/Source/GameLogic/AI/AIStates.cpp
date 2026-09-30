@@ -6736,9 +6736,11 @@ StateReturnType AIEnterState::update()
 						// If this is not a Hijacker ride, a veteran American vehicle may recover
 						// the same Pilot its normal EjectPilotDie behavior would create.  Invoke
 						// only that OCL, never the vehicle's death pipeline.
-						if( !hasHijackerDriver && obj->getVeterancyLevel() != LEVEL_REGULAR &&
-								obj->getTemplate()->getSide().compareNoCase( "America" ) == 0 )
+						if( !hasHijackerDriver && obj->getVeterancyLevel() != LEVEL_REGULAR )
 						{
+							// Presence of EjectPilotDie is the vehicle's own declaration that it
+							// carries the American-style recoverable pilot.  This is safer than
+							// checking current owner, which may now be GLA.
 							for( BehaviorModule **bm = obj->getBehaviorModules(); *bm; ++bm )
 							{
 								DieModuleInterface *eject = (*bm)->getEjectPilotDieInterface();
