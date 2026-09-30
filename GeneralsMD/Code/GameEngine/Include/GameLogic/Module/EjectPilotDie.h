@@ -65,6 +65,10 @@ public:
 
 	static void ejectPilot(const ObjectCreationList* ocl, const Object* dyingObject, const Object* damageDealer);
 
+	// Recycler support: use the vehicle's normal pilot OCL without invoking the
+	// death mux or any other death behavior. Returns the spawned pilot, if any.
+	Object *ejectPilotForRecycle();
+
 	virtual void onDie( const DamageInfo *damageInfo ) override;
 	virtual DieModuleInterface* getEjectPilotDieInterface() override {return this; }
 
