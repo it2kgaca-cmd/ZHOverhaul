@@ -372,6 +372,8 @@ UnsignedInt INI::load( AsciiString filename, INILoadType loadType, Xfer *pXfer )
 	s_xfer = pXfer;
 	prepFile(filename, loadType);
 
+	AsciiString lastLineRead;
+
 	try
 	{
 
@@ -383,6 +385,7 @@ UnsignedInt INI::load( AsciiString filename, INILoadType loadType, Xfer *pXfer )
 			readLine();
 
 			AsciiString currentLine = m_buffer;
+			lastLineRead = currentLine;
 
 			// the first word is the type of data we're processing
 			const char *token = strtok( m_buffer, getSeps() );
@@ -421,12 +424,38 @@ UnsignedInt INI::load( AsciiString filename, INILoadType loadType, Xfer *pXfer )
 
 		}
 	}
-	catch (...)
+	catch (const INIException&)
 	{
 		unPrepFile();
-
-		// propagate the exception.
 		throw;
+	}
+	catch (const std::exception& e)
+	{
+		AsciiString failedFile = m_filename;
+		UnsignedInt failedLine = m_lineNum;
+		AsciiString failedText = lastLineRead;
+		unPrepFile();
+
+		char buff[1536];
+		snprintf(buff, ARRAY_SIZE(buff),
+			"Exception while parsing INI file '%s' at line %u: %s\nLast line: '%s'",
+			failedFile.str(), failedLine, e.what(), failedText.str());
+		throw INIException(buff);
+	}
+	catch (...)
+	{
+		// Several legacy INI helpers still throw raw integer error constants instead
+		// of INIException. Preserve the parser context before unPrepFile() clears it.
+		AsciiString failedFile = m_filename;
+		UnsignedInt failedLine = m_lineNum;
+		AsciiString failedText = lastLineRead;
+		unPrepFile();
+
+		char buff[1536];
+		snprintf(buff, ARRAY_SIZE(buff),
+			"Error parsing INI file '%s' at line %u.\nLast line: '%s'",
+			failedFile.str(), failedLine, failedText.str());
+		throw INIException(buff);
 	}
 
 	unPrepFile();

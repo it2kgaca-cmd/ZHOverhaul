@@ -754,17 +754,21 @@ void GameEngine::init()
 			RELEASE_CRASHLOCALIZED("ERROR:D3DFailurePrompt", "ERROR:D3DFailureMessage");
 		}
 	}
-	catch (INIException e)
+	catch (const INIException& e)
 	{
 		if (e.mFailureMessage)
 			RELEASE_CRASH((e.mFailureMessage));
 		else
-			RELEASE_CRASH(("Uncaught Exception during initialization."));
+			RELEASE_CRASH(("INI exception during initialization without a message."));
 
+	}
+	catch (const std::exception& e)
+	{
+		RELEASE_CRASH(("C++ exception during initialization: %s", e.what()));
 	}
 	catch (...)
 	{
-		RELEASE_CRASH(("Uncaught Exception during initialization."));
+		RELEASE_CRASH(("Unknown non-standard exception during initialization."));
 	}
 
 	resetSubsystems();
