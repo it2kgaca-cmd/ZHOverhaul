@@ -3743,6 +3743,12 @@ static Object *findAttackMoveSpecialistTarget(Object *owner, const Coord3D *dest
 
 	for (Object *target = iter->first(); target; target = iter->next())
 	{
+		// Attack Move should not immediately latch back onto a target whose
+		// hacking disable is already running. Manual abilities remain free to
+		// refresh/retarget according to their normal ActionManager rules.
+		if( target->isDisabledByType( DISABLED_HACKED ) )
+			continue;
+
 		Real dx = target->getPosition()->x - p->x;
 		Real dy = target->getPosition()->y - p->y;
 		Real along = dx*rx + dy*ry;
