@@ -2917,6 +2917,17 @@ static void countExisting( Object *obj, void *userData )
 // Make sure that building another of this unit/structure/object won't exceed MaxSimultaneousOfType()
 Bool Player::canBuildMoreOfType( const ThingTemplate *whatToBuild ) const
 {
+#if !RETAIL_COMPATIBLE_CRC
+	const char *templateName = whatToBuild ? whatToBuild->getName().str() : nullptr;
+	if( templateName != nullptr &&
+			(strstr(templateName, "StrategyCenter") != nullptr ||
+			 strstr(templateName, "PropagandaCenter") != nullptr ||
+			 strstr(templateName, "GLAPalace") != nullptr) )
+	{
+		return true;
+	}
+#endif
+
   // make sure we're not maxed out for this type of unit.
   UnsignedInt maxSimultaneousOfType = whatToBuild->getMaxSimultaneousOfType();
   if (maxSimultaneousOfType != 0)

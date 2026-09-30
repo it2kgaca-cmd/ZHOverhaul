@@ -299,12 +299,35 @@ Bool TunnelContain::isContained( const Object *obj ) const
 //-------------------------------------------------------------------------------------------------
 Bool TunnelContain::isValidContainerFor(const Object* obj, Bool checkCapacity) const
 {
+	// Rebuild holes enter the same player TunnelTracker as proper tunnels, but
+	// only infantry may use a hole as an access point.
+	if( getObject()->isKindOf( KINDOF_REBUILD_HOLE ) && obj != nullptr && !obj->isKindOf( KINDOF_INFANTRY ) )
+		return false;
+
 	Player *owningPlayer = getObject()->getControllingPlayer();
 	if( owningPlayer && owningPlayer->getTunnelSystem() )
 	{
 		return owningPlayer->getTunnelSystem()->isValidContainerFor( obj, checkCapacity );
 	}
 	return false;
+}
+
+//-------------------------------------------------------------------------------------------------
+ExitDoorType TunnelContain::reserveDoorForExit( const ThingTemplate* objType, Object *specificObject )
+{
+	if( getObject()->isKindOf( KINDOF_REBUILD_HOLE ) && specificObject != nullptr && !specificObject->isKindOf( KINDOF_INFANTRY ) )
+		return DOOR_NONE_AVAILABLE;
+
+	return OpenContain::reserveDoorForExit( objType, specificObject );
+}
+
+//-------------------------------------------------------------------------------------------------
+void TunnelContain::exitObjectViaDoor( Object *newObj, ExitDoorType exitDoor )
+{
+	if( getObject()->isKindOf( KINDOF_REBUILD_HOLE ) && newObj != nullptr && !newObj->isKindOf( KINDOF_INFANTRY ) )
+		return;
+
+	OpenContain::exitObjectViaDoor( newObj, exitDoor );
 }
 
 UnsignedInt TunnelContain::getContainCount() const
@@ -533,7 +556,27 @@ void TunnelContain::orderAllPassengersToExit( CommandSourceType commandSource, B
 	if( !owningPlayer || !owningPlayer->getTunnelSystem() )
 		return;
 
-	OpenContain::orderAllPassengersToExit( commandSource, instantly );
+	if( !getObject()->isKindOf( KINDOF_REBUILD_HOLE ) )
+	{
+		OpenContain::orderAllPassengersToExit( commandSource, instantly );
+		return;
+	}
+
+	const ContainedItemsList *items = getContainedItemsList();
+	if( items == nullptr )
+		return;
+
+	for( ContainedItemsList::const_iterator it = items->begin(); it != items->end(); ++it )
+	{
+		Object *rider = *it;
+		if( rider == nullptr || !rider->isKindOf( KINDOF_INFANTRY ) || rider->getAI() == nullptr )
+			continue;
+
+		if( instantly )
+			rider->getAI()->aiExitInstantly( getObject(), commandSource );
+		else
+			rider->getAI()->aiExit( getObject(), commandSource );
+	}
 }
 
 //-------------------------------------------------------------------------------------------------

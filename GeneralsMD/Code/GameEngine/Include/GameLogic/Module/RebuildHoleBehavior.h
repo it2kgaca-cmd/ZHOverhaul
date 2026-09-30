@@ -32,11 +32,11 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "GameLogic/Module/BehaviorModule.h"
 #include "GameLogic/Module/DieModule.h"
-#include "GameLogic/Module/UpdateModule.h"
+#include "GameLogic/Module/TunnelContain.h"
 
 //-------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
-class RebuildHoleBehaviorModuleData : public UpdateModuleData
+class RebuildHoleBehaviorModuleData : public TunnelContainModuleData
 {
 
 public:
@@ -69,8 +69,7 @@ public:
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
-class RebuildHoleBehavior : public UpdateModule,
-														public DieModuleInterface,
+class RebuildHoleBehavior : public TunnelContain,
 														public RebuildHoleBehaviorInterface
 {
 
@@ -84,7 +83,7 @@ public:
 
 	virtual RebuildHoleBehaviorInterface* getRebuildHoleBehaviorInterface() override { return this; }
 
-	static Int getInterfaceMask() { return UpdateModule::getInterfaceMask() | (MODULEINTERFACE_DIE); }
+	static Int getInterfaceMask() { return TunnelContain::getInterfaceMask(); }
 
 	// BehaviorModule
 	virtual DieModuleInterface* getDie() override { return this; }

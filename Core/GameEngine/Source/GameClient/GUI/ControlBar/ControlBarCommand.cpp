@@ -86,6 +86,10 @@ void ControlBar::populateInvDataCallback( Object *obj, void *userData )
 {
 	PopulateInvButtonData *data = (PopulateInvButtonData *)userData;
 
+	ContainModuleInterface *endpointContain = data->transport ? data->transport->getContain() : nullptr;
+	if( endpointContain != nullptr && !endpointContain->isValidContainerFor( obj, FALSE ) )
+		return;
+
 	//
 	// if we're beyond the max the GUI can support, design needs to change the parameters
 	// of the transport object to carry less things

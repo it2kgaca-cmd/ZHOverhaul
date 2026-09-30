@@ -58,7 +58,7 @@ RebuildHoleBehaviorModuleData::RebuildHoleBehaviorModuleData()
 /*static*/ void RebuildHoleBehaviorModuleData::buildFieldParse( MultiIniFieldParse &p )
 {
 
-  UpdateModuleData::buildFieldParse( p );
+  TunnelContainModuleData::buildFieldParse( p );
 
 	static const FieldParse dataFieldParse[] =
 	{
@@ -79,7 +79,7 @@ RebuildHoleBehaviorModuleData::RebuildHoleBehaviorModuleData()
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 RebuildHoleBehavior::RebuildHoleBehavior( Thing *thing, const ModuleData* moduleData )
-									 : UpdateModule( thing, moduleData )
+									 : TunnelContain( thing, moduleData )
 {
 
 	m_workerID = INVALID_ID;
@@ -182,6 +182,8 @@ void RebuildHoleBehavior::transferBombs( Object *reconstruction )
 //-------------------------------------------------------------------------------------------------
 UpdateSleepTime RebuildHoleBehavior::update()
 {
+	TunnelContain::update();
+
 	const RebuildHoleBehaviorModuleData *modData = getRebuildHoleBehaviorModuleData();
 	Object *hole = getObject();
 	Object *reconstructing = nullptr;
@@ -337,6 +339,8 @@ UpdateSleepTime RebuildHoleBehavior::update()
 //-------------------------------------------------------------------------------------------------
 void RebuildHoleBehavior::onDie( const DamageInfo *damageInfo )
 {
+	TunnelContain::onDie( damageInfo );
+
 	if( m_workerID != INVALID_ID )
 	{
 		// Our rebuilding building and us the hole can be killed in the same frame, which means we may not have

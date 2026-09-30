@@ -104,6 +104,8 @@ public:
 	virtual void orderAllPassengersToExit( CommandSourceType commandSource, Bool instantly ) override; ///< All of the smarts of exiting are in the passenger's AIExit. removeAllFrommContain is a last ditch system call, this is the game Evacuate
 	virtual void orderAllPassengersToIdle( CommandSourceType commandSource ) override; ///< Just like it sounds
 
+	virtual ExitDoorType reserveDoorForExit( const ThingTemplate* objType, Object *specificObject ) override;
+	virtual void exitObjectViaDoor( Object *newObj, ExitDoorType exitDoor ) override;
 	virtual Bool isValidContainerFor(const Object* obj, Bool checkCapacity) const override;
 	virtual void addToContainList( Object *obj ) override;		///< The part of AddToContain that inheritors can override (Can't do whole thing because of all the private stuff involved)
 	virtual void removeFromContain( Object *obj, Bool exposeStealthUnits = FALSE ) override;	///< remove 'obj' from contain list
