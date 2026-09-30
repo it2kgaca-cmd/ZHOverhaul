@@ -70,6 +70,7 @@
 #include "GameLogic/Module/JetAIUpdate.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "GameLogic/Module/StealthUpdate.h"
+#include "GameLogic/Module/SpecialPowerModule.h"
 
 
 static Bool cannotPossiblyAttackObject( State *thisState, void* userData );
