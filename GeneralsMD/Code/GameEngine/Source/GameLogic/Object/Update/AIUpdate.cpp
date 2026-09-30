@@ -3667,6 +3667,9 @@ void AIUpdateInterface::aiDoCommand(const AICommandParms* parms)
  */
 void AIUpdateInterface::privateMoveToPosition( const Coord3D *pos, CommandSourceType cmdSource )
 {
+	// Explicit movement cancels anchored weapon stances such as Toxin Tractor Contaminate.
+	getObject()->releaseWeaponLock( LOCKED_PERMANENTLY );
+	getObject()->releaseWeaponLock( LOCKED_TEMPORARILY );
 	if (getObject()->isMobile() == FALSE)
 		return;
 
@@ -4395,6 +4398,9 @@ void AIUpdateInterface::privateAttackPosition( const Coord3D *pos, Int maxShotsT
  */
 void AIUpdateInterface::privateAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire, CommandSourceType cmdSource )
 {
+	// Explicit movement cancels anchored weapon stances such as Toxin Tractor Contaminate.
+	getObject()->releaseWeaponLock( LOCKED_PERMANENTLY );
+	getObject()->releaseWeaponLock( LOCKED_TEMPORARILY );
 	if (m_isAiDead || getObject()->isMobile() == FALSE)
 		return;
 
