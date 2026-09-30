@@ -874,6 +874,9 @@ protected:
 	// methods to help out with each context
 	void updateConstructionTextDisplay( Object *obj );
 	void updateOCLTimerTextDisplay( UnsignedInt totalSeconds, Real percent );
+#if !RETAIL_COMPATIBLE_CRC
+	void updateSupplyDropCooldownTile( Object *creatorObject );
+#endif
 
 	void setUpDownImages();
 		// methods for flashing cameos

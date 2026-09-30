@@ -2240,32 +2240,20 @@ void ControlBar::switchToContext( ControlBarContext context, Drawable *draw )
 		//---------------------------------------------------------------------------------------------
 		case CB_CONTEXT_COMMAND:
 		{
-#if !RETAIL_COMPATIBLE_CRC
-			static const NameKeyType key_OCLUpdate = NAMEKEY( "OCLUpdate" );
-			const Bool showSupplyDropTimer =
-				obj != nullptr &&
-				obj->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) &&
-				obj->findUpdateModule( key_OCLUpdate ) != nullptr;
-#else
-			const Bool showSupplyDropTimer = FALSE;
-#endif
-
 			// show or hide the right window groups
 			//m_contextParent[ CP_PURCHASE_SCIENCE ]->winHide( TRUE );
 			m_contextParent[ CP_COMMAND ]->winHide( FALSE );
 			m_contextParent[ CP_BUILD_QUEUE ]->winHide( TRUE );
 			m_contextParent[ CP_BEACON ]->winHide( TRUE );
 			m_contextParent[ CP_UNDER_CONSTRUCTION ]->winHide( TRUE );
-			m_contextParent[ CP_OCL_TIMER ]->winHide( showSupplyDropTimer ? FALSE : TRUE );
+			// The stock OCL timer is a full alternate context and must never be layered
+			// over the command grid. Supply Drop Zones render their cooldown in slot 12.
+			m_contextParent[ CP_OCL_TIMER ]->winHide( TRUE );
 			m_contextParent[ CP_OBSERVER_INFO ]->winHide( TRUE );
 			m_contextParent[ CP_OBSERVER_LIST ]->winHide( TRUE );
 
 			// fill the specific UI info
 			populateCommand( draw->getObject() );
-#if !RETAIL_COMPATIBLE_CRC
-			if( showSupplyDropTimer )
-				populateOCLTimer( obj );
-#endif
 
 			//
 			// for objects that are able to create units, we show a build queue if we actually

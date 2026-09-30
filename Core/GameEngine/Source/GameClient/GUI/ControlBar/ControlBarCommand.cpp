@@ -43,6 +43,7 @@
 #include "GameLogic/Module/BattlePlanUpdate.h"
 #include "GameLogic/Module/DozerAIUpdate.h"
 #include "GameLogic/Module/OverchargeBehavior.h"
+#include "GameLogic/Module/OCLUpdate.h"
 #include "GameLogic/Module/ProductionUpdate.h"
 #include "GameLogic/Module/SpecialPowerModule.h"
 #include "GameLogic/Module/TransportContain.h"
@@ -78,6 +79,62 @@ struct PopulateInvButtonData
 	GameWindow **controls;   ///< the controls
 	Object *transport;			 ///< the transport
 };
+
+
+//-------------------------------------------------------------------------------------------------
+#if !RETAIL_COMPATIBLE_CRC
+// Supply Drop Zones use the normal command grid for their standing manifest.  The stock
+// OCL timer is a full alternate control-bar context, so displaying it at the same time
+// would cover the command grid and intercept its mouse input.  Keep the countdown inside
+// command slot 12 instead.
+void ControlBar::updateSupplyDropCooldownTile( Object *creatorObject )
+{
+	static const Int supplyDropCooldownIndex = 11; // UI slot 12; slots 1-11 are manifest units.
+
+	if( creatorObject == nullptr || !creatorObject->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) )
+		return;
+
+	GameWindow *win = m_commandWindows[ supplyDropCooldownIndex ];
+	if( win == nullptr )
+		return;
+
+	static const NameKeyType key_OCLUpdate = NAMEKEY( "OCLUpdate" );
+	OCLUpdate *update = (OCLUpdate*)creatorObject->findUpdateModule( key_OCLUpdate );
+	if( update == nullptr )
+	{
+		win->winHide( TRUE );
+		return;
+	}
+
+	const UnsignedInt frames = update->getRemainingFrames();
+	const UnsignedInt totalSeconds =
+		(frames + LOGICFRAMES_PER_SECOND - 1) / LOGICFRAMES_PER_SECOND;
+	const UnsignedInt minutes = totalSeconds / 60;
+	const UnsignedInt seconds = totalSeconds - (minutes * 60);
+
+	UnicodeString text;
+	text.format( L"%u:%02u", minutes, seconds );
+
+	// This is a status tile, not a command.  Keep it visible but disabled so it cannot
+	// steal clicks or be interpreted as a build command.
+	GadgetButtonSetData( win, nullptr );
+	GadgetButtonEnableCheckLike( win, FALSE, FALSE );
+	win->winClearStatus( WIN_STATUS_RIGHT_CLICK | WIN_STATUS_NOT_READY | WIN_STATUS_USE_OVERLAY_STATES );
+	win->winSetStatus( WIN_STATUS_ALWAYS_COLOR );
+	win->winEnable( FALSE );
+	win->winHide( FALSE );
+	win->winSetTooltipFunc( nullptr );
+
+	const Image *image = creatorObject->getTemplate()->getButtonImage();
+	GadgetButtonSetEnabledImage( win, image );
+	GadgetButtonSetDisabledImage( win, image );
+	GadgetButtonDrawOverlayImage( win, nullptr );
+	GadgetButtonSetText( win, text );
+
+	const Int percent = REAL_TO_INT_FLOOR( update->getCountdownPercent() * 100.0f + 0.5f );
+	GadgetButtonDrawInverseClock( win, MAX( 0, MIN( 100, percent ) ), m_buildUpClockColor );
+}
+#endif
 
 //-------------------------------------------------------------------------------------------------
 /** Used for the callback iterator on transport contents to do the actual GUI fill */
@@ -377,6 +434,10 @@ void ControlBar::populateCommand( Object *obj )
 			m_commandWindows[buttonIndex]->winEnable( TRUE );
 			setControlCommand( m_commandWindows[buttonIndex], button );
 		}
+
+		// Slot 12 is a compact, non-interactive countdown tile.  The stock OCL timer
+		// window cannot coexist with this command grid because it covers the same area.
+		updateSupplyDropCooldownTile( obj );
 
 		// Keep the normal sell action in the familiar slot 14.
 		if( m_commandWindows[13] )
@@ -825,13 +886,8 @@ void ControlBar::updateContextCommand()
 		obj = m_currentSelectedDrawable->getObject();
 
 #if !RETAIL_COMPATIBLE_CRC
-	if( obj && obj->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) &&
-			m_contextParent[ CP_OCL_TIMER ]->winIsHidden() == FALSE )
-	{
-		static const NameKeyType key_OCLUpdate = NAMEKEY( "OCLUpdate" );
-		if( obj->findUpdateModule( key_OCLUpdate ) )
-			updateContextOCLTimer();
-	}
+	if( obj && obj->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) )
+		updateSupplyDropCooldownTile( obj );
 #endif
 
 	//
