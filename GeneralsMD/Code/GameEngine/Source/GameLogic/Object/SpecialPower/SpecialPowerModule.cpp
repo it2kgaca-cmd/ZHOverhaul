@@ -131,6 +131,20 @@ SpecialPowerModule::SpecialPowerModule( Thing *thing, const ModuleData *moduleDa
 	if( md->m_startsPaused )
 		pauseCountdown( TRUE );
 
+#if !RETAIL_COMPATIBLE_CRC
+	// Non-retail builds use 0xFFFFFFFF as a sentinel for powers that are not
+	// available yet. Zero-reload powers with no required science (such as
+	// Strategy Center battle plans) are inherently ready and otherwise never
+	// clear that sentinel after a normally constructed building.
+	if( !md->m_startsPaused &&
+			getSpecialPowerTemplate() != nullptr &&
+			getSpecialPowerTemplate()->getReloadTime() == 0 &&
+			getSpecialPowerTemplate()->getRequiredScience() == SCIENCE_INVALID )
+	{
+		m_availableOnFrame = TheGameLogic->getFrame();
+	}
+#endif
+
 	resolveSpecialPower();
 
 	// Now, if we find that we have just come into being,
