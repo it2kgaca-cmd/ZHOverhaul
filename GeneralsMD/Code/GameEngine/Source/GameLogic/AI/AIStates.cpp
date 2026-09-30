@@ -3623,7 +3623,6 @@ AIAttackMoveToState::AIAttackMoveToState( StateMachine *machine ) : AIMoveToStat
 	m_frameToSleepUntil = 0;
 	m_retryCount = ATTACK_RETRY_COUNT;
 	m_specialistDestination.zero();
-	m_specialistResumePending = FALSE;
 	m_attackMoveMachine = newInstance(AIAttackMoveStateMachine)(getMachineOwner(), "AIAttackMoveMachine");
 	m_attackMoveMachine->initDefaultState();
 }
@@ -3660,10 +3659,8 @@ void AIAttackMoveToState::xfer( Xfer *xfer )
 	}
 	if (version>=3) {
 		xfer->xferCoord3D(&m_specialistDestination);
-		xfer->xferBool(&m_specialistResumePending);
 	} else if (xfer->getXferMode() == XFER_LOAD) {
 		m_specialistDestination.zero();
-		m_specialistResumePending = FALSE;
 	}
 	xfer->xferSnapshot(m_attackMoveMachine);
 }
@@ -3698,7 +3695,6 @@ StateReturnType AIAttackMoveToState::onEnter()
 	m_retryCount = ATTACK_RETRY_COUNT;
 	m_frameToSleepUntil = 0;
 	m_specialistDestination = *getMachineGoalPosition();
-	m_specialistResumePending = FALSE;
 
 	return AIMoveToState::onEnter();
 }
