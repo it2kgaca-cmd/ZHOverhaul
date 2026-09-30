@@ -3418,11 +3418,23 @@ void AIUpdateInterface::aiDoCommand(const AICommandParms* parms)
 	// weapon lock as a stance. Any later explicit order cancels it, while ordinary
 	// SWITCH_WEAPON locks (SCUD warheads, etc.) remain untouched.
 	if (parms->m_cmdSource != CMD_FROM_AI &&
-			parms->m_cmd != AICMD_ATTACK_POSITION &&
 			isAnchoredToxinContaminateStance(getObject(), this))
 	{
-		getObject()->releaseWeaponLock(LOCKED_PERMANENTLY);
-		getObject()->releaseWeaponLock(LOCKED_TEMPORARILY);
+		Bool isSameSpotContaminateAttack = FALSE;
+		if( parms->m_cmd == AICMD_ATTACK_POSITION )
+		{
+			const Coord3D *here = getObject()->getPosition();
+			const Real dx = parms->m_pos.x - here->x;
+			const Real dy = parms->m_pos.y - here->y;
+			const Real dz = parms->m_pos.z - here->z;
+			isSameSpotContaminateAttack = (dx*dx + dy*dy + dz*dz) < 1.0f;
+		}
+
+		if( !isSameSpotContaminateAttack )
+		{
+			getObject()->releaseWeaponLock(LOCKED_PERMANENTLY);
+			getObject()->releaseWeaponLock(LOCKED_TEMPORARILY);
+		}
 	}
 
 #ifdef ALLOW_SURRENDER
