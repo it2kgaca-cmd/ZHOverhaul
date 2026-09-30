@@ -99,6 +99,34 @@ EjectPilotDie::~EjectPilotDie()
 }
 
 //-------------------------------------------------------------------------------------------------
+Object *EjectPilotDie::ejectPilotForRecycle()
+{
+	Object *vehicle = getObject();
+	if( !vehicle || vehicle->getVeterancyLevel() == LEVEL_REGULAR )
+		return nullptr;
+
+	const EjectPilotDieModuleData *d = getEjectPilotDieModuleData();
+	const ObjectCreationList *ocl = vehicle->isSignificantlyAboveTerrain() ? d->m_oclInAir : d->m_oclOnGround;
+	if( !ocl )
+		return nullptr;
+
+	Object *pilot = ObjectCreationList::create( ocl, vehicle, (const Object*)nullptr );
+	if( pilot && pilot->getExperienceTracker() )
+		pilot->getExperienceTracker()->setVeterancyLevel( vehicle->getVeterancyLevel(), FALSE );
+
+	AudioEventRTS voiceEject = *(vehicle->getTemplate()->getPerUnitSound("VoiceEject"));
+	voiceEject.setPosition( vehicle->getPosition() );
+	voiceEject.setPlayerIndex( vehicle->getControllingPlayer()->getPlayerIndex() );
+	TheAudio->addAudioEvent(&voiceEject);
+
+	AudioEventRTS soundEject = *(vehicle->getTemplate()->getPerUnitSound("SoundEject"));
+	soundEject.setPosition( vehicle->getPosition() );
+	TheAudio->addAudioEvent(&soundEject);
+
+	return pilot;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** The die callback. */
 //-------------------------------------------------------------------------------------------------
 void EjectPilotDie::onDie( const DamageInfo * damageInfo )
