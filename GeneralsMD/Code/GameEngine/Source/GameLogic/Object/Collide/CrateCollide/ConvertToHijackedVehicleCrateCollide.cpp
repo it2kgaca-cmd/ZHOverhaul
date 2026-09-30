@@ -246,7 +246,11 @@ Bool ConvertToHijackedVehicleCrateCollide::executeCrateBehavior( Object *other )
 		obj->getDrawable()->setDrawableHidden( true );
 
 	if( hijackerUpdate && hijackerUpdate->hasResumeAttackMoveDestination() && targetAI )
-		targetAI->aiAttackMoveToPosition(hijackerUpdate->getResumeAttackMoveDestination(), NO_MAX_SHOTS_LIMIT, CMD_FROM_AI);
+	{
+		const CommandSourceType resumeSource = (CommandSourceType)hijackerUpdate->getResumeAttackMoveCommandSource();
+		targetAI->aiAttackMoveToPosition(hijackerUpdate->getResumeAttackMoveDestination(), NO_MAX_SHOTS_LIMIT, resumeSource);
+		hijackerUpdate->clearResumeAttackMoveDestination();
+	}
 
 	// By returning FALSE, we will not remove the object (Hijacker)
 	return FALSE;
