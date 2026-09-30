@@ -1156,6 +1156,9 @@ Bool ActionManager::canDisableVehicleViaHacking( const Object *obj, const Object
 		return FALSE;
 	}
 
+	if( objectToHack->isDisabledByType( DISABLED_HACKED ) )
+		return FALSE;
+
 	if( objectToHack->isKindOf( KINDOF_AIRCRAFT ) || objectToHack->isAirborneTarget() )
 	{
 		return false;
@@ -1350,6 +1353,9 @@ Bool ActionManager::canDisableBuildingViaHacking( const Object *obj, const Objec
 	{
 		return FALSE;
 	}
+
+	if( objectToHack->isDisabledByType( DISABLED_HACKED ) )
+		return FALSE;
 
 	// if the target is in the shroud, we can't do anything
 	if (isObjectShroudedForAction(obj, objectToHack, commandSource))
