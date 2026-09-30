@@ -526,19 +526,9 @@ void AIUpdateInterface::requestPath( Coord3D *destination, Bool isFinalGoal )
 	//DEBUG_LOG(("Request Frame %d, obj %s %x", TheGameLogic->getFrame(), getObject()->getTemplate()->getName().str(), getObject()));
 	m_isFinalGoal = isFinalGoal;
 
-	// ZH Overhaul: terminal ground goals are admitted through the locomotor/pathfind terrain
-	// contract before they become canonical retry intent.  Aircraft, exact/temporary movement
-	// states and off-map paths deliberately pass isFinalGoal == FALSE and keep their old behavior.
-	if (isFinalGoal && !canComputeQuickPath())
-	{
-		Coord3D admittedDestination = *destination;
-		if (TheAI->pathfinder()->adjustToReachableDestination(
-			getObject(), m_locomotorSet, &admittedDestination))
-		{
-			*destination = admittedDestination;
-		}
-	}
-
+	// Preserve the caller's terminal intent. Terrain legality is enforced by the pathfinder using
+	// this unit's locomotor surfaces; rewriting the canonical goal here made ordinary obstacle
+	// repaths collapse to a nearby cell and could stop vehicles in their tracks.
 	m_requestedDestination = *destination;
 	CRCDEBUG_LOG(("AIUpdateInterface::requestPath() - m_isAttackPath = FALSE for object %d", getObject()->getID()));
 	m_isAttackPath = FALSE;
