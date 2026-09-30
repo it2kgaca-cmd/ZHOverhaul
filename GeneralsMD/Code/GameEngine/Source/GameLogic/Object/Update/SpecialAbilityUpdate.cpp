@@ -724,6 +724,9 @@ void SpecialAbilityUpdate::onExit( Bool cleanup )
   m_active = false;
   m_withinStartAbilityRange = false;
   m_packingState = STATE_NONE;
+  m_resumeAttackMove = FALSE;
+  m_attackMoveOneShotPersistent = FALSE;
+  m_resumeAttackMoveDestination.zero();
 
 //  This is the althernate way to one-at-a-time BlackLotus' specials; we'll keep it commented her until Dustin decides, or until 12/10/02
 //  setBusy( FALSE );// My owner is no longer using me
