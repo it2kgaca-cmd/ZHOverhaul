@@ -199,12 +199,13 @@ public:
 	UnsignedInt getSpecialObjectMax() const;
 	Object* findSpecialObjectWithProducerID( const Object *target );
 	SpecialPowerType getSpecialPowerType() const;
-	void setAttackMoveContinuation(const Coord3D *pos, Bool oneShotPersistent)
+	void setAttackMoveContinuation(const Coord3D *pos, Bool oneShotPersistent, Int commandSource)
 	{
 		if (pos)
 		{
 			m_resumeAttackMove = TRUE;
 			m_attackMoveOneShotPersistent = oneShotPersistent;
+			m_resumeAttackMoveCommandSource = commandSource;
 			m_resumeAttackMoveDestination = *pos;
 		}
 	}
@@ -292,5 +293,6 @@ private:
 	Bool													m_doDisableFXParticles;      // smaller targets cause this flag to toggle, making the particle effect more sparse
 	Bool											m_resumeAttackMove;
 	Bool											m_attackMoveOneShotPersistent;
+	Int											m_resumeAttackMoveCommandSource;
 	Coord3D										m_resumeAttackMoveDestination;
 };
