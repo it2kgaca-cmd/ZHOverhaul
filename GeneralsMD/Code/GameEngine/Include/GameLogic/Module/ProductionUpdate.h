@@ -36,6 +36,7 @@
 
 // FORWARD REFERENCES //////////////////////////////////////////////////////////////////////////////
 class ProductionEntry;
+class OCLUpdate;
 class ThingTemplate;
 class UpgradeTemplate;
 
@@ -60,6 +61,7 @@ class ProductionEntry : public MemoryPoolObject
 {
 
 friend class ProductionUpdate;
+friend class OCLUpdate;
 
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE( ProductionEntry, "ProductionEntry" )
 

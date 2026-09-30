@@ -78,6 +78,10 @@ public:
 	MoneyCrateCollide( Thing *thing, const ModuleData* moduleData );
 	// virtual destructor prototype provided by memory pool declaration
 
+#if !RETAIL_COMPATIBLE_CRC
+	void setMoneyProvidedOverride( UnsignedInt money ) { m_moneyProvidedOverride = money; }
+#endif
+
 protected:
 
 	/// This is the game logic execution function that all real CrateCollides will implement
@@ -85,4 +89,7 @@ protected:
 
 	Int getUpgradedSupplyBoost( Object *other ) const;
 
+#if !RETAIL_COMPATIBLE_CRC
+	UnsignedInt m_moneyProvidedOverride;
+#endif
 };

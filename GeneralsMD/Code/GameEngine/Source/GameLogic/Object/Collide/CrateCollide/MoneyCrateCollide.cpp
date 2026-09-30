@@ -40,7 +40,9 @@
 //-------------------------------------------------------------------------------------------------
 MoneyCrateCollide::MoneyCrateCollide( Thing *thing, const ModuleData* moduleData ) : CrateCollide( thing, moduleData )
 {
-
+#if !RETAIL_COMPATIBLE_CRC
+	m_moneyProvidedOverride = 0xffffffffu;
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -54,6 +56,10 @@ MoneyCrateCollide::~MoneyCrateCollide()
 Bool MoneyCrateCollide::executeCrateBehavior( Object *other )
 {
 	UnsignedInt money = getMoneyCrateCollideModuleData()->m_moneyProvided;
+#if !RETAIL_COMPATIBLE_CRC
+	if( m_moneyProvidedOverride != 0xffffffffu )
+		money = m_moneyProvidedOverride;
+#endif
 
 	money += getUpgradedSupplyBoost(other);
 
@@ -84,6 +90,14 @@ Int MoneyCrateCollide::getUpgradedSupplyBoost( Object *other ) const
 		static const UpgradeTemplate *upgradeTemplate = TheUpgradeCenter->findUpgrade( info.type.c_str() );
 		if (player && upgradeTemplate && player->hasUpgradeComplete(upgradeTemplate))
 		{
+#if !RETAIL_COMPATIBLE_CRC
+			const UnsignedInt baseMoney = getMoneyCrateCollideModuleData()->m_moneyProvided;
+			if( m_moneyProvidedOverride != 0xffffffffu && baseMoney > 0 )
+			{
+				const Real scaled = (Real)info.amount * (Real)m_moneyProvidedOverride / (Real)baseMoney;
+				return REAL_TO_INT_FLOOR( scaled + 0.5f );
+			}
+#endif
 			return info.amount;
 		}
 
@@ -102,7 +116,9 @@ void MoneyCrateCollide::crc( Xfer *xfer )
 
 	// extend base class
 	CrateCollide::crc( xfer );
-
+#if !RETAIL_COMPATIBLE_CRC
+	xfer->xferUnsignedInt( &m_moneyProvidedOverride );
+#endif
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -114,13 +130,23 @@ void MoneyCrateCollide::xfer( Xfer *xfer )
 {
 
 	// version
+#if !RETAIL_COMPATIBLE_CRC && !RETAIL_COMPATIBLE_XFER_SAVE
+	XferVersion currentVersion = 2;
+#else
 	XferVersion currentVersion = 1;
+#endif
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
 	// extend base class
 	CrateCollide::xfer( xfer );
 
+#if !RETAIL_COMPATIBLE_CRC
+	if( version >= 2 )
+		xfer->xferUnsignedInt( &m_moneyProvidedOverride );
+	else if( xfer->getXferMode() == XFER_LOAD )
+		m_moneyProvidedOverride = 0xffffffffu;
+#endif
 }
 
 // ------------------------------------------------------------------------------------------------

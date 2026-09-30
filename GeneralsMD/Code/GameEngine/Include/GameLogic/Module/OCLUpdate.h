@@ -31,6 +31,7 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "GameLogic/Module/UpdateModule.h"
+#include "GameLogic/Module/ProductionUpdate.h"
 
 class ObjectCreationList;
 
@@ -65,6 +66,9 @@ private:
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 class OCLUpdate : public UpdateModule
+#if !RETAIL_COMPATIBLE_CRC
+	, public ProductionUpdateInterface
+#endif
 {
 
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE( OCLUpdate, "OCLUpdate" )
@@ -76,6 +80,32 @@ public:
 	// virtual destructor prototype provided by memory pool declaration
 
 	virtual UpdateSleepTime update() override;
+
+#if !RETAIL_COMPATIBLE_CRC
+	virtual ProductionUpdateInterface* getProductionUpdateInterface() override;
+
+	virtual CanMakeType canQueueCreateUnit( const ThingTemplate *unitType ) const override;
+	virtual CanMakeType canQueueUpgrade( const UpgradeTemplate *upgrade ) const override { return CANMAKE_NO_PREREQ; }
+	virtual ProductionID requestUniqueUnitID() override;
+	virtual Bool queueUpgrade( const UpgradeTemplate *upgrade ) override { return FALSE; }
+	virtual Bool cancelUpgrade( const UpgradeTemplate *upgrade ) override { return FALSE; }
+	virtual Bool isUpgradeInQueue( const UpgradeTemplate *upgrade ) const override { return FALSE; }
+	virtual UnsignedInt countUnitTypeInQueue( const ThingTemplate *unitType ) const override;
+	virtual Bool toggleRepeatUnit( const ThingTemplate *unitType ) override { return FALSE; }
+	virtual Bool isUnitInRepeatQueue( const ThingTemplate *unitType ) const override { return FALSE; }
+	virtual Bool isNextRepeatUnit( const ThingTemplate *unitType ) const override { return FALSE; }
+	virtual UnsignedInt getRepeatProductionCount() const override { return 0; }
+	virtual Bool queueCreateUnit( const ThingTemplate *unitType, ProductionID productionID ) override;
+	virtual Bool cancelUnitCreate( ProductionID productionID ) override;
+	virtual void cancelAllUnitsOfType( const ThingTemplate *unitType ) override;
+	virtual void cancelAndRefundAllProduction() override;
+	virtual UnsignedInt getProductionCount() const override { return m_manifestCount; }
+	virtual const ProductionEntry *firstProduction() const override { return m_manifestHead; }
+	virtual const ProductionEntry *nextProduction( const ProductionEntry *p ) const override { return p ? p->m_next : nullptr; }
+	virtual void setHoldDoorOpen( ExitDoorType exitDoor, Bool holdIt ) override {}
+	virtual const CommandButton* getSpecialPowerConstructionCommandButton() const override { return nullptr; }
+	virtual void setSpecialPowerConstructionCommandButton( const CommandButton *commandButton ) override {}
+#endif
 
 	Real getCountdownPercent() const; ///< goes from 0% to 100%
 	UnsignedInt getRemainingFrames() const; ///< For feedback display
@@ -91,5 +121,20 @@ protected:
 
 	Bool shouldCreate();
 	void setNextCreationFrame();
+
+#if !RETAIL_COMPATIBLE_CRC
+	Bool isSupplyDropZone() const;
+	Bool isEligibleSupplyManifestUnit( const ThingTemplate *unitType ) const;
+	Int getSupplyManifestCost() const;
+	void appendManifestEntry( ProductionEntry *entry );
+	void removeManifestEntry( ProductionEntry *entry );
+	void clearSupplyManifest();
+	Bool deliverSupplyManifest( const Coord3D& edgePoint );
+
+	ProductionEntry *m_manifestHead;
+	ProductionEntry *m_manifestTail;
+	UnsignedInt m_manifestCount;
+	ProductionID m_manifestUniqueID;
+#endif
 
 };
