@@ -85,6 +85,8 @@ public:
 	// virtual destructor prototype provided by memory pool declaration
 
 	virtual void onDie( const DamageInfo *damageInfo ) override;
+	Bool isSalvageCrateDie() const;
+	static Object *createSalvageCrateForObject( Object *obj );
 
 private:
 	Bool testCreationChance( CrateTemplate const *currentCrateData );
