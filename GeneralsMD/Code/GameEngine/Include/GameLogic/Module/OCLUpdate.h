@@ -134,7 +134,6 @@ protected:
 	ProductionEntry *m_manifestHead;
 	ProductionEntry *m_manifestTail;
 	UnsignedInt m_manifestCount;
-	ProductionID m_manifestUniqueID;
 #endif
 
 };

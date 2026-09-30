@@ -120,7 +120,6 @@ OCLUpdate::OCLUpdate( Thing *thing, const ModuleData* moduleData ) : UpdateModul
 	m_manifestHead = nullptr;
 	m_manifestTail = nullptr;
 	m_manifestCount = 0;
-	m_manifestUniqueID = (ProductionID)1;
 #endif
 }
 
@@ -231,9 +230,12 @@ CanMakeType OCLUpdate::canQueueCreateUnit( const ThingTemplate *unitType ) const
 
 ProductionID OCLUpdate::requestUniqueUnitID()
 {
-	ProductionID result = m_manifestUniqueID;
-	m_manifestUniqueID = (ProductionID)(m_manifestUniqueID + 1);
-	return result;
+	// The normal UI asks for an ID before posting the network message. Do not mutate
+	// simulation state here: remote peers do not execute that client-side request.
+	Int maxID = 0;
+	for( ProductionEntry *entry = m_manifestHead; entry; entry = entry->m_next )
+		maxID = MAX( maxID, (Int)entry->m_productionID );
+	return (ProductionID)(maxID + 1);
 }
 
 void OCLUpdate::appendManifestEntry( ProductionEntry *entry )
@@ -363,7 +365,7 @@ Bool OCLUpdate::deliverSupplyManifest( const Coord3D& edgePoint )
 	delivery.m_distToTarget = deliveryDistance;
 	delivery.m_maxAttempts = 4;
 	delivery.m_dropOffset.z = -5.0f;
-	delivery.m_dropDelay = REAL_TO_INT_CEIL( ConvertDurationFromMsecsToFrames( 350.0f ) );
+	delivery.m_dropDelay = (UnsignedInt)REAL_TO_INT_FLOOR( ConvertDurationFromMsecsToFrames( 350.0f ) + 0.5f );
 	delivery.m_isParachuteDirectly = TRUE;
 	ai->deliverPayload( &targetPos, &targetPos, &delivery );
 
@@ -584,7 +586,6 @@ void OCLUpdate::crc( Xfer *xfer )
 
 #if !RETAIL_COMPATIBLE_CRC
 	xfer->xferUnsignedInt( &m_manifestCount );
-	xfer->xferUser( &m_manifestUniqueID, sizeof( ProductionID ) );
 	for( ProductionEntry *entry = m_manifestHead; entry; entry = entry->m_next )
 	{
 		AsciiString name = entry->m_objectToProduce ? entry->m_objectToProduce->getName() : AsciiString::TheEmptyString;
@@ -663,7 +664,6 @@ void OCLUpdate::xfer( Xfer *xfer )
 				appendManifestEntry( entry );
 			}
 		}
-		xfer->xferUser( &m_manifestUniqueID, sizeof( ProductionID ) );
 	}
 #endif
 }
