@@ -1921,7 +1921,11 @@ void ControlBar::evaluateContextUI()
 					switchToContext( CB_CONTEXT_STRUCTURE_INVENTORY, drawToEvaluateFor );
 
 			}
-			else if( update )
+			else if( update
+#if !RETAIL_COMPATIBLE_CRC
+					&& !(obj->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) && obj->getCommandSetString().isNotEmpty())
+#endif
+					)
 			{
 				switchToContext( CB_CONTEXT_OCL_TIMER, drawToEvaluateFor );
 			}

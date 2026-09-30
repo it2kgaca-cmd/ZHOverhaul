@@ -1240,7 +1240,13 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 			if( player->canBuild( command->getThingTemplate() ) == FALSE )
 				return COMMAND_RESTRICTED;
 
-			CanMakeType makeType = TheBuildAssistant->canMakeUnit( obj, command->getThingTemplate() );
+			CanMakeType makeType;
+#if !RETAIL_COMPATIBLE_CRC
+			if( obj->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) && pu )
+				makeType = pu->canQueueCreateUnit( command->getThingTemplate() );
+			else
+#endif
+				makeType = TheBuildAssistant->canMakeUnit( obj, command->getThingTemplate() );
 			if( makeType == CANMAKE_MAXED_OUT_FOR_PLAYER || makeType == CANMAKE_PARKING_PLACES_FULL )
 			{
 				//Disable the button if the player has a max amount of these units in build queue or existence.

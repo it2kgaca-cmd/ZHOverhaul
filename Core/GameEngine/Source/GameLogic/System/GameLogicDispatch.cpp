@@ -2796,7 +2796,17 @@ bool GameLogic::onQueueUnitCreate(MAYBE_UNUSED GameMessage *msg, AIGroupPtr &cur
 			continue;
 
 		ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
-		if (pu == nullptr || !TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate))
+		if (pu == nullptr)
+			continue;
+#if !RETAIL_COMPATIBLE_CRC
+		if( producer->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) )
+		{
+			if( pu->canQueueCreateUnit( whatToCreate ) != CANMAKE_OK )
+				continue;
+		}
+		else
+#endif
+		if( !TheBuildAssistant->isPossibleToMakeUnit(producer, whatToCreate) )
 			continue;
 
 		ProductionID productionID = pu->requestUniqueUnitID();

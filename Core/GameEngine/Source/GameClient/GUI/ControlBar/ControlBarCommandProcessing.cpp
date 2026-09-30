@@ -525,7 +525,14 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			DEBUG_ASSERTCRASH( whatToBuild, ("Undefined BUILD command for object '%s'",
 												 commandButton->getThingTemplate()->getName().str()) );
 
-			CanMakeType cmt = TheBuildAssistant->canMakeUnit(factory, whatToBuild);
+			ProductionUpdateInterface *pu = factory->getProductionUpdateInterface();
+			CanMakeType cmt;
+#if !RETAIL_COMPATIBLE_CRC
+			if( factory->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) && pu )
+				cmt = pu->canQueueCreateUnit( whatToBuild );
+			else
+#endif
+				cmt = TheBuildAssistant->canMakeUnit(factory, whatToBuild);
 
 			if (cmt == CANMAKE_NO_MONEY)
 			{
@@ -556,8 +563,8 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 				break;
 			}
 
-			// get the production interface from the factory object
-			ProductionUpdateInterface *pu = factory->getProductionUpdateInterface();
+			// production interface was resolved above so Supply Drop Zone manifests
+			// can use requisition-budget admission rather than player cash.
 
 			// sanity, we can't build things if we can't produce units
 			if( pu == nullptr )

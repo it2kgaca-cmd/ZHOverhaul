@@ -39,6 +39,7 @@
 #include "Common/ModuleFactory.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
+#include "Common/PlayerTemplate.h"
 #include "Common/Radar.h"
 #include "Common/SpecialPower.h"
 #include "Common/Team.h"
@@ -6222,6 +6223,26 @@ const AsciiString& Object::getCommandSetString() const
 {
 	if (m_commandSetStringOverride.isNotEmpty())
 		return m_commandSetStringOverride;
+
+#if !RETAIL_COMPATIBLE_CRC
+	if( isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) )
+	{
+		Player *player = getControllingPlayer();
+		const PlayerTemplate *playerTemplate = player ? player->getPlayerTemplate() : nullptr;
+		if( playerTemplate && player->isPlayableSide() )
+		{
+			static const AsciiString baseManifestSet( "AmericaSupplyDropManifestCommandSet" );
+			static const AsciiString airForceManifestSet( "AirF_AmericaSupplyDropManifestCommandSet" );
+			static const AsciiString laserManifestSet( "Lazr_AmericaSupplyDropManifestCommandSet" );
+			static const AsciiString superWeaponManifestSet( "SupW_AmericaSupplyDropManifestCommandSet" );
+			const AsciiString& side = playerTemplate->getSide();
+			if( side.compareNoCase( "AmericaAirForceGeneral" ) == 0 ) return airForceManifestSet;
+			if( side.compareNoCase( "AmericaLaserGeneral" ) == 0 ) return laserManifestSet;
+			if( side.compareNoCase( "AmericaSuperWeaponGeneral" ) == 0 ) return superWeaponManifestSet;
+			if( side.compareNoCase( "America" ) == 0 ) return baseManifestSet;
+		}
+	}
+#endif
 
 	return getTemplate()->friend_getCommandSetString();
 }
