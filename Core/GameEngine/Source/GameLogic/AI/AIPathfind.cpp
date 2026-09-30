@@ -5977,8 +5977,9 @@ Bool Pathfinder::checkForAdjust(Object *obj, const LocomotorSet& locomotorSet, B
 	Coord3D adjustDest;
 	PathfindCell *cellP = getCell(layer, cellX, cellY);
 	if (cellP==nullptr) return false;
-	if (cellP && cellP->getType() == PathfindCell::CELL_CLIFF) {
-		return false;  // no final destinations on cliffs.
+	const Bool isCrusher = obj ? obj->getCrusherLevel() > 0 : false;
+	if (!validMovementPosition(isCrusher, locomotorSet.getValidSurfaces(), cellP)) {
+		return false;
 	}
 	if (isHuman) {
 		// check if new cell is in logical map.	(computer can move off logical map)
@@ -7084,9 +7085,6 @@ struct ExamineCellsStruct
 			}
 
 			UnsignedInt newCostSoFar = from->getCostSoFar() + 0.5f*COST_ORTHOGONAL;
-			if (to->getType() == PathfindCell::CELL_CLIFF ) {
-				return 1;
-			}
 
 			ICoord2D newCellCoord;
 			newCellCoord.x = to_x;
@@ -9235,9 +9233,6 @@ Bool Pathfinder::clientSafeQuickDoesPathExist( const LocomotorSet& locomotorSet,
 
 	PathfindCell *parentCell = getClippedCell(fromLayer, from);
 	PathfindCell *goalCell = getClippedCell(destinationLayer, to);
-	if (goalCell->getType()==PathfindCell::CELL_CLIFF) {
-		return false; // No goals on cliffs.
-	}
 	Bool doingTerrainZone = false;
 	zone1 = m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), false, parentCell->getZone());
 
@@ -9287,14 +9282,14 @@ Bool Pathfinder::clientSafeQuickDoesPathExistForUI( const LocomotorSet& locomoto
 {
 	// See if terrain or building is blocking the destination.
 	PathfindLayerEnum destinationLayer = TheTerrainLogic->getLayerForDestination(to);
+	if (!validMovementPosition(false, destinationLayer, locomotorSet, to)) {
+		return false;
+	}
 	PathfindLayerEnum fromLayer = TheTerrainLogic->getLayerForDestination(from);
 	Int zone1, zone2;
 
 	PathfindCell *parentCell = getClippedCell(fromLayer, from);
 	PathfindCell *goalCell = getClippedCell(destinationLayer, to);
-	if (goalCell->getType()==PathfindCell::CELL_CLIFF) {
-		return false; // No goals on cliffs.
-	}
 
 	zone1 = m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), false, parentCell->getZone());
 	zone2 =  m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), false, goalCell->getZone());
