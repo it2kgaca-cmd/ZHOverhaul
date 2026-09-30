@@ -38,7 +38,6 @@
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/RandomValue.h"
-#include "Common/ScoreKeeper.h"
 #include "Common/Team.h"
 #include "Common/ThingTemplate.h"
 #include "Common/ThingFactory.h"
@@ -6708,8 +6707,10 @@ StateReturnType AIEnterState::update()
 						const Int recycleValue = obj->getRecycleValue();
 						if( player && recycleValue > 0 )
 						{
-							player->getMoney()->deposit( recycleValue );
-							player->getScoreKeeper()->addMoneyEarned( recycleValue );
+							// This is liquidation of previously paid-for value, not new income.
+							// Match production-cancel refund accounting so recycling cannot inflate
+							// cash-per-minute / money-earned statistics through repeated reuse.
+							player->getMoney()->deposit( recycleValue, TRUE, FALSE );
 						}
 
 						// Recycle through destruction rather than death so this does not trigger
