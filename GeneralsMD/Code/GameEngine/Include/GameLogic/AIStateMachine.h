@@ -590,7 +590,6 @@ protected:
 	UnsignedInt		m_frameToSleepUntil;
 	Int						m_retryCount;
 	Coord3D					m_specialistDestination;
-	Bool						m_specialistResumePending;
 protected:
 	// snapshot interface
 	virtual void crc( Xfer *xfer ) override;
