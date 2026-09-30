@@ -198,22 +198,22 @@ static Bool isSupplyManifestRosterUnit( const PlayerTemplate *playerTemplate, co
 	if( side.compareNoCase( "America" ) == 0 )
 	{
 		roster = baseRoster;
-		rosterCount = sizeof( baseRoster ) / sizeof( baseRoster[0] );
+		rosterCount = (UnsignedInt)(sizeof( baseRoster ) / sizeof( baseRoster[0] ));
 	}
 	else if( side.compareNoCase( "AmericaAirForceGeneral" ) == 0 )
 	{
 		roster = airForceRoster;
-		rosterCount = sizeof( airForceRoster ) / sizeof( airForceRoster[0] );
+		rosterCount = (UnsignedInt)(sizeof( airForceRoster ) / sizeof( airForceRoster[0] ));
 	}
 	else if( side.compareNoCase( "AmericaLaserGeneral" ) == 0 )
 	{
 		roster = laserRoster;
-		rosterCount = sizeof( laserRoster ) / sizeof( laserRoster[0] );
+		rosterCount = (UnsignedInt)(sizeof( laserRoster ) / sizeof( laserRoster[0] ));
 	}
 	else if( side.compareNoCase( "AmericaSuperWeaponGeneral" ) == 0 )
 	{
 		roster = superWeaponRoster;
-		rosterCount = sizeof( superWeaponRoster ) / sizeof( superWeaponRoster[0] );
+		rosterCount = (UnsignedInt)(sizeof( superWeaponRoster ) / sizeof( superWeaponRoster[0] ));
 	}
 	else
 	{
