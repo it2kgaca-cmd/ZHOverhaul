@@ -237,7 +237,11 @@ void HijackerUpdate::xfer( Xfer *xfer )
 {
 
 	// version
+#if !RETAIL_COMPATIBLE_XFER_SAVE
 	XferVersion currentVersion = 4;
+#else
+	XferVersion currentVersion = 1;
+#endif
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
