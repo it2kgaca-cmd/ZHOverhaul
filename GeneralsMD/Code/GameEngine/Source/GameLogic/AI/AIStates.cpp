@@ -6851,6 +6851,10 @@ StateReturnType AIEnterState::update()
 								HijackerUpdate *hu = (HijackerUpdate*)driver->findUpdateModule( key_HijackerUpdate );
 								if( hu && hu->getTargetObject() == obj )
 								{
+									// Recycling is the explicit non-death path that returns
+									// the real hidden driver even for vehicles that would not
+									// normally eject a Hijacker on battlefield death.
+									hu->setReturnWhenTargetGone( TRUE );
 									hasHijackerDriver = TRUE;
 									break;
 								}
