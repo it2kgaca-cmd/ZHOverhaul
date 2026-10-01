@@ -3648,7 +3648,11 @@ void AIAttackMoveToState::crc( Xfer *xfer )
 void AIAttackMoveToState::xfer( Xfer *xfer )
 {
   // version
+#if !RETAIL_COMPATIBLE_XFER_SAVE
   XferVersion currentVersion = 3;
+#else
+  XferVersion currentVersion = 2;
+#endif
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
