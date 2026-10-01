@@ -204,13 +204,13 @@ Bool ConvertToHijackedVehicleCrateCollide::executeCrateBehavior( Object *other )
 		}
 	}
 
-	if ( ! targetCanEject )
-	{
-		TheGameLogic->destroyObject( obj );
-		return TRUE;
-	}
+	// Keep the real Hijacker object hidden behind every stolen vehicle so
+	// Black Market recycling can recover the actual driver.  Stock death-ejection
+	// behavior is retained only for vehicles that already expose EjectPilotDie.
+	// Non-ejecting stolen vehicles keep the Hijacker hidden, but ordinary
+	// death/sell/delete will still consume him unless recycler explicitly opts in.
 
-	// I we have made it this far, we are going to ride in this vehicle for a while
+	// We are going to ride in this vehicle for a while
 	// get the name of the hijackerupdate
 	static NameKeyType key_HijackerUpdate = NAMEKEY( "HijackerUpdate" );
 	HijackerUpdate *hijackerUpdate = (HijackerUpdate*)obj->findUpdateModule( key_HijackerUpdate );
@@ -218,6 +218,7 @@ Bool ConvertToHijackedVehicleCrateCollide::executeCrateBehavior( Object *other )
 	{
 		hijackerUpdate->setTargetObject( other );
 		hijackerUpdate->setIsInVehicle( TRUE );
+		hijackerUpdate->setReturnWhenTargetGone( targetCanEject );
 		hijackerUpdate->setUpdate( TRUE );
 
 		// flag bits so hijacker won't be selectible or collideable
