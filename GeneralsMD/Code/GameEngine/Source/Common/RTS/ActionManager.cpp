@@ -1156,6 +1156,10 @@ Bool ActionManager::canDisableVehicleViaHacking( const Object *obj, const Object
 		return FALSE;
 	}
 
+	// Do not reacquire a vehicle whose hacking disable is already active.
+	if( objectToHack->isDisabledByType( DISABLED_HACKED ) )
+		return FALSE;
+
 
 	if( objectToHack->isKindOf( KINDOF_AIRCRAFT ) || objectToHack->isAirborneTarget() )
 	{
@@ -1351,6 +1355,12 @@ Bool ActionManager::canDisableBuildingViaHacking( const Object *obj, const Objec
 	{
 		return FALSE;
 	}
+
+	// A target that is already disabled by hacking is not a legal fresh hack
+	// target.  This keeps opportunistic Attack Move from immediately latching
+	// back onto the same target after its one-shot disable cycle completes.
+	if( objectToHack->isDisabledByType( DISABLED_HACKED ) )
+		return FALSE;
 
 
 	// if the target is in the shroud, we can't do anything
