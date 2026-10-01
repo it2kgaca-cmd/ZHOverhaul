@@ -70,13 +70,13 @@ Bool SalvageCrateCollide::isValidToExecute( const Object *other ) const
 	if( ! other->getTemplate()->isKindOf( KINDOF_SALVAGER ) )
 		return FALSE;
 
-#if !RETAIL_COMPATIBLE_CRC
-	// A maxed/non-advancing unit in a moving group must leave the crate for a
-	// groupmate that can still improve. Once nobody in the group can advance,
-	// or this is effectively a lone unit, the crate may be converted to cash.
+	// ZHOverhaul salvage priority: a maxed salvage-capable unit must leave the
+	// crate for a member of its commanded group that can still gain a salvage
+	// upgrade. If nobody in the group can advance, normal execution converts
+	// the crate to cash. Units with no salvage progression also fall through
+	// to the cash path.
 	if( !canAdvanceSalvage( other ) && groupHasSalvageAdvanceCandidate( other ) )
 		return FALSE;
-#endif
 
 	return TRUE;
 }
@@ -84,7 +84,7 @@ Bool SalvageCrateCollide::isValidToExecute( const Object *other ) const
 //-------------------------------------------------------------------------------------------------
 Bool SalvageCrateCollide::executeCrateBehavior( Object *other )
 {
-#if !RETAIL_COMPATIBLE_CRC
+
 	// Overhaul contract: salvage-upgrading units consume crates only to advance
 	// salvage. At peak salvage (or for units with no salvage progression), a
 	// leftover crate is cash. Group priority is enforced by isValidToExecute().
@@ -109,33 +109,7 @@ Bool SalvageCrateCollide::executeCrateBehavior( Object *other )
 		soundToPlay.setObjectID( other->getID() );
 		TheAudio->addAudioEvent(&soundToPlay);
 	}
-#else
-	if( eligibleForArmorSet(other) )
-	{
-		doArmorSet(other);
-		AudioEventRTS soundToPlay = TheAudio->getMiscAudio()->m_crateSalvage;
-		soundToPlay.setObjectID( other->getID() );
-		TheAudio->addAudioEvent( &soundToPlay );
-	}
-	else if( eligibleForWeaponSet( other ) && testWeaponChance() )
-	{
-		doWeaponSet( other );
-		AudioEventRTS soundToPlay = TheAudio->getMiscAudio()->m_crateSalvage;
-		soundToPlay.setObjectID( other->getID() );
-		TheAudio->addAudioEvent( &soundToPlay );
-	}
-	else if( eligibleForLevel( other ) && testLevelChance() )
-	{
-		doLevelGain( other );
-	}
-	else
-	{
-		doMoney( other );
-		AudioEventRTS soundToPlay = TheAudio->getMiscAudio()->m_crateMoney;
-		soundToPlay.setObjectID( other->getID() );
-		TheAudio->addAudioEvent(&soundToPlay);
-	}
-#endif
+
 
 	other->getControllingPlayer()->getAcademyStats()->recordSalvageCollected();
 	return TRUE;
