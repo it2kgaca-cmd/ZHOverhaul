@@ -56,6 +56,7 @@ HijackerUpdate::HijackerUpdate( Thing *thing, const ModuleData *moduleData ) : U
 	setUpdate( FALSE );
 	setIsInVehicle( FALSE );
 	m_wasTargetAirborne = false;
+	m_returnWhenTargetGone = FALSE;
 	m_resumeAttackMove = FALSE;
 	m_resumeAttackMoveCommandSource = (Int)CMD_FROM_AI;
 	m_resumeAttackMoveDestination.zero();
@@ -105,8 +106,19 @@ UpdateSleepTime HijackerUpdate::update()
 			}
 
 		}
-		else // the car we have been "driving" is dead now, and has safely ejected us
+		else // the vehicle we have been driving is gone
 		{
+			if( !m_returnWhenTargetGone )
+			{
+				// Preserve stock semantics for non-ejecting vehicles on ordinary
+				// death/sell/delete.  Recycler explicitly flips this flag first.
+				setTargetObject( nullptr );
+				setIsInVehicle( FALSE );
+				setUpdate( FALSE );
+				TheGameLogic->destroyObject( obj );
+				return UPDATE_SLEEP_NONE;
+			}
+
 			{
 
 
@@ -155,6 +167,7 @@ UpdateSleepTime HijackerUpdate::update()
 			setIsInVehicle( FALSE );
 			setUpdate( FALSE );
 			m_wasTargetAirborne = false;
+			m_returnWhenTargetGone = FALSE;
 
 		}
 
@@ -224,7 +237,7 @@ void HijackerUpdate::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 3;
+	XferVersion currentVersion = 4;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -247,6 +260,11 @@ void HijackerUpdate::xfer( Xfer *xfer )
 	xfer->xferBool( &m_wasTargetAirborne );
 
 #if !RETAIL_COMPATIBLE_XFER_SAVE
+	if( version >= 4 )
+		xfer->xferBool( &m_returnWhenTargetGone );
+	else if( xfer->getXferMode() == XFER_LOAD )
+		m_returnWhenTargetGone = FALSE;
+
 	if( version >= 2 )
 	{
 		xfer->xferBool( &m_resumeAttackMove );
