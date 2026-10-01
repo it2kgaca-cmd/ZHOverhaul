@@ -76,6 +76,8 @@ public:
 	Object* getTargetObject() const;
 	void setUpdate(Bool u ) {m_update = u;}
 	void setIsInVehicle(Bool i ) {m_isInVehicle = i;}
+	void setReturnWhenTargetGone(Bool enabled) { m_returnWhenTargetGone = enabled; }
+	Bool getReturnWhenTargetGone() const { return m_returnWhenTargetGone; }
 	void setResumeAttackMoveDestination(const Coord3D *pos, Int commandSource) { if(pos){ m_resumeAttackMoveDestination=*pos; m_resumeAttackMoveCommandSource=commandSource; m_resumeAttackMove=TRUE; } }
 	Bool hasResumeAttackMoveDestination() const { return m_resumeAttackMove; }
 	const Coord3D *getResumeAttackMoveDestination() const { return &m_resumeAttackMoveDestination; }
@@ -89,6 +91,7 @@ private:
 	Bool     m_update;
 	Bool		 m_isInVehicle;
 	Bool		 m_wasTargetAirborne;
+	Bool		 m_returnWhenTargetGone;
 	Bool		 m_resumeAttackMove;
 	Int			 m_resumeAttackMoveCommandSource;
 	Coord3D	 m_resumeAttackMoveDestination;
