@@ -249,7 +249,9 @@ Bool ConvertToHijackedVehicleCrateCollide::executeCrateBehavior( Object *other )
 	if( hijackerUpdate && hijackerUpdate->hasResumeAttackMoveDestination() && targetAI )
 	{
 		const CommandSourceType resumeSource = (CommandSourceType)hijackerUpdate->getResumeAttackMoveCommandSource();
-		targetAI->aiAttackMoveToPosition(hijackerUpdate->getResumeAttackMoveDestination(), NO_MAX_SHOTS_LIMIT, resumeSource);
+		// AI command max-shots uses zero as the unlimited/default sentinel here.  Keep
+		// this translation unit independent of AIStates.cpp's private convenience constant.
+		targetAI->aiAttackMoveToPosition(hijackerUpdate->getResumeAttackMoveDestination(), 0, resumeSource);
 		hijackerUpdate->clearResumeAttackMoveDestination();
 	}
 
