@@ -29,6 +29,7 @@
 
 
 #include "Common/ActionManager.h"
+#include "Common/AudioEventRTS.h"
 #include "Common/AudioHandleSpecialValues.h"
 #include "Common/CRCDebug.h"
 #include "Common/GameAudio.h"
