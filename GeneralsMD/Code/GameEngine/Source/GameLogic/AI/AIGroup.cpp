@@ -2950,8 +2950,7 @@ void AIGroup::groupDoSpecialPowerAtObject( UnsignedInt specialPowerID, Object *t
 
 	const SpecialPowerType spType = spTemplate->getSpecialPowerType();
 	const Bool singleCapturer =
-		spType == SPECIAL_INFANTRY_CAPTURE_BUILDING ||
-		spType == SPECIAL_BLACKLOTUS_CAPTURE_BUILDING;
+		spType == SPECIAL_INFANTRY_CAPTURE_BUILDING;
 
 	// Capturing the same building with multiple infantry does not stack. Elect one
 	// deterministic legal capturer -- nearest first, then object ID -- and leave

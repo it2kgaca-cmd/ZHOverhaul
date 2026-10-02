@@ -39,6 +39,8 @@
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
 #include "Common/UnicodeString.h"
+#include "GameLogic/AI.h"
+#include "GameLogic/AIPathfind.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Locomotor.h"
 #include "GameLogic/Object.h"
@@ -270,17 +272,31 @@ ProductionUpdateInterface* OCLUpdate::getProductionUpdateInterface()
 
 void OCLUpdate::exitObjectViaDoor( Object *newObj, ExitDoorType )
 {
-	if( newObj == nullptr )
+	if( newObj == nullptr || !m_rallyPointExists )
 		return;
 
 	AIUpdateInterface *ai = newObj->getAIUpdateInterface();
 	if( ai == nullptr )
 		return;
 
-	if( m_rallyPointExists )
-		ai->aiMoveToPosition( &m_rallyPoint, CMD_FROM_AI );
-	else
-		ai->aiIdle( CMD_FROM_AI );
+	Coord3D destination = m_rallyPoint;
+	Bool reserveGoal = FALSE;
+	if( ai->isDoingGroundMovement() )
+	{
+		if( TheAI->pathfinder()->adjustDestination(
+				newObj, ai->getLocomotorSet(), &destination, &m_rallyPoint ) )
+		{
+			reserveGoal = TRUE;
+		}
+	}
+
+	ai->aiMoveToPosition( &destination, CMD_FROM_AI );
+
+	if( reserveGoal )
+	{
+		TheAI->pathfinder()->updateGoal(
+			newObj, &destination, TheTerrainLogic->getLayerForDestination( &destination ) );
+	}
 }
 
 void OCLUpdate::setRallyPoint( const Coord3D *pos )
