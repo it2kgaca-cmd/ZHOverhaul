@@ -34,6 +34,7 @@
 #include "Common/GameAudio.h"
 #include "Common/GlobalData.h"
 #include "Common/Money.h"
+#include "Common/MiscAudio.h"
 #include "Common/PerfTimer.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
@@ -46,6 +47,7 @@
 
 #include "GameClient/ControlBar.h"
 #include "GameClient/FXList.h"
+#include "GameClient/GameText.h"
 #include "GameClient/InGameUI.h"
 
 #include "GameLogic/AIDock.h"
@@ -6841,6 +6843,19 @@ StateReturnType AIEnterState::update()
 							// Match production-cancel refund accounting so recycling cannot inflate
 							// cash-per-minute / money-earned statistics through repeated reuse.
 							player->getMoney()->deposit( recycleValue, TRUE, FALSE );
+
+							// Give the recycler the same immediate feedback language as salvage cash:
+							// show the exact refund at the Black Market and play the crate-money cue.
+							UnicodeString moneyString;
+							moneyString.format( TheGameText->fetch( "GUI:AddCash" ), recycleValue );
+							Coord3D feedbackPos = *goal->getPosition();
+							feedbackPos.z += 10.0f;
+							Color color = player->getPlayerColor() | GameMakeColor( 0, 0, 0, 230 );
+							TheInGameUI->addFloatingText( moneyString, &feedbackPos, color );
+
+							AudioEventRTS recycleSound = TheAudio->getMiscAudio()->m_crateMoney;
+							recycleSound.setObjectID( goal->getID() );
+							TheAudio->addAudioEvent( &recycleSound );
 						}
 
 						// Recover a legitimate crew member before administrative removal.
