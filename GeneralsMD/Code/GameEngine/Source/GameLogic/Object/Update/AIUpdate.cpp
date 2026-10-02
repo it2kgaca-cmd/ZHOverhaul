@@ -996,8 +996,9 @@ Object* AIUpdateInterface::checkForCrateToPickup()
 {
 	if (m_crateCreated != INVALID_ID)
 	{
+		const ObjectID crateID = m_crateCreated;
 		m_crateCreated = INVALID_ID; // we have processed it, so clear it.
-		Object* crate = TheGameLogic->findObjectByID(m_crateCreated);
+		Object* crate = TheGameLogic->findObjectByID(crateID);
 		if (crate)
 		{
 			for (BehaviorModule** m = crate->getBehaviorModules(); *m; ++m)
