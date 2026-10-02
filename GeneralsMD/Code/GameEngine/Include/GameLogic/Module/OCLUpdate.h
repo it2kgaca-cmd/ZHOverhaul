@@ -68,6 +68,7 @@ private:
 class OCLUpdate : public UpdateModule
 #if !RETAIL_COMPATIBLE_CRC
 	, public ProductionUpdateInterface
+	, public ExitInterface
 #endif
 {
 
@@ -83,6 +84,20 @@ public:
 
 #if !RETAIL_COMPATIBLE_CRC
 	virtual ProductionUpdateInterface* getProductionUpdateInterface() override;
+	virtual ExitInterface* getUpdateExitInterface() override { return isSupplyDropZone() ? this : nullptr; }
+
+	// Supply Drop Zones expose the normal rally-point interface even though their
+	// units arrive by cargo plane instead of a conventional production door.
+	virtual Bool isExitBusy() const override { return FALSE; }
+	virtual ExitDoorType reserveDoorForExit( const ThingTemplate*, Object* ) override { return DOOR_NONE_NEEDED; }
+	virtual void exitObjectViaDoor( Object*, ExitDoorType ) override {}
+	virtual void exitObjectByBudding( Object*, Object* ) override {}
+	virtual void unreserveDoorForExit( ExitDoorType ) override {}
+	virtual void setRallyPoint( const Coord3D *pos ) override;
+	virtual const Coord3D *getRallyPoint() const override;
+	virtual Bool useSpawnRallyPoint() const override { return isSupplyDropZone(); }
+	virtual Bool getNaturalRallyPoint( Coord3D& rallyPoint, Bool offset = TRUE ) const override;
+	virtual Bool getExitPosition( Coord3D& exitPosition ) const override;
 
 	virtual CanMakeType canQueueCreateUnit( const ThingTemplate *unitType ) const override;
 	virtual CanMakeType canQueueUpgrade( const UpgradeTemplate *upgrade ) const override;
@@ -134,6 +149,8 @@ protected:
 	ProductionEntry *m_manifestHead;
 	ProductionEntry *m_manifestTail;
 	UnsignedInt m_manifestCount;
+	Coord3D m_rallyPoint;
+	Bool m_rallyPointExists;
 #endif
 
 };
