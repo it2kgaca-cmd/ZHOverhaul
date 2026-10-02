@@ -4926,7 +4926,8 @@ Bool InGameUI::canSelectedObjectsDoAction( ActionType action, const Object *obje
 					success = false;
 					break;
 				}
-				success = (obj->isKindOf(KINDOF_AUTO_RALLYPOINT) && obj->isLocallyControlled());
+				success = ((obj->isKindOf(KINDOF_AUTO_RALLYPOINT) || obj->isKindOf(KINDOF_FS_SUPPLY_DROPZONE)) &&
+					obj->getObjectExitInterface() != nullptr && obj->isLocallyControlled());
 				break;
 			}
 		}
