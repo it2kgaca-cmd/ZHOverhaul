@@ -41,10 +41,12 @@
 #include "Common/Xfer.h"
 #include "GameClient/GameText.h"
 #include "GameClient/InGameUI.h"
-#include "GameLogic/AI.h"
 #include "GameLogic/ExperienceTracker.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/ObjectIter.h"
+#include "GameLogic/PartitionManager.h"
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
@@ -70,12 +72,14 @@ Bool SalvageCrateCollide::isValidToExecute( const Object *other ) const
 	if( ! other->getTemplate()->isKindOf( KINDOF_SALVAGER ) )
 		return FALSE;
 
-	// ZHOverhaul salvage priority: a maxed salvage-capable unit must leave the
-	// crate for a member of its commanded group that can still gain a salvage
-	// upgrade. If nobody in the group can advance, normal execution converts
-	// the crate to cash. Units with no salvage progression also fall through
-	// to the cash path.
-	if( !canAdvanceSalvage( other ) && groupHasSalvageAdvanceCandidate( other ) )
+	// Units with no weapon/armor salvage progression (Radar Van, Rocket Buggy,
+	// Combat Bike, etc.) never participate in last-stage arbitration: salvage is
+	// simply cash for them. Only a genuinely maxed progression unit may yield a
+	// crate to an upgradeable nearby member of the same movement cohort.
+	if( !hasSalvageProgression( other ) )
+		return TRUE;
+
+	if( !canAdvanceSalvage( other ) && nearbyCohortHasSalvageAdvanceCandidate( other ) )
 		return FALSE;
 
 	return TRUE;
@@ -133,33 +137,70 @@ Bool SalvageCrateCollide::canAdvanceSalvage( const Object *other ) const
 }
 
 // ------------------------------------------------------------------------------------------------
-Bool SalvageCrateCollide::groupHasSalvageAdvanceCandidate( const Object *other ) const
+Bool SalvageCrateCollide::hasSalvageProgression( const Object *other ) const
 {
-	if( other == nullptr )
+	return other != nullptr &&
+		(other->isKindOf( KINDOF_ARMOR_SALVAGER ) ||
+		 other->isKindOf( KINDOF_WEAPON_SALVAGER ));
+}
+
+// ------------------------------------------------------------------------------------------------
+Bool SalvageCrateCollide::sharesSalvageMovementCohort( const Object *a, const Object *b ) const
+{
+	if( a == nullptr || b == nullptr )
 		return FALSE;
 
-	AIGroup *group = const_cast<Object*>(other)->getGroup();
-	if( group == nullptr )
+	AIUpdateInterface *aAI = const_cast<Object*>(a)->getAIUpdateInterface();
+	AIUpdateInterface *bAI = const_cast<Object*>(b)->getAIUpdateInterface();
+	if( aAI == nullptr || bAI == nullptr ||
+			!aAI->friend_hasGroupArrival() || !bAI->friend_hasGroupArrival() )
 		return FALSE;
 
-	const VecObjectID& memberIDs = group->getAllIDs();
-	if( memberIDs.size() <= 1 )
+	// Player group Move / Attack Move writes the same persistent arrival anchor
+	// into every member before the temporary dispatch AIGroup is destroyed.
+	// Compare that durable command footprint rather than Object::getGroup().
+	const Coord3D& aAnchor = aAI->friend_getGroupArrivalAnchor();
+	const Coord3D& bAnchor = bAI->friend_getGroupArrivalAnchor();
+	const Real dx = aAnchor.x - bAnchor.x;
+	const Real dy = aAnchor.y - bAnchor.y;
+	const Real anchorTolerance = 5.0f;
+	return dx*dx + dy*dy <= anchorTolerance * anchorTolerance;
+}
+
+// ------------------------------------------------------------------------------------------------
+Bool SalvageCrateCollide::nearbyCohortHasSalvageAdvanceCandidate( const Object *other ) const
+{
+	if( other == nullptr || getObject() == nullptr )
 		return FALSE;
 
-	for( VecObjectID::const_iterator it = memberIDs.begin(); it != memberIDs.end(); ++it )
+	AIUpdateInterface *otherAI = const_cast<Object*>(other)->getAIUpdateInterface();
+	if( otherAI == nullptr || !otherAI->friend_hasGroupArrival() )
+		return FALSE;
+
+	// Keep the reservation local. A maxed tank must not strand salvage for a
+	// nominal cohort member half a base away, stuck elsewhere, or on another layer.
+	const Real priorityRange = 120.0f;
+	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(
+		getObject()->getPosition(), priorityRange, FROM_CENTER_2D );
+	if( iter == nullptr )
+		return FALSE;
+	MemoryPoolObjectHolder hold( iter );
+
+	for( Object *member = iter->first(); member; member = iter->next() )
 	{
-		if( *it == other->getID() )
-			continue;
-
-		Object *member = TheGameLogic->findObjectByID( *it );
-		if( member == nullptr || member->isEffectivelyDead() )
+		if( member == other || member->isEffectivelyDead() || member->isDisabled() ||
+				member->isContained() || !member->isMobile() )
 			continue;
 		if( member->getControllingPlayer() != other->getControllingPlayer() )
 			continue;
-		if( !member->isKindOf( KINDOF_SALVAGER ) )
+		if( member->getLayer() != other->getLayer() )
 			continue;
-		if( canAdvanceSalvage( member ) )
-			return TRUE;
+		if( !member->isKindOf( KINDOF_SALVAGER ) || !canAdvanceSalvage( member ) )
+			continue;
+		if( !sharesSalvageMovementCohort( other, member ) )
+			continue;
+
+		return TRUE;
 	}
 
 	return FALSE;

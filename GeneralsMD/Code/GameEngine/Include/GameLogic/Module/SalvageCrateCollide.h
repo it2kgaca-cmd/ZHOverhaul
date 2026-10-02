@@ -98,8 +98,10 @@ protected:
 	virtual Bool executeCrateBehavior( Object *other ) override;
 
 private:
+	Bool hasSalvageProgression( const Object *other ) const;
 	Bool canAdvanceSalvage( const Object *other ) const;
-	Bool groupHasSalvageAdvanceCandidate( const Object *other ) const;
+	Bool sharesSalvageMovementCohort( const Object *a, const Object *b ) const;
+	Bool nearbyCohortHasSalvageAdvanceCandidate( const Object *other ) const;
 	Bool eligibleForWeaponSet( Object *other );
 	Bool eligibleForArmorSet( Object *other );
 	Bool eligibleForLevel( Object *other );

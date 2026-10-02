@@ -3821,10 +3821,13 @@ static Bool canAttackMoveFireWhileMoving(Object *owner, AIUpdateInterface *ai, O
 	if (!owner || !ai || !target || !ai->isDoingGroundMovement())
 		return false;
 
-	// Turreted ground vehicles are already supported by the attack state as
-	// independent hull/turret actors. Keep the hull's move order alive while
-	// the turret handles a target that is currently in range.
+	// Turreted ordinary vehicles may keep rolling while the turret fires, but
+	// long-range artillery behaves like infantry on Attack Move: the instant a
+	// legal firing opportunity exists, plant the chassis and let the weapon work
+	// from the earliest possible range.
 	if (!owner->isKindOf(KINDOF_VEHICLE))
+		return false;
+	if (ai->isLongRangeArtillery())
 		return false;
 
 	Weapon *weapon = owner->getCurrentWeapon();
@@ -3995,7 +3998,8 @@ StateReturnType AIAttackMoveToState::update()
 		// because a tactically higher-scoring enemy is visible farther ahead.
 		const UnsignedInt now = TheGameLogic->getFrame();
 		const Bool explicitCombatScan =
-			forceRetargetThisFrame || (((now + owner->getID()) % 3) == 0);
+			forceRetargetThisFrame || ai->isLongRangeArtillery() ||
+			(((now + owner->getID()) % 3) == 0);
 
 		Object *nextObjectToAttack = nullptr;
 		Object *widePreAimTarget = nullptr;
