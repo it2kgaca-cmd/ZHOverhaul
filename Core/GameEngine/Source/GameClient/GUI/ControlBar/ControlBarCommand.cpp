@@ -176,7 +176,18 @@ const CommandButton *ControlBar::getSupplyDropManifestCommand( Object *creatorOb
 	if( buttonNames == nullptr || (UnsignedInt)commandIndex >= buttonCount )
 		return nullptr;
 
-	return findCommandButton( buttonNames[ commandIndex ] );
+	const CommandButton *button = findCommandButton( buttonNames[ commandIndex ] );
+	if( button == nullptr )
+		return nullptr;
+
+	// Keep the visible roster honest with the manifest's hard $1500 allowance.
+	// If a general-specific balance change pushes a recipe above the cap later,
+	// hide it instead of leaving a permanently unusable button in the Drop Zone.
+	const ThingTemplate *unitType = button->getThingTemplate();
+	if( unitType && player && unitType->calcCostToBuild( player ) > 1500 )
+		return nullptr;
+
+	return button;
 }
 
 // Supply Drop Zones use the normal command grid for their standing manifest.  The stock
