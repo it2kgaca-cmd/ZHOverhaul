@@ -89,9 +89,13 @@ const CommandButton *ControlBar::getSupplyDropManifestCommand( Object *creatorOb
 	if( creatorObject == nullptr || !creatorObject->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) )
 		return nullptr;
 
+	if( commandIndex == 12 )
+		return findCommandButton( "Command_SetRallyPoint" );
 	if( commandIndex == 13 )
 		return findCommandButton( "Command_Sell" );
 
+	// Index 11 is reserved for the cooldown tile. Unit recipes occupy the
+	// compact slots below it.
 	if( commandIndex < 0 || commandIndex >= 11 )
 		return nullptr;
 
@@ -106,7 +110,6 @@ const CommandButton *ControlBar::getSupplyDropManifestCommand( Object *creatorOb
 		"Command_ConstructAmericaVehicleMedic",
 		"Command_ConstructAmericaVehiclePaladin",
 		"Command_ConstructAmericaVehicleSentryDrone",
-		"Command_ConstructAmericaVehicleAvenger",
 		"Command_ConstructAmericaVehicleMicrowave"
 	};
 	static const char *const airForceButtons[] =
@@ -118,7 +121,6 @@ const CommandButton *ControlBar::getSupplyDropManifestCommand( Object *creatorOb
 		"AirF_Command_ConstructAmericaVehicleHumvee",
 		"AirF_Command_ConstructAmericaVehicleMedic",
 		"AirF_Command_ConstructAmericaVehicleSentryDrone",
-		"AirF_Command_ConstructAmericaVehicleAvenger",
 		"AirF_Command_ConstructAmericaVehicleMicrowave"
 	};
 	static const char *const laserButtons[] =
@@ -130,7 +132,6 @@ const CommandButton *ControlBar::getSupplyDropManifestCommand( Object *creatorOb
 		"Lazr_Command_ConstructAmericaVehicleHumvee",
 		"Lazr_Command_ConstructAmericaVehicleMedic",
 		"Lazr_Command_ConstructAmericaVehicleSentryDrone",
-		"Lazr_Command_ConstructAmericaVehicleAvenger",
 		"Lazr_Command_ConstructAmericaVehicleMicrowave"
 	};
 	static const char *const superWeaponButtons[] =
@@ -142,7 +143,6 @@ const CommandButton *ControlBar::getSupplyDropManifestCommand( Object *creatorOb
 		"SupW_Command_ConstructAmericaVehicleHumvee",
 		"SupW_Command_ConstructAmericaVehicleMedic",
 		"SupW_Command_ConstructAmericaVehicleSentryDrone",
-		"SupW_Command_ConstructAmericaVehicleAvenger",
 		"SupW_Command_ConstructAmericaVehicleMicrowave"
 	};
 
