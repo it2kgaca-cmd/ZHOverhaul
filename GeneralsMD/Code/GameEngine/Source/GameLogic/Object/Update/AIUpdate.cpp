@@ -1100,12 +1100,11 @@ void AIUpdateInterface::friend_notifyStateMachineChanged()
 // Opportunistically return idle damaged player units to their own nearby production facility.
 // This deliberately uses the stock ActionManager legality checks so faction-specific healing,
 // repair-dock, aircraft and containment rules remain authoritative.
-static Bool tryAutoProductionHealing( AIUpdateInterface *ai, UpdateSleepTime &sleepTime )
+static Bool tryAutoProductionHealing( AIUpdateInterface *ai, Object *obj, UpdateSleepTime &sleepTime )
 {
-	if( ai == nullptr )
+	if( ai == nullptr || obj == nullptr )
 		return FALSE;
 
-	Object *obj = ai->getObject();
 	if( obj == nullptr || obj->isEffectivelyDead() || !obj->isMobile() || obj->isContained() )
 		return FALSE;
 
@@ -1333,7 +1332,7 @@ UpdateSleepTime AIUpdateInterface::update()
 
 	m_isInUpdate = FALSE;
 
-	tryAutoProductionHealing(this, subMachineSleep);
+	tryAutoProductionHealing(this, obj, subMachineSleep);
 	updateSmartLoadRendezvous(subMachineSleep);
 	updatePersistentForceAttackTargetSet(subMachineSleep);
 
