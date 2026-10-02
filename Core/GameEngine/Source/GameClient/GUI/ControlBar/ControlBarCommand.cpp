@@ -89,8 +89,6 @@ const CommandButton *ControlBar::getSupplyDropManifestCommand( Object *creatorOb
 	if( creatorObject == nullptr || !creatorObject->isKindOf( KINDOF_FS_SUPPLY_DROPZONE ) )
 		return nullptr;
 
-	if( commandIndex == 12 )
-		return findCommandButton( "Command_SetRallyPoint" );
 	if( commandIndex == 13 )
 		return findCommandButton( "Command_Sell" );
 
