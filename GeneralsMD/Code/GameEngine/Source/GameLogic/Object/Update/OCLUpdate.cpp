@@ -120,6 +120,8 @@ OCLUpdate::OCLUpdate( Thing *thing, const ModuleData* moduleData ) : UpdateModul
 	m_manifestHead = nullptr;
 	m_manifestTail = nullptr;
 	m_manifestCount = 0;
+	m_rallyPoint.zero();
+	m_rallyPointExists = FALSE;
 #endif
 }
 
@@ -152,7 +154,6 @@ static Bool isSupplyManifestRosterUnit( const PlayerTemplate *playerTemplate, co
 		"AmericaVehicleMedic",
 		"AmericaTankPaladin",
 		"AmericaVehicleSentryDrone",
-		"AmericaTankAvenger",
 		"AmericaTankMicrowave"
 	};
 	static const char *const airForceRoster[] =
@@ -164,7 +165,6 @@ static Bool isSupplyManifestRosterUnit( const PlayerTemplate *playerTemplate, co
 		"AirF_AmericaVehicleHumvee",
 		"AirF_AmericaVehicleMedic",
 		"AirF_AmericaVehicleSentryDrone",
-		"AirF_AmericaTankAvenger",
 		"AirF_AmericaTankMicrowave"
 	};
 	static const char *const laserRoster[] =
@@ -176,7 +176,6 @@ static Bool isSupplyManifestRosterUnit( const PlayerTemplate *playerTemplate, co
 		"Lazr_AmericaVehicleHumvee",
 		"Lazr_AmericaVehicleMedic",
 		"Lazr_AmericaVehicleSentryDrone",
-		"Lazr_AmericaTankAvenger",
 		"Lazr_AmericaTankMicrowave"
 	};
 	static const char *const superWeaponRoster[] =
@@ -188,7 +187,6 @@ static Bool isSupplyManifestRosterUnit( const PlayerTemplate *playerTemplate, co
 		"SupW_AmericaVehicleHumvee",
 		"SupW_AmericaVehicleMedic",
 		"SupW_AmericaVehicleSentryDrone",
-		"SupW_AmericaTankAvenger",
 		"SupW_AmericaTankMicrowave"
 	};
 
@@ -229,13 +227,13 @@ static Bool isSupplyManifestRosterUnit( const PlayerTemplate *playerTemplate, co
 	return FALSE;
 }
 
-static Bool attachSupplyDropPayload( Object *transport, Object *payload, const char *containerTemplateName, const Coord3D& startPos )
+static Bool attachSupplyDropPayload( Object *transport, Object *payload, Object *payloadProducer, const char *containerTemplateName, const Coord3D& startPos )
 {
 	if( transport == nullptr || payload == nullptr )
 		return FALSE;
 
 	payload->setPosition( &startPos );
-	payload->setProducer( transport );
+	payload->setProducer( payloadProducer ? payloadProducer : transport );
 
 	Object *outerPayload = payload;
 	if( containerTemplateName != nullptr && containerTemplateName[0] != 0 )
@@ -267,6 +265,47 @@ static Bool attachSupplyDropPayload( Object *transport, Object *payload, const c
 ProductionUpdateInterface* OCLUpdate::getProductionUpdateInterface()
 {
 	return isSupplyDropZone() ? this : nullptr;
+}
+
+void OCLUpdate::setRallyPoint( const Coord3D *pos )
+{
+	if( pos == nullptr )
+	{
+		m_rallyPointExists = FALSE;
+		m_rallyPoint.zero();
+		return;
+	}
+	m_rallyPoint = *pos;
+	m_rallyPointExists = TRUE;
+}
+
+const Coord3D *OCLUpdate::getRallyPoint() const
+{
+	return m_rallyPointExists ? &m_rallyPoint : nullptr;
+}
+
+Bool OCLUpdate::getNaturalRallyPoint( Coord3D& rallyPoint, Bool offset ) const
+{
+	const Object *obj = getObject();
+	if( obj == nullptr )
+	{
+		rallyPoint.zero();
+		return FALSE;
+	}
+
+	rallyPoint = *obj->getPosition();
+	if( offset )
+	{
+		const Real distance = obj->getGeometryInfo().getMajorRadius() + 30.0f;
+		rallyPoint.x += Cos( obj->getOrientation() ) * distance;
+		rallyPoint.y += Sin( obj->getOrientation() ) * distance;
+	}
+	return TRUE;
+}
+
+Bool OCLUpdate::getExitPosition( Coord3D& exitPosition ) const
+{
+	return getNaturalRallyPoint( exitPosition, FALSE );
 }
 
 Bool OCLUpdate::isSupplyDropZone() const
@@ -494,7 +533,7 @@ Bool OCLUpdate::deliverSupplyManifest( const Coord3D& edgePoint )
 		const ThingTemplate *unitType = *it;
 		Object *payload = TheThingFactory->newObject( unitType, player->getDefaultTeam() );
 		if( payload == nullptr ) continue;
-		attachSupplyDropPayload( transport, payload, unitType->isKindOf( KINDOF_VEHICLE ) ? "LargeParachute" : "AmericaParachute", startPos );
+		attachSupplyDropPayload( transport, payload, dropZone, unitType->isKindOf( KINDOF_VEHICLE ) ? "LargeParachute" : "AmericaParachute", startPos );
 	}
 
 	const Int cashRemainder = SUPPLY_DROP_MANIFEST_BUDGET - spent;
@@ -512,7 +551,7 @@ Bool OCLUpdate::deliverSupplyManifest( const Coord3D& edgePoint )
 				static const NameKeyType key_MoneyCrateCollide = NAMEKEY( "MoneyCrateCollide" );
 				MoneyCrateCollide *money = (MoneyCrateCollide*)cash->findCollideModule( key_MoneyCrateCollide );
 				if( money ) money->setMoneyProvidedOverride( (UnsignedInt)cashRemainder );
-				attachSupplyDropPayload( transport, cash, "AmericaCrateParachute", startPos );
+				attachSupplyDropPayload( transport, cash, dropZone, "AmericaCrateParachute", startPos );
 			}
 		}
 	}
@@ -701,6 +740,8 @@ void OCLUpdate::crc( Xfer *xfer )
 		xfer->xferAsciiString( &name );
 		xfer->xferUser( &entry->m_productionID, sizeof( ProductionID ) );
 	}
+	xfer->xferBool( &m_rallyPointExists );
+	xfer->xferCoord3D( &m_rallyPoint );
 #endif
 }
 
@@ -709,14 +750,15 @@ void OCLUpdate::crc( Xfer *xfer )
 	* Version Info:
 	* 1: Initial version
 	* 2: Supply Drop manifest plus serialized unique-ID counter
-	* 3: Supply Drop manifest with deterministic IDs derived from queue state */
+	* 3: Supply Drop manifest with deterministic IDs derived from queue state
+	* 4: Supply Drop rally point */
 // ------------------------------------------------------------------------------------------------
 void OCLUpdate::xfer( Xfer *xfer )
 {
 
 	// version
 #if !RETAIL_COMPATIBLE_CRC && !RETAIL_COMPATIBLE_XFER_SAVE
-	XferVersion currentVersion = 3;
+	XferVersion currentVersion = 4;
 #else
 	XferVersion currentVersion = 1;
 #endif
@@ -790,6 +832,17 @@ void OCLUpdate::xfer( Xfer *xfer )
 			ProductionID legacyUniqueID = PRODUCTIONID_INVALID;
 			xfer->xferUser( &legacyUniqueID, sizeof( ProductionID ) );
 		}
+	}
+
+	if( version >= 4 )
+	{
+		xfer->xferBool( &m_rallyPointExists );
+		xfer->xferCoord3D( &m_rallyPoint );
+	}
+	else if( xfer->getXferMode() == XFER_LOAD )
+	{
+		m_rallyPointExists = FALSE;
+		m_rallyPoint.zero();
 	}
 #endif
 }
