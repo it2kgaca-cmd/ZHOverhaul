@@ -67,6 +67,7 @@
 #include "GameLogic/Module/HackInternetAIUpdate.h"
 #include "GameLogic/Module/HordeUpdate.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/ObjectIter.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/PolygonTrigger.h"
 #include "GameLogic/ScriptEngine.h"
@@ -1096,6 +1097,106 @@ void AIUpdateInterface::friend_notifyStateMachineChanged()
 }
 
 //-------------------------------------------------------------------------------------------------
+// Opportunistically return idle damaged player units to their own nearby production facility.
+// This deliberately uses the stock ActionManager legality checks so faction-specific healing,
+// repair-dock, aircraft and containment rules remain authoritative.
+static Bool tryAutoProductionHealing( AIUpdateInterface *ai, UpdateSleepTime &sleepTime )
+{
+	if( ai == nullptr )
+		return FALSE;
+
+	Object *obj = ai->getObject();
+	if( obj == nullptr || obj->isEffectivelyDead() || !obj->isMobile() || obj->isContained() )
+		return FALSE;
+
+	Player *player = obj->getControllingPlayer();
+	if( player == nullptr || player->getPlayerType() != PLAYER_HUMAN || !ai->isIdle() )
+		return FALSE;
+
+	BodyModuleInterface *body = obj->getBodyModule();
+	if( body == nullptr || body->getMaxHealth() <= 0.0f ||
+			body->getHealth() >= body->getMaxHealth() * 0.90f )
+		return FALSE;
+
+	const Bool infantry = obj->isKindOf( KINDOF_INFANTRY );
+	const Bool aircraft = obj->isKindOf( KINDOF_AIRCRAFT );
+	const Bool groundVehicle = obj->isKindOf( KINDOF_VEHICLE ) && !aircraft;
+	if( !infantry && !groundVehicle && !aircraft )
+		return FALSE;
+
+	const UnsignedInt scanPeriod = LOGICFRAMES_PER_SECOND;
+	if( ((TheGameLogic->getFrame() + obj->getID()) % scanPeriod) != 0 )
+	{
+		if( sleepTime > UPDATE_SLEEP(scanPeriod) )
+			sleepTime = UPDATE_SLEEP(scanPeriod);
+		return FALSE;
+	}
+
+	const Real scanRange = 300.0f;
+	Object *best = nullptr;
+	Real bestDistSqr = scanRange * scanRange;
+
+	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(
+		obj->getPosition(), scanRange, FROM_CENTER_2D );
+	MemoryPoolObjectHolder hold( iter );
+
+	for( Object *candidate = iter->first(); candidate; candidate = iter->next() )
+	{
+		if( candidate == obj || candidate->isEffectivelyDead() ||
+				candidate->getControllingPlayer() != player || candidate->isDisabled() )
+			continue;
+
+		Bool correctFacility = FALSE;
+		Bool legal = FALSE;
+		if( infantry )
+		{
+			correctFacility = candidate->isKindOf( KINDOF_FS_BARRACKS );
+			legal = correctFacility &&
+				TheActionManager->canGetHealedAt( obj, candidate, CMD_FROM_AI );
+		}
+		else if( aircraft )
+		{
+			correctFacility = candidate->isKindOf( KINDOF_FS_AIRFIELD );
+			legal = correctFacility &&
+				TheActionManager->canGetRepairedAt( obj, candidate, CMD_FROM_AI );
+		}
+		else
+		{
+			correctFacility = candidate->isKindOf( KINDOF_FS_WARFACTORY );
+			legal = correctFacility &&
+				TheActionManager->canGetRepairedAt( obj, candidate, CMD_FROM_AI );
+		}
+
+		if( !legal )
+			continue;
+
+		const Real distSqr = ThePartitionManager->getDistanceSquared(
+			obj, candidate, FROM_CENTER_2D );
+		if( best == nullptr || distSqr < bestDistSqr ||
+				(distSqr == bestDistSqr && candidate->getID() < best->getID()) )
+		{
+			best = candidate;
+			bestDistSqr = distSqr;
+		}
+	}
+
+	if( best == nullptr )
+	{
+		if( sleepTime > UPDATE_SLEEP(scanPeriod) )
+			sleepTime = UPDATE_SLEEP(scanPeriod);
+		return FALSE;
+	}
+
+	if( infantry )
+		ai->aiGetHealed( best, CMD_FROM_AI );
+	else
+		ai->aiGetRepaired( best, CMD_FROM_AI );
+
+	sleepTime = UPDATE_SLEEP_NONE;
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
 /**
  * The "main loop" of the AI subsystem
  */
@@ -1232,6 +1333,7 @@ UpdateSleepTime AIUpdateInterface::update()
 
 	m_isInUpdate = FALSE;
 
+	tryAutoProductionHealing(this, subMachineSleep);
 	updateSmartLoadRendezvous(subMachineSleep);
 	updatePersistentForceAttackTargetSet(subMachineSleep);
 
