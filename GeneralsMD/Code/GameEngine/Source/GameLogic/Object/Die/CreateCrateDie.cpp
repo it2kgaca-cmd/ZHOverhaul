@@ -77,20 +77,47 @@ Object *CreateCrateDie::createSalvageCrateForObject( Object *obj )
 	if (!crateType)
 		return nullptr;
 
-	Coord3D center = *obj->getPosition();
+	const Coord3D center = *obj->getPosition();
+	const PathfindLayerEnum layer = obj->getLayer();
 	Coord3D pos = center;
+	Bool spotFound = FALSE;
+
 	FindPositionOptions fp;
 	fp.minRadius = 0.0f;
 	fp.maxRadius = 5.0f;
 	fp.relationshipObject = obj;
 	fp.flags = FPF_IGNORE_ALLY_OR_NEUTRAL_UNITS;
-	if (obj->getLayer() == LAYER_GROUND)
-		ThePartitionManager->findPositionAround(&center, &fp, &pos);
 
-	Object *crate = TheThingFactory->newObject(crateType, nullptr);
-	crate->setPosition(&pos);
-	crate->setOrientation(GameLogicRandomValueReal(0, 2*PI));
-	crate->setLayer(obj->getLayer());
+	if( layer != LAYER_GROUND )
+	{
+		spotFound = TRUE;
+	}
+	else if( ThePartitionManager->findPositionAround( &center, &fp, &pos ) )
+	{
+		spotFound = TRUE;
+	}
+	else
+	{
+		// Match the normal CreateCrateDie placement fallback. Large wrecks and
+		// congested deaths can make the tight search fail; put salvage around
+		// the edge instead of burying it at the dead vehicle's center.
+		fp.minRadius = 0.0f;
+		fp.maxRadius = 125.0f;
+		fp.relationshipObject = nullptr;
+		fp.flags = FPF_NONE;
+		spotFound = ThePartitionManager->findPositionAround( &center, &fp, &pos );
+	}
+
+	if( !spotFound )
+		return nullptr;
+
+	Object *crate = TheThingFactory->newObject( crateType, nullptr );
+	if( crate == nullptr )
+		return nullptr;
+
+	crate->setPosition( &pos );
+	crate->setOrientation( GameLogicRandomValueReal( 0, 2*PI ) );
+	crate->setLayer( layer );
 
 	Drawable *crateDrawable = crate->getDrawable();
 	if( crateDrawable )
