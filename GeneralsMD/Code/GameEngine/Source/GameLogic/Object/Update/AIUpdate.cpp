@@ -1105,7 +1105,7 @@ static Bool tryAutoProductionHealing( AIUpdateInterface *ai, Object *obj, Update
 	if( ai == nullptr || obj == nullptr )
 		return FALSE;
 
-	if( obj == nullptr || obj->isEffectivelyDead() || !obj->isMobile() || obj->isContained() )
+	if( obj->isEffectivelyDead() || !obj->isMobile() || obj->isContained() )
 		return FALSE;
 
 	Player *player = obj->getControllingPlayer();
