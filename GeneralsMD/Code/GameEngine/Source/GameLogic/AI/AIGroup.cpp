@@ -2944,34 +2944,77 @@ void AIGroup::groupDoSpecialPowerAtLocation( UnsignedInt specialPowerID, const C
  */
 void AIGroup::groupDoSpecialPowerAtObject( UnsignedInt specialPowerID, Object *target, UnsignedInt commandOptions )
 {
-	//This one requires a target
-	std::list<Object *>::iterator i;
-	for( i = m_memberList.begin(); i != m_memberList.end(); ++i )
-	{
-		//Special powers do a lot of different things, but the top level stuff doesn't use
-		//ai interface code. It finds the special power module and calls it directly for each object.
+	const SpecialPowerTemplate *spTemplate = TheSpecialPowerStore->findSpecialPowerTemplateByID( specialPowerID );
+	if( spTemplate == nullptr )
+		return;
 
-		Object *object = (*i);
-		const SpecialPowerTemplate *spTemplate = TheSpecialPowerStore->findSpecialPowerTemplateByID( specialPowerID );
-		if( spTemplate )
+	const SpecialPowerType spType = spTemplate->getSpecialPowerType();
+	const Bool singleCapturer =
+		spType == SPECIAL_INFANTRY_CAPTURE_BUILDING ||
+		spType == SPECIAL_BLACKLOTUS_CAPTURE_BUILDING;
+
+	// Capturing the same building with multiple infantry does not stack. Elect one
+	// deterministic legal capturer -- nearest first, then object ID -- and leave
+	// the rest of the selected group alone.
+	if( singleCapturer )
+	{
+		Object *best = nullptr;
+		Real bestDistSqr = 1.0e30f;
+
+		for( std::list<Object *>::iterator i = m_memberList.begin(); i != m_memberList.end(); ++i )
 		{
-			// Have to justify the execution in case someone changed their button
-			if( spTemplate->getRequiredScience() != SCIENCE_INVALID )
-			{
-				if( !object->getControllingPlayer()->hasScience(spTemplate->getRequiredScience()) )
-					continue;// Nice try, smacktard.
-			}
+			Object *object = *i;
+			if( object == nullptr || target == nullptr )
+				continue;
+
+			if( spTemplate->getRequiredScience() != SCIENCE_INVALID &&
+					!object->getControllingPlayer()->hasScience( spTemplate->getRequiredScience() ) )
+				continue;
 
 			SpecialPowerModuleInterface *mod = object->getSpecialPowerModule( spTemplate );
+			if( mod == nullptr ||
+					!TheActionManager->canDoSpecialPowerAtObject( object, target, CMD_FROM_PLAYER, spTemplate, commandOptions ) )
+				continue;
+
+			const Real dx = object->getPosition()->x - target->getPosition()->x;
+			const Real dy = object->getPosition()->y - target->getPosition()->y;
+			const Real distSqr = dx*dx + dy*dy;
+			if( best == nullptr || distSqr < bestDistSqr ||
+					(distSqr == bestDistSqr && object->getID() < best->getID()) )
+			{
+				best = object;
+				bestDistSqr = distSqr;
+			}
+		}
+
+		if( best )
+		{
+			SpecialPowerModuleInterface *mod = best->getSpecialPowerModule( spTemplate );
 			if( mod )
 			{
-				if( TheActionManager->canDoSpecialPowerAtObject( object, target, CMD_FROM_PLAYER, spTemplate, commandOptions ) )
-				{
-					mod->doSpecialPowerAtObject( target, commandOptions );
-
-					object->friend_setUndetectedDefector( FALSE );// My secret is out
-				}
+				mod->doSpecialPowerAtObject( target, commandOptions );
+				best->friend_setUndetectedDefector( FALSE );
 			}
+		}
+		return;
+	}
+
+	// Other object-targeted special powers retain normal group semantics.
+	for( std::list<Object *>::iterator i = m_memberList.begin(); i != m_memberList.end(); ++i )
+	{
+		Object *object = *i;
+
+		if( spTemplate->getRequiredScience() != SCIENCE_INVALID )
+		{
+			if( !object->getControllingPlayer()->hasScience(spTemplate->getRequiredScience()) )
+				continue;
+		}
+
+		SpecialPowerModuleInterface *mod = object->getSpecialPowerModule( spTemplate );
+		if( mod && TheActionManager->canDoSpecialPowerAtObject( object, target, CMD_FROM_PLAYER, spTemplate, commandOptions ) )
+		{
+			mod->doSpecialPowerAtObject( target, commandOptions );
+			object->friend_setUndetectedDefector( FALSE );
 		}
 	}
 }
