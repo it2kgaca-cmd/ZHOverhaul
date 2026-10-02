@@ -90,12 +90,12 @@ public:
 	// units arrive by cargo plane instead of a conventional production door.
 	virtual Bool isExitBusy() const override { return FALSE; }
 	virtual ExitDoorType reserveDoorForExit( const ThingTemplate*, Object* ) override { return DOOR_NONE_NEEDED; }
-	virtual void exitObjectViaDoor( Object*, ExitDoorType ) override {}
+	virtual void exitObjectViaDoor( Object *newObj, ExitDoorType exitDoor ) override;
 	virtual void exitObjectByBudding( Object*, Object* ) override {}
 	virtual void unreserveDoorForExit( ExitDoorType ) override {}
 	virtual void setRallyPoint( const Coord3D *pos ) override;
 	virtual const Coord3D *getRallyPoint() const override;
-	virtual Bool useSpawnRallyPoint() const override { return isSupplyDropZone(); }
+	virtual Bool useSpawnRallyPoint() const override { return isSupplyDropZone() && m_rallyPointExists; }
 	virtual Bool getNaturalRallyPoint( Coord3D& rallyPoint, Bool offset = TRUE ) const override;
 	virtual Bool getExitPosition( Coord3D& exitPosition ) const override;
 
