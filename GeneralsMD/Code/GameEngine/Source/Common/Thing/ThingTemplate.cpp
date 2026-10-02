@@ -1602,7 +1602,7 @@ Int ThingTemplate::calcCostToBuild( const Player* player) const
 #if !RETAIL_COMPATIBLE_CRC
 	cost *= getDoctrineCostMultiplier(this, player);
 #endif
-	return REAL_TO_INT_FLOOR(cost + 0.5f);
+	return REAL_TO_INT_FLOOR(cost);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1618,7 +1618,7 @@ Int ThingTemplate::calcTimeToBuild( const Player* player) const
 	Real factionModifier = 1 + player->getProductionTimeChangePercent( getName() );
 	buildTime *= factionModifier;
 #if !RETAIL_COMPATIBLE_CRC
-	buildTime = REAL_TO_INT_FLOOR(buildTime * getDoctrineTimeMultiplier(this, player) + 0.5f);
+	buildTime = REAL_TO_INT_FLOOR(buildTime * getDoctrineTimeMultiplier(this, player));
 #endif
 
 #if defined(RTS_DEBUG) || defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
