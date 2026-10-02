@@ -48,6 +48,7 @@
 #include "Common/Player.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
+#include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/GameText.h"
@@ -144,6 +145,124 @@ const ThingTemplate *ProductionPrerequisite::getExistingBuildFacilityTemplate( c
 		}
 	}
 	return nullptr;
+}
+
+//-----------------------------------------------------------------------------
+Bool ProductionPrerequisite::hasUnmetSciencePrerequisite(const Player *player) const
+{
+	if (!player)
+		return !m_prereqSciences.empty();
+
+	for (ScienceVec::const_iterator it = m_prereqSciences.begin(); it != m_prereqSciences.end(); ++it)
+	{
+		if (!player->hasScience(*it))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
+static Bool doctrineTemplateBelongsToPlayerBaseSide(const ThingTemplate *thing, const Player *player)
+{
+	if (!thing || !player)
+		return FALSE;
+
+	const AsciiString side = thing->getDefaultOwningSide();
+	const AsciiString base = player->getBaseSide();
+
+	if (base.compareNoCase("USA") == 0)
+		return strstr(side.str(), "America") != nullptr;
+	if (base.compareNoCase("China") == 0)
+		return strstr(side.str(), "China") != nullptr;
+	if (base.compareNoCase("GLA") == 0)
+		return strstr(side.str(), "GLA") != nullptr;
+
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
+static Bool doctrineFacilityClassMatches(const ThingTemplate *required, const ThingTemplate *candidate)
+{
+	if (!required || !candidate)
+		return FALSE;
+
+	// Test the most specific facility identities first. FS_ADVANCED_TECH is
+	// deliberately later because Strategy Centers also carry advanced-tech identity.
+	if (required->isKindOf(KINDOF_FS_STRATEGY_CENTER))
+		return candidate->isKindOf(KINDOF_FS_STRATEGY_CENTER);
+	if (required->isKindOf(KINDOF_FS_INTERNET_CENTER))
+		return candidate->isKindOf(KINDOF_FS_INTERNET_CENTER);
+	if (required->isKindOf(KINDOF_FS_BLACK_MARKET))
+		return candidate->isKindOf(KINDOF_FS_BLACK_MARKET);
+	if (required->isKindOf(KINDOF_FS_BARRACKS))
+		return candidate->isKindOf(KINDOF_FS_BARRACKS);
+	if (required->isKindOf(KINDOF_FS_WARFACTORY))
+		return candidate->isKindOf(KINDOF_FS_WARFACTORY);
+	if (required->isKindOf(KINDOF_FS_AIRFIELD))
+		return candidate->isKindOf(KINDOF_FS_AIRFIELD);
+	if (required->isKindOf(KINDOF_FS_SUPPLY_CENTER))
+		return candidate->isKindOf(KINDOF_FS_SUPPLY_CENTER);
+	if (required->isKindOf(KINDOF_FS_ADVANCED_TECH))
+		return candidate->isKindOf(KINDOF_FS_ADVANCED_TECH);
+
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
+static Bool playerOwnsDoctrineFacilityEquivalent(const Player *player, const ThingTemplate *required)
+{
+	if (!player || !required || !required->isKindOf(KINDOF_STRUCTURE) ||
+			!doctrineTemplateBelongsToPlayerBaseSide(required, player))
+		return FALSE;
+
+	for (Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject())
+	{
+		if (obj->isEffectivelyDead() || obj->getControllingPlayer() != player)
+			continue;
+
+		const ThingTemplate *candidate = obj->getTemplate();
+		if (!candidate || !candidate->isKindOf(KINDOF_STRUCTURE) ||
+				!doctrineTemplateBelongsToPlayerBaseSide(candidate, player))
+			continue;
+
+		if (doctrineFacilityClassMatches(required, candidate))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
+Bool ProductionPrerequisite::isSatisfiedByDoctrineFacility(const Player *player) const
+{
+	if (!player || m_prereqUnits.empty() || !m_prereqSciences.empty())
+		return FALSE;
+
+	Int ownCount[MAX_PREREQ];
+	const Int cnt = calcNumPrereqUnitsOwned(player, ownCount);
+	Int i = 0;
+	while (i < cnt)
+	{
+		const Int blockStart = i;
+		Int blockEnd = i;
+		while (blockEnd + 1 < cnt && (m_prereqUnits[blockEnd + 1].flags & UNIT_OR_WITH_PREV))
+			++blockEnd;
+
+		Bool blockSatisfied = FALSE;
+		for (Int j = blockStart; j <= blockEnd; ++j)
+		{
+			if (ownCount[j] > 0 ||
+					playerOwnsDoctrineFacilityEquivalent(player, m_prereqUnits[j].unit))
+			{
+				blockSatisfied = TRUE;
+				break;
+			}
+		}
+		if (!blockSatisfied)
+			return FALSE;
+
+		i = blockEnd + 1;
+	}
+	return TRUE;
 }
 
 //-----------------------------------------------------------------------------

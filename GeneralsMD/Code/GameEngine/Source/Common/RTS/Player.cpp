@@ -2952,6 +2952,36 @@ Bool Player::canBuildMoreOfType( const ThingTemplate *whatToBuild ) const
 }
 
 //=============================================================================
+Bool Player::isDoctrineRosterFallback(const ThingTemplate *tmplate) const
+{
+#if !RETAIL_COMPATIBLE_CRC
+	if (!tmplate ||
+			(!tmplate->isKindOf(KINDOF_INFANTRY) &&
+			 !tmplate->isKindOf(KINDOF_VEHICLE) &&
+			 !tmplate->isKindOf(KINDOF_AIRCRAFT)))
+		return FALSE;
+
+	// Base factions keep their normal prices. Boss is not treated as a specialist
+	// general. General-specific unit templates also keep their authored balance;
+	// only parent-faction templates restored to a specialist roster get this tax.
+	const AsciiString side = getSide();
+	if (strstr(side.str(), "General") == nullptr)
+		return FALSE;
+
+	const AsciiString ownerSide = tmplate->getDefaultOwningSide();
+	const AsciiString base = getBaseSide();
+
+	if (base.compareNoCase("USA") == 0)
+		return ownerSide.compareNoCase("America") == 0;
+	if (base.compareNoCase("China") == 0)
+		return ownerSide.compareNoCase("China") == 0;
+	if (base.compareNoCase("GLA") == 0)
+		return ownerSide.compareNoCase("GLA") == 0;
+#endif
+	return FALSE;
+}
+
+//=============================================================================
 Bool Player::canBuild(const ThingTemplate *tmplate) const
 {
 	if (!tmplate)
@@ -2972,13 +3002,34 @@ Bool Player::canBuild(const ThingTemplate *tmplate) const
 	// else BSTATUS tmplate->getBuildable() == BSTATUS_YES
 	{
 
-		// we must satisfy all of the prereqs
+		// We must satisfy all hard prerequisites. In the overhaul, an unmet
+		// promotion/perk science on an ordinary unit is a price/time penalty rather
+		// than a hard lock. Restored specialist-roster units may also use their
+		// general's equivalent production/advanced-tech facility.
 		Bool prereqsOK = true;
+		const Bool doctrineUnit =
+#if !RETAIL_COMPATIBLE_CRC
+			tmplate->isKindOf(KINDOF_INFANTRY) ||
+			tmplate->isKindOf(KINDOF_VEHICLE) ||
+			tmplate->isKindOf(KINDOF_AIRCRAFT);
+#else
+			FALSE;
+#endif
+		const Bool rosterFallback = isDoctrineRosterFallback(tmplate);
+
 		for (Int i = 0; i < tmplate->getPrereqCount(); i++)
 		{
 			const ProductionPrerequisite *pre = tmplate->getNthPrereq(i);
 			if (pre->isSatisfied(this) == false )
+			{
+#if !RETAIL_COMPATIBLE_CRC
+				if (doctrineUnit && pre->isScienceOnly())
+					continue;
+				if (rosterFallback && pre->isSatisfiedByDoctrineFacility(this))
+					continue;
+#endif
 				prereqsOK = false;
+			}
 		}
 
 #if defined(RTS_DEBUG)

@@ -84,6 +84,50 @@ const Int USE_EXP_VALUE_FOR_SKILL_VALUE = -999;
 
 AudioEventRTS ThingTemplate::s_audioEventNoSound;
 
+#if !RETAIL_COMPATIBLE_CRC
+static Bool isDoctrineProductionUnit(const ThingTemplate *thing)
+{
+	return thing &&
+		(thing->isKindOf(KINDOF_INFANTRY) ||
+		 thing->isKindOf(KINDOF_VEHICLE) ||
+		 thing->isKindOf(KINDOF_AIRCRAFT));
+}
+
+static Bool hasUnmetDoctrineScience(const ThingTemplate *thing, const Player *player)
+{
+	if (!isDoctrineProductionUnit(thing) || !player)
+		return FALSE;
+
+	for (Int i = 0; i < thing->getPrereqCount(); ++i)
+	{
+		const ProductionPrerequisite *pre = thing->getNthPrereq(i);
+		if (pre && pre->isScienceOnly() && pre->hasUnmetSciencePrerequisite(player))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static Real getDoctrineCostMultiplier(const ThingTemplate *thing, const Player *player)
+{
+	Real mult = 1.0f;
+	if (hasUnmetDoctrineScience(thing, player))
+		mult *= 1.60f;
+	if (player && player->isDoctrineRosterFallback(thing))
+		mult *= 1.60f;
+	return mult;
+}
+
+static Real getDoctrineTimeMultiplier(const ThingTemplate *thing, const Player *player)
+{
+	Real mult = 1.0f;
+	if (hasUnmetDoctrineScience(thing, player))
+		mult *= 1.40f;
+	if (player && player->isDoctrineRosterFallback(thing))
+		mult *= 1.40f;
+	return mult;
+}
+#endif
+
 static void parseKindOfFromINI(INI* ini, void* instance, void *store, const void* userData)
 {
 	KindOfMaskType::parseFromINI(ini, instance, store, userData);
@@ -1554,7 +1598,11 @@ Int ThingTemplate::calcCostToBuild( const Player* player) const
 	// changePercent format is "-.2 equals 20% cheaper"
 	Real factionModifier = 1 + player->getProductionCostChangePercent( getName() );
 	factionModifier *= player->getProductionCostChangeBasedOnKindOf( m_kindof );
-	return getBuildCost() * factionModifier * player->getHandicap()->getHandicap(Handicap::BUILDCOST, this);
+	Real cost = getBuildCost() * factionModifier * player->getHandicap()->getHandicap(Handicap::BUILDCOST, this);
+#if !RETAIL_COMPATIBLE_CRC
+	cost *= getDoctrineCostMultiplier(this, player);
+#endif
+	return REAL_TO_INT_FLOOR(cost + 0.5f);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1569,6 +1617,9 @@ Int ThingTemplate::calcTimeToBuild( const Player* player) const
 
 	Real factionModifier = 1 + player->getProductionTimeChangePercent( getName() );
 	buildTime *= factionModifier;
+#if !RETAIL_COMPATIBLE_CRC
+	buildTime = REAL_TO_INT_FLOOR(buildTime * getDoctrineTimeMultiplier(this, player) + 0.5f);
+#endif
 
 #if defined(RTS_DEBUG) || defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
 	if( player->buildsInstantly() )

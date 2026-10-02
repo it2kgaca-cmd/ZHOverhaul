@@ -3838,6 +3838,22 @@ static Bool canAttackMoveFireWhileMoving(Object *owner, AIUpdateInterface *ai, O
 	return turret != TURRET_INVALID && ai->getTurretTurnRate(turret) != 0.0f;
 }
 
+static void stopLongRangeArtilleryAtAttackMoveOpportunity(Object *owner, AIUpdateInterface *ai)
+{
+	if (!owner || !ai || !ai->isLongRangeArtillery())
+		return;
+
+	// DeployStyleAIUpdate treats any surviving path as "still trying to move".
+	// Kill both the route and pending request at the first legal shot so deploy
+	// weapons unpack immediately and other artillery cannot creep closer.
+	ai->destroyPath();
+	ai->setQueueForPathTime(0);
+	TheAI->pathfinder()->removeGoal(owner);
+	ai->setLocomotorGoalNone();
+	ai->friend_endingMove();
+	owner->clearModelConditionState(MODELCONDITION_MOVING);
+}
+
 StateReturnType AIAttackMoveToState::update()
 {
 
@@ -3942,8 +3958,13 @@ StateReturnType AIAttackMoveToState::update()
 			// the existing attack sub-machine independently aims and fires.
 			if (!fireWhileMoving)
 			{
-				ai->setLocomotorGoalNone();
-				owner->clearModelConditionState(MODELCONDITION_MOVING);
+				if (ai->isLongRangeArtillery())
+					stopLongRangeArtilleryAtAttackMoveOpportunity(owner, ai);
+				else
+				{
+					ai->setLocomotorGoalNone();
+					owner->clearModelConditionState(MODELCONDITION_MOVING);
+				}
 			}
 
 			m_attackMoveMachine->updateStateMachine();
@@ -4059,10 +4080,12 @@ StateReturnType AIAttackMoveToState::update()
 			m_attackMoveMachine->setGoalObject(nextObjectToAttack);
 			m_attackMoveMachine->setState( AI_ATTACK_OBJECT );
 
-			// setState() selects the weapon. If that gives us a real independently
-			// turning turret and the target is already in range, preserve the
-			// movement state instead of declaring the move finished.
-			if (!canAttackMoveFireWhileMoving(owner, ai, nextObjectToAttack))
+			// setState() selects the weapon. Artillery must terminate the outer
+			// route at the first legal shot; ordinary non-moving-fire units retain
+			// the usual move-completion behavior.
+			if (ai->isLongRangeArtillery())
+				stopLongRangeArtilleryAtAttackMoveOpportunity(owner, ai);
+			else if (!canAttackMoveFireWhileMoving(owner, ai, nextObjectToAttack))
 				ai->friend_endingMove();
 
 			shouldRepathThisFrame = false;	// we're about to drop out of this function, but this is semantic emphasis.

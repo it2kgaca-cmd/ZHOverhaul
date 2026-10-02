@@ -82,6 +82,12 @@ public:
 	/// return true iff the player satisfies our set of prerequisites
 	Bool isSatisfied(const Player *player) const;
 
+	// ZHOverhaul doctrine support. Science-only unit requirements become an
+	// economic/time gate; production/tech structures remain real prerequisites.
+	Bool isScienceOnly() const { return !m_prereqSciences.empty() && m_prereqUnits.empty(); }
+	Bool hasUnmetSciencePrerequisite(const Player *player) const;
+	Bool isSatisfiedByDoctrineFacility(const Player *player) const;
+
 	/**
 		return the BuildFacilityTemplate, if any.
 

@@ -266,6 +266,10 @@ public:
 	/// true if we have the prereqs for this item
 	Bool canBuild(const ThingTemplate *tmplate) const;
 
+	/// ZHOverhaul: true when a specialist general is buying a normally omitted
+	/// ordinary unit from the parent faction roster.
+	Bool isDoctrineRosterFallback(const ThingTemplate *tmplate) const;
+
 	// Can we afford to build?
 	Bool canAffordBuild( const ThingTemplate *whatToBuild ) const;
 
