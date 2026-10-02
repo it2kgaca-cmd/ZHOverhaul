@@ -227,13 +227,13 @@ static Bool isSupplyManifestRosterUnit( const PlayerTemplate *playerTemplate, co
 	return FALSE;
 }
 
-static Bool attachSupplyDropPayload( Object *transport, Object *payload, Object *payloadProducer, const char *containerTemplateName, const Coord3D& startPos )
+static Bool attachSupplyDropPayload( Object *transport, Object *payload, const char *containerTemplateName, const Coord3D& startPos )
 {
 	if( transport == nullptr || payload == nullptr )
 		return FALSE;
 
 	payload->setPosition( &startPos );
-	payload->setProducer( payloadProducer ? payloadProducer : transport );
+	payload->setProducer( transport );
 
 	Object *outerPayload = payload;
 	if( containerTemplateName != nullptr && containerTemplateName[0] != 0 )
@@ -265,6 +265,21 @@ static Bool attachSupplyDropPayload( Object *transport, Object *payload, Object 
 ProductionUpdateInterface* OCLUpdate::getProductionUpdateInterface()
 {
 	return isSupplyDropZone() ? this : nullptr;
+}
+
+void OCLUpdate::exitObjectViaDoor( Object *newObj, ExitDoorType )
+{
+	if( newObj == nullptr )
+		return;
+
+	AIUpdateInterface *ai = newObj->getAIUpdateInterface();
+	if( ai == nullptr )
+		return;
+
+	if( m_rallyPointExists )
+		ai->aiMoveToPosition( &m_rallyPoint, CMD_FROM_AI );
+	else
+		ai->aiIdle( CMD_FROM_AI );
 }
 
 void OCLUpdate::setRallyPoint( const Coord3D *pos )
@@ -533,7 +548,7 @@ Bool OCLUpdate::deliverSupplyManifest( const Coord3D& edgePoint )
 		const ThingTemplate *unitType = *it;
 		Object *payload = TheThingFactory->newObject( unitType, player->getDefaultTeam() );
 		if( payload == nullptr ) continue;
-		attachSupplyDropPayload( transport, payload, dropZone, unitType->isKindOf( KINDOF_VEHICLE ) ? "LargeParachute" : "AmericaParachute", startPos );
+		attachSupplyDropPayload( transport, payload, unitType->isKindOf( KINDOF_VEHICLE ) ? "LargeParachute" : "AmericaParachute", startPos );
 	}
 
 	const Int cashRemainder = SUPPLY_DROP_MANIFEST_BUDGET - spent;
@@ -551,7 +566,7 @@ Bool OCLUpdate::deliverSupplyManifest( const Coord3D& edgePoint )
 				static const NameKeyType key_MoneyCrateCollide = NAMEKEY( "MoneyCrateCollide" );
 				MoneyCrateCollide *money = (MoneyCrateCollide*)cash->findCollideModule( key_MoneyCrateCollide );
 				if( money ) money->setMoneyProvidedOverride( (UnsignedInt)cashRemainder );
-				attachSupplyDropPayload( transport, cash, dropZone, "AmericaCrateParachute", startPos );
+				attachSupplyDropPayload( transport, cash, "AmericaCrateParachute", startPos );
 			}
 		}
 	}
