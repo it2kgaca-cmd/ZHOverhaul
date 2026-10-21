@@ -222,7 +222,10 @@ void AISkirmishPlayer::processBaseBuilding()
 				}
 				continue;
 			}
-			if (TheBuildAssistant->canMakeUnit(dozer, bldgPlan)!=CANMAKE_OK) {
+			// Test the entry currently being scanned, not whichever candidate happened to
+			// win earlier in the loop. Using bldgPlan here made later tech-chain entries
+			// inherit another building's legality and could leave the AI permanently stuck.
+			if (TheBuildAssistant->canMakeUnit(dozer, curPlan)!=CANMAKE_OK) {
 				if (info->isBuildable()) {
 					AsciiString bldgName = info->getTemplateName();
 					bldgName.concat(" - Dozer unable to build - money or technology missing.");
@@ -1091,6 +1094,14 @@ void AISkirmishPlayer::newMap()
 	// Build any with the initially built flag.
 	for( BuildListInfo *info = m_player->getBuildList(); info; info = info->getNext() )
 	{
+#if !RETAIL_COMPATIBLE_CRC
+		// Skirmish AI should restore its authored automatic base plan instead of permanently
+		// losing a production/tech/economy layer after a finite number of destructions.
+		// Script-controlled entries remain finite so mission logic keeps its intended semantics.
+		if (info->isAutomaticBuild())
+			info->setNumRebuilds(BuildListInfo::UNLIMITED_REBUILDS);
+#endif
+
 		AsciiString name = info->getTemplateName();
 		if (name.isEmpty()) continue;
 		const ThingTemplate *bldgPlan = TheThingFactory->findTemplate( name );
