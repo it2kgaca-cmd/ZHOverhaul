@@ -2292,8 +2292,15 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 		// prepareNewGame(), but campaign/challenge "Continue" can transition directly into the next map
 		// with the shell stack reactivated by the victory screen. Enforce the invariant here as well so
 		// menu layouts can never remain over live gameplay.
-		if (TheShell && TheShell->isShellActive())
-			TheShell->hideShell();
+		if (TheShell)
+		{
+			if (TheShell->isShellActive())
+				TheShell->hideShell();
+			// The active flag is not a guarantee that MainMenu's windows are
+			// hidden: a score-screen pop can uncover them while inactive.
+			// Always enforce actual visibility at every real map start.
+			TheShell->hide(TRUE);
+		}
 
 		if(TheStatsCollector)
 		{

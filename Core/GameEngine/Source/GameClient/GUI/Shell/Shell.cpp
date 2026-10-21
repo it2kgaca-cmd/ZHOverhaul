@@ -444,7 +444,7 @@ void Shell::pop()
 	* from the shutdown() for the screen, it will be immediately popped off
 	* the stack */
 //-------------------------------------------------------------------------------------------------
-void Shell::popImmediate()
+void Shell::popImmediate(Bool reinitializeUncovered)
 {
 	WindowLayout *screen = top();
 
@@ -468,7 +468,11 @@ void Shell::popImmediate()
 	screen->runShutdown( &immediatePop );
 
 	// pop the screen of the stack
-	doPop( FALSE );
+	// A Continue-to-next-mission pop must not reinitialize the exposed
+	// MainMenu: MainMenuInit() can request a shell-map NEW_GAME and reveal
+	// those menu windows while the campaign/Challenge map loads.
+	// Ordinary menu pops retain the original reinitialize behavior.
+	doPop( reinitializeUncovered ? FALSE : TRUE );
 
 	if (TheIMEManager)
 		TheIMEManager->detach();
@@ -611,6 +615,13 @@ void Shell::hideShell()
 
 	if (TheIMEManager)
 		TheIMEManager->detach();
+
+	// Shutdown() only hides the top layout, and an uncovered MainMenu can
+	// remain visible even while the shell is marked inactive. Hide every
+	// stacked layout plus the separate background before entering gameplay.
+	hide(TRUE);
+	if (m_background)
+		m_background->hide(TRUE);
 
 	// Mark that the shell is no longer up.
 	m_isShellActive = FALSE;

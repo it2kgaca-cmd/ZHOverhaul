@@ -193,7 +193,9 @@ void populateSideInfo( UnicodeString side,ScoreGather *sg, Int pos, Color color)
 
 void startNextCampaignGame()
 {
-	TheShell->popImmediate();
+	// Continue goes into another map, not the main menu. Leave the
+	// underlying shell stack dormant rather than running MainMenuInit().
+	TheShell->popImmediate(FALSE);
 	TheShell->hideShell();
 	TheWritableGlobalData->m_pendingFile = TheCampaignManager->getCurrentMap();
 	if (TheCampaignManager->getCurrentCampaign() && TheCampaignManager->getCurrentCampaign()->isChallengeCampaign())
