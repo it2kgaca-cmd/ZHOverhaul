@@ -7360,6 +7360,106 @@ void AIGuardState::onExit( StateExitType status )
 }
 
 //----------------------------------------------------------------------------------------------------------
+#if !RETAIL_COMPATIBLE_CRC
+// Guard has no weapon target for Hacker/Lotus; scan for a legal hack or
+// capture within the assigned post, then resume that *same Guard order*.
+static Bool executeSpecialistGuardOpportunity(Object *owner)
+{
+	if (!owner || !TheActionManager || !ThePartitionManager || !TheGameLogic)
+		return FALSE;
+	AIUpdateInterface *ai = owner->getAIUpdateInterface();
+	Player *player = owner->getControllingPlayer();
+	if (!ai || !player || ai->getGuardTargetType() == GUARDTARGET_NONE)
+		return FALSE;
+
+	if (!owner->findSpecialPowerModuleInterface(SPECIAL_HACKER_DISABLE_BUILDING) &&
+			!owner->findSpecialPowerModuleInterface(SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK) &&
+			!owner->findSpecialPowerModuleInterface(SPECIAL_BLACKLOTUS_CAPTURE_BUILDING))
+		return FALSE;
+
+	const GuardTargetType guardType = ai->getGuardTargetType();
+	Coord3D guardCenter = *ai->getGuardLocation();
+	const ObjectID guardedObjectID = ai->getGuardObject();
+	if (guardType == GUARDTARGET_OBJECT)
+	{
+		Object *guarded = TheGameLogic->findObjectByID(guardedObjectID);
+		if (guarded && !guarded->isEffectivelyDead())
+			guardCenter = *guarded->getPosition();
+	}
+	else if (guardType == GUARDTARGET_AREA && ai->getAreaToGuard())
+		ai->getAreaToGuard()->getCenterPoint(&guardCenter);
+
+	Real guardRange = AIGuardMachine::getStdGuardRange(owner);
+	if (guardType == GUARDTARGET_AREA && ai->getAreaToGuard())
+		guardRange = ai->getAreaToGuard()->getRadius();
+	if (guardRange <= 0.0f)
+		return FALSE;
+	Real scanRange = guardRange;
+	if (scanRange > 220.0f)
+		scanRange = 220.0f;
+
+	PartitionFilterRelationship enemies(owner,
+		PartitionFilterRelationship::ALLOW_ENEMIES | PartitionFilterRelationship::ALLOW_NEUTRAL);
+	PartitionFilterAlive alive;
+	PartitionFilterOnMap onMap;
+	PartitionFilterStealthedAndUndetected visible(owner, false);
+	PartitionFilterFreeOfFog unfogged(player->getPlayerIndex());
+	PartitionFilterSameMapStatus sameLayer(owner);
+	PartitionFilterPolygonTrigger insideArea(ai->getAreaToGuard());
+	PartitionFilter *filters[9];
+	Int filterCount = 0;
+	filters[filterCount++] = &enemies;
+	filters[filterCount++] = &alive;
+	filters[filterCount++] = &onMap;
+	filters[filterCount++] = &visible;
+	filters[filterCount++] = &unfogged;
+	filters[filterCount++] = &sameLayer;
+	if (guardType == GUARDTARGET_AREA && ai->getAreaToGuard())
+		filters[filterCount++] = &insideArea;
+	filters[filterCount] = nullptr;
+
+	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(
+		owner, scanRange, FROM_BOUNDINGSPHERE_2D, filters, ITER_SORTED_NEAR_TO_FAR);
+	MemoryPoolObjectHolder hold(iter);
+	if (!iter)
+		return FALSE;
+
+	for (Object *target = iter->first(); target; target = iter->next())
+	{
+		const Real dx = target->getPosition()->x - guardCenter.x;
+		const Real dy = target->getPosition()->y - guardCenter.y;
+		if (dx*dx + dy*dy > guardRange*guardRange)
+			continue;
+
+		const Bool alreadyHacked = target->isDisabledByType(DISABLED_HACKED);
+		SpecialPowerType type = SPECIAL_INVALID;
+		if (!alreadyHacked && TheActionManager->canDisableBuildingViaHacking(owner,target,CMD_FROM_AI))
+			type = SPECIAL_HACKER_DISABLE_BUILDING;
+		else if (!alreadyHacked && TheActionManager->canDisableVehicleViaHacking(owner,target,CMD_FROM_AI))
+			type = SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK;
+		else if (owner->hasSpecialPower(SPECIAL_BLACKLOTUS_CAPTURE_BUILDING) &&
+				TheActionManager->canCaptureBuilding(owner,target,CMD_FROM_AI))
+			type = SPECIAL_BLACKLOTUS_CAPTURE_BUILDING;
+		if (type == SPECIAL_INVALID)
+			continue;
+
+		SpecialPowerModuleInterface *power = owner->findSpecialPowerModuleInterface(type);
+		SpecialAbilityUpdate *ability = owner->findSpecialAbilityUpdate(type);
+		if (!power || !ability || power->getPercentReady() < 1.0f)
+			continue;
+
+		const GuardMode mode = ai->getGuardMode();
+		owner->doSpecialPowerAtObject(power->getSpecialPowerTemplate(),
+			target, COMMAND_FIRED_BY_SCRIPT, TRUE);
+		ability->setGuardContinuation((Int)guardType, &guardCenter,
+			guardedObjectID, (Int)mode, (Int)CMD_FROM_AI,
+			type == SPECIAL_HACKER_DISABLE_BUILDING);
+		return TRUE;
+	}
+	return FALSE;
+}
+#endif
+
 StateReturnType AIGuardState::update()
 {
 	//DEBUG_LOG(("AIGuardState frame %d: %08lx",TheGameLogic->getFrame(),getMachineOwner()));
@@ -7377,6 +7477,13 @@ StateReturnType AIGuardState::update()
 		DEBUG_CRASH(("Hmm, this should probably never happen, since this case should be intercepted by JetAIUpdate"));
 		return STATE_FAILURE;
 	}
+
+#if !RETAIL_COMPATIBLE_CRC
+	// Beginning a special changes the outer state: do it before locking Guard.
+	if (m_guardMachine->isInGuardIdleState() &&
+			executeSpecialistGuardOpportunity(owner))
+		return STATE_CONTINUE;
+#endif
 
 	getMachine()->lock("AIGuardState::update");	// We don't want to switch out of guard during the update.
 	StateReturnType ret = m_guardMachine->updateStateMachine();
