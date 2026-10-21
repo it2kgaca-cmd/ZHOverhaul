@@ -1460,6 +1460,11 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 			}
 #endif
 			CanMakeType makeType = TheBuildAssistant->canMakeUnit( obj, command->getThingTemplate() );
+			// The actual queue checks command-set membership and hard prerequisites.
+			// Do not display an enabled science-softened unit that cannot be queued
+			// from this particular producer.
+			if( makeType == CANMAKE_NO_PREREQ || makeType == CANMAKE_FACTORY_IS_DISABLED )
+				return COMMAND_RESTRICTED;
 			if( makeType == CANMAKE_MAXED_OUT_FOR_PLAYER || makeType == CANMAKE_PARKING_PLACES_FULL )
 			{
 				//Disable the button if the player has a max amount of these units in build queue or existence.
