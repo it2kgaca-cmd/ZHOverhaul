@@ -174,76 +174,13 @@ void ScriptActions::update()
 
 
 //-------------------------------------------------------------------------------------------------
-/** Begin a headless fast-forward of an in-engine scripted cinematic. Gameplay logic keeps running. */
+/** Skip only the scripted presentation; gameplay time remains unchanged. */
 //-------------------------------------------------------------------------------------------------
-Bool ScriptActions::skipCurrentCinematic()
+// Skipping presentation must never execute world simulation ahead of the
+// renderer/client: doing so risks mission lifecycle and script invalidation.
+// Idempotent: called both on ESC and at the natural ENABLE_INPUT endpoint.
+static void releaseSkippedCinematicPresentation()
 {
-	// A cinematic skip is a one-shot transition. Keep a second latch alive even after the accelerated
-	// simulation reaches the cinematic endpoint: camera/presentation teardown can finish a little before
-	// the script's canonical ENABLE_INPUT action. ESC must stay inert for that entire input-lock period.
-	if (m_skipCinematicPresentation || m_cinematicSkipEscapeLatched)
-		return FALSE;
-
-	// Fast-forwarding game logic independently is only safe in single-player.
-	if (TheNetwork != nullptr || TheInGameUI == nullptr || TheInGameUI->getInputEnabled() || m_messageWindow != nullptr)
-		return FALSE;
-
-	// DISABLE_INPUT is also used by non-cinematic mission states (notably victory/defeat). Require
-	// evidence that a presentation sequence is actually active before treating ESC as a cinematic skip.
-	const Bool hasCinematicPresentation =
-		(TheDisplay && (TheDisplay->isLetterBoxed() || TheDisplay->isLetterBoxFading())) ||
-		(TheTacticalView && (TheTacticalView->isDoingScriptedCamera() || TheTacticalView->getCameraLock() != INVALID_ID)) ||
-		(TheScriptEngine && TheScriptEngine->isTimeFrozenScript());
-	if (!hasCinematicPresentation)
-		return FALSE;
-
-	m_skipCinematicPresentation = TRUE;
-	m_cinematicSkipEscapeLatched = TRUE;
-	m_cinematicSkipStartFrame = TheGameLogic ? TheGameLogic->getFrame() : 0;
-
-	// Keep control locked until the cinematic's own ENABLE_INPUT action is reached. The fast-forward
-	// loop advances real GameLogic frames, so movement, damage, deaths, spawns, timers, AI and other
-	// mission consequences resolve exactly through the normal simulation path.
-	TheInGameUI->setInputEnabled(FALSE);
-	if (TheMouse)
-		TheMouse->setVisibility(FALSE);
-
-	// A scripted FREEZE_TIME would otherwise prevent world-frame progress forever. Ignore the current
-	// cinematic freeze now; later FREEZE_TIME actions are presentation-suppressed while skipping.
-	if (TheScriptEngine)
-		TheScriptEngine->doUnfreezeTime();
-	if (TheTacticalView)
-		TheTacticalView->setTimeMultiplier(1);
-
-	if (TheDisplay)
-	{
-		TheDisplay->setCinematicText(AsciiString::TheEmptyString);
-		TheDisplay->setCinematicTextFrames(0);
-	}
-	TheInGameUI->removeMilitarySubtitle();
-
-	DEBUG_LOG(("Fast-forwarding scripted cinematic from frame %u", m_cinematicSkipStartFrame));
-	return TRUE;
-}
-
-
-//-------------------------------------------------------------------------------------------------
-void ScriptActions::finishCinematicSkipFastForward(Bool aborted)
-{
-	if (!m_skipCinematicPresentation)
-		return;
-
-#ifdef DEBUG_LOGGING
-	const UnsignedInt endFrame = TheGameLogic ? TheGameLogic->getFrame() : m_cinematicSkipStartFrame;
-	const UnsignedInt startFrame = m_cinematicSkipStartFrame;
-#else
-	// DEBUG_LOG compiles out in Release, so do not leave logging-only locals/parameters unused under /WX.
-	(void)aborted;
-#endif
-
-	m_skipCinematicPresentation = FALSE;
-	m_cinematicSkipStartFrame = 0;
-
 	if (TheScriptEngine)
 		TheScriptEngine->doUnfreezeTime();
 
@@ -272,6 +209,85 @@ void ScriptActions::finishCinematicSkipFastForward(Bool aborted)
 		TheTacticalView->setFadeParameters(0, -1);
 		TheTacticalView->setUserControlled(TRUE);
 	}
+
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool ScriptActions::skipCurrentCinematic()
+{
+	// A cinematic skip is a one-shot transition. Keep a second latch alive even after the accelerated
+	// simulation reaches the cinematic endpoint: camera/presentation teardown can finish a little before
+	// the script's canonical ENABLE_INPUT action. ESC must stay inert for that entire input-lock period.
+	if (m_skipCinematicPresentation || m_cinematicSkipEscapeLatched)
+		return FALSE;
+
+	// Fast-forwarding game logic independently is only safe in single-player.
+	if (TheNetwork != nullptr || TheInGameUI == nullptr || TheInGameUI->getInputEnabled() || m_messageWindow != nullptr)
+		return FALSE;
+
+	// DISABLE_INPUT is also used by non-cinematic mission states (notably victory/defeat). Require
+	// evidence that a presentation sequence is actually active before treating ESC as a cinematic skip.
+	const Bool hasCinematicPresentation =
+		(TheDisplay && (TheDisplay->isLetterBoxed() || TheDisplay->isLetterBoxFading())) ||
+		(TheTacticalView && (TheTacticalView->isDoingScriptedCamera() || TheTacticalView->getCameraLock() != INVALID_ID)) ||
+		(TheScriptEngine && TheScriptEngine->isTimeFrozenScript());
+	if (!hasCinematicPresentation)
+		return FALSE;
+
+	m_skipCinematicPresentation = TRUE;
+	m_cinematicSkipEscapeLatched = TRUE;
+	m_cinematicSkipStartFrame = TheGameLogic ? TheGameLogic->getFrame() : 0;
+
+	// Keep the ESC latch until ENABLE_INPUT even though controls are returned
+	// immediately; another press must not re-enter cinematic skip.
+	TheInGameUI->setInputEnabled(FALSE);
+	if (TheMouse)
+		TheMouse->setVisibility(FALSE);
+
+	// Clear the existing script freeze and suppress further cinematic freezes.
+	// Do not run extra mission/gameplay simulation steps.
+	if (TheScriptEngine)
+		TheScriptEngine->doUnfreezeTime();
+	if (TheTacticalView)
+		TheTacticalView->setTimeMultiplier(1);
+
+	if (TheDisplay)
+	{
+		TheDisplay->setCinematicText(AsciiString::TheEmptyString);
+		TheDisplay->setCinematicTextFrames(0);
+	}
+	TheInGameUI->removeMilitarySubtitle();
+
+	// Release presentation/input now. Game logic and scripted gameplay events
+	// still proceed at their authored times, on the normal simulation clock.
+	releaseSkippedCinematicPresentation();
+	TheInGameUI->setInputEnabled(TRUE);
+	if (TheMouse)
+		TheMouse->setVisibility(TRUE);
+
+	DEBUG_LOG(("Skipping scripted cinematic presentation from frame %u", m_cinematicSkipStartFrame));
+	return TRUE;
+}
+
+
+//-------------------------------------------------------------------------------------------------
+void ScriptActions::finishCinematicSkipFastForward(Bool aborted)
+{
+	if (!m_skipCinematicPresentation)
+		return;
+
+#ifdef DEBUG_LOGGING
+	const UnsignedInt endFrame = TheGameLogic ? TheGameLogic->getFrame() : m_cinematicSkipStartFrame;
+	const UnsignedInt startFrame = m_cinematicSkipStartFrame;
+#else
+	// DEBUG_LOG compiles out in Release, so do not leave logging-only locals/parameters unused under /WX.
+	(void)aborted;
+#endif
+
+	m_skipCinematicPresentation = FALSE;
+	m_cinematicSkipStartFrame = 0;
+
+	releaseSkippedCinematicPresentation();
 
 #ifdef DEBUG_LOGGING
 	DEBUG_LOG(("Scripted cinematic fast-forward %s at frame %u after %u simulated frames",
@@ -3388,6 +3404,10 @@ void ScriptActions::doMergeTeamIntoTeam(const AsciiString& teamSrcName, const As
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doDisableInput()
 {
+	// Preserve player control after a presentation skip, even if the rest
+	// of the authored cinematic contains further DISABLE_INPUT actions.
+	if (m_skipCinematicPresentation)
+		return;
 #if defined(RTS_DEBUG)
 	if (!TheGlobalData->m_disableScriptedInputDisabling)
 #endif
@@ -3407,8 +3427,8 @@ void ScriptActions::doDisableInput()
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::doEnableInput()
 {
-	// ENABLE_INPUT is the cinematic's natural endpoint. If ESC requested a skip, reveal the world only
-	// after the real simulation has progressed here, then release any remaining presentation control.
+	// A cinematic skipped by ESC still reaches its scripted ENABLE_INPUT,
+	// which ends suppression and restores normal future camera behavior.
 	if (m_skipCinematicPresentation)
 		finishCinematicSkipFastForward(FALSE);
 	TheInGameUI->setInputEnabled(true);
@@ -6678,8 +6698,9 @@ Bool ScriptActions::shouldSuppressSkippedCinematicAction(ScriptAction *action) c
 	if (action == nullptr)
 		return FALSE;
 
-	// Gameplay and camera-positioning actions still execute during skip. Only transient presentation
-	// that would either spam after the catch-up or prevent fast-forward progress is suppressed.
+	// Only presentation is suppressed. World/gameplay actions remain on the normal
+	// mission clock; cinematic camera/input actions may not retake control
+	// until the scene's actual ENABLE_INPUT action ends this skip.
 	switch (action->getActionType())
 	{
 		case ScriptAction::PLAY_SOUND_EFFECT:
@@ -6697,6 +6718,38 @@ Bool ScriptActions::shouldSuppressSkippedCinematicAction(ScriptAction *action) c
 		case ScriptAction::CAMERA_MOTION_BLUR_JUMP:
 		case ScriptAction::CAMERA_MOTION_BLUR_FOLLOW:
 		case ScriptAction::CAMERA_MOTION_BLUR_END_FOLLOW:
+		case ScriptAction::MOVE_CAMERA_TO:
+		case ScriptAction::SETUP_CAMERA:
+		case ScriptAction::ZOOM_CAMERA:
+		case ScriptAction::PITCH_CAMERA:
+		case ScriptAction::MOVE_CAMERA_ALONG_WAYPOINT_PATH:
+		case ScriptAction::ROTATE_CAMERA:
+		case ScriptAction::RESET_CAMERA:
+		case ScriptAction::MOVE_CAMERA_TO_SELECTION:
+		case ScriptAction::CAMERA_MOVE_HOME:
+		case ScriptAction::CAMERA_LOOK_TOWARD_OBJECT:
+		case ScriptAction::CAMERA_LOOK_TOWARD_WAYPOINT:
+		case ScriptAction::CAMERA_FOLLOW_NAMED:
+		case ScriptAction::CAMERA_STOP_FOLLOW:
+		case ScriptAction::CAMERA_MOD_LOOK_TOWARD:
+		case ScriptAction::CAMERA_MOD_FINAL_LOOK_TOWARD:
+		case ScriptAction::CAMERA_MOD_SET_FINAL_ZOOM:
+		case ScriptAction::CAMERA_MOD_SET_FINAL_PITCH:
+		case ScriptAction::CAMERA_MOD_SET_FINAL_SPEED_MULTIPLIER:
+		case ScriptAction::CAMERA_MOD_SET_ROLLING_AVERAGE:
+		case ScriptAction::CAMERA_TETHER_NAMED:
+		case ScriptAction::CAMERA_STOP_TETHER_NAMED:
+		case ScriptAction::CAMERA_SET_DEFAULT:
+		case ScriptAction::CAMERA_ENABLE_SLAVE_MODE:
+		case ScriptAction::CAMERA_DISABLE_SLAVE_MODE:
+		case ScriptAction::CAMERA_LETTERBOX_END:
+		case ScriptAction::CAMERA_BW_MODE_END:
+		case ScriptAction::CAMERA_FADE_ADD:
+		case ScriptAction::CAMERA_FADE_SUBTRACT:
+		case ScriptAction::CAMERA_FADE_MULTIPLY:
+		case ScriptAction::CAMERA_FADE_SATURATE:
+		case ScriptAction::CAMERA_SET_AUDIBLE_DISTANCE:
+		case ScriptAction::DISABLE_INPUT:
 		case ScriptAction::FREEZE_TIME:
 		case ScriptAction::SHOW_MILITARY_CAPTION:
 		case ScriptAction::CAMERA_ADD_SHAKER_AT:
