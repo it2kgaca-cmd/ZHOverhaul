@@ -112,6 +112,12 @@ Bool DeployStyleAIUpdate::isLocomotionLocked() const
 	const Bool plantedState = self &&
 		(self->testStatus(OBJECT_STATUS_DEPLOYED) || m_state == DEPLOY ||
 		 m_state == READY_TO_ATTACK || m_state == ALIGNING_TURRETS);
+	// Attack-Move is a player-initiated *route*, not a fixed emplacement.
+	// While it is engaging a target the outer state has destroyed its route;
+	// after combat the same order must be permitted to unpack and travel on.
+	// The hard plant still applies to stationary Guard and direct Attack.
+	if (getAIStateType() == AI_ATTACK_MOVE_TO)
+		return FALSE;
 	return self && owner && owner->getPlayerType() == PLAYER_HUMAN &&
 		plantedState && isHardPlantedDeployWeapon(self);
 }
@@ -419,8 +425,15 @@ void DeployStyleAIUpdate::setMyState( DeployStateTypes stateID, Bool reverseDepl
 			m_state == READY_TO_ATTACK ||
 			m_state == ALIGNING_TURRETS;
 
+		// A planted Nuke Cannon may pack when its already-issued Attack-Move
+		// route has resumed and a new path exists. Do not allow packing in the
+		// middle of an engagement (its path is cleared when it acquires a shot).
+		const Bool resumingAttackMoveRoute =
+			getAIStateType() == AI_ATTACK_MOVE_TO &&
+			(isWaitingForPath() || getPath() != nullptr);
 		if (owner && owner->getPlayerType() == PLAYER_HUMAN &&
-			plantedState && isHardPlantedDeployWeapon(self))
+			plantedState && isHardPlantedDeployWeapon(self) &&
+			!resumingAttackMoveRoute)
 		{
 			destroyPath();
 			setQueueForPathTime(0);
