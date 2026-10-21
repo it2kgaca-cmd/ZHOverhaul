@@ -2288,8 +2288,13 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 	}
 	else
 	{
+		// Entering any real game must leave the shell inactive. Most launch paths already hide it in
+		// prepareNewGame(), but campaign/challenge "Continue" can transition directly into the next map
+		// with the shell stack reactivated by the victory screen. Enforce the invariant here as well so
+		// menu layouts can never remain over live gameplay.
+		if (TheShell && TheShell->isShellActive())
+			TheShell->hideShell();
 
-//		TheShell->hideShell();
 		if(TheStatsCollector)
 		{
 			TheStatsCollector->reset();
