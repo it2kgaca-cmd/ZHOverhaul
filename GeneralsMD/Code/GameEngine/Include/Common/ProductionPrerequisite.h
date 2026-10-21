@@ -88,6 +88,12 @@ public:
 	Bool hasUnmetSciencePrerequisite(const Player *player) const;
 	Bool isSatisfiedByDoctrineFacility(const Player *player) const;
 
+	// ZHOverhaul tech split: an advanced-tech structure still gates advanced infantry,
+	// while vehicle prerequisites that point at that tier are satisfied by the faction's
+	// economy-tech structure instead.
+	Bool isAdvancedTechStructurePrerequisite(const Player *player) const;
+	Bool isSatisfiedByAdvancedVehicleEconomy(const Player *player) const;
+
 	/**
 		return the BuildFacilityTemplate, if any.
 
