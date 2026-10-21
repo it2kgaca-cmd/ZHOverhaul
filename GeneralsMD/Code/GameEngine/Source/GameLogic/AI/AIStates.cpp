@@ -3952,6 +3952,21 @@ StateReturnType AIAttackMoveToState::update()
 		if (tacticalRange < PATHFIND_CELL_SIZE_F * 12.0f)
 			tacticalRange = PATHFIND_CELL_SIZE_F * 12.0f;
 
+		// A deployed gun must be able to resume its route when a moving enemy
+		// leaves its weapon envelope. Otherwise hard-stop cancels every new path
+		// while the attack submachine keeps pursuing an impossible shot.
+		if (!abandonTarget && ai->isLongRangeArtillery())
+		{
+			if (!owner->chooseBestWeaponForTarget(attackTarget, PREFER_MOST_DAMAGE, m_commandSrc))
+				abandonTarget = TRUE;
+			else
+			{
+				Weapon *engagedWeapon = owner->getCurrentWeapon();
+				if (!engagedWeapon || !engagedWeapon->isWithinAttackRange(owner, attackTarget))
+					abandonTarget = TRUE;
+			}
+		}
+
 		if (!abandonTarget)
 		{
 			// Attack-move is a moving order, not Hunt.  Once a victim drags us well
@@ -3989,10 +4004,21 @@ StateReturnType AIAttackMoveToState::update()
 				if (urgentScore >= currentScore + 45 &&
 						owner->chooseBestWeaponForTarget(urgentTarget, PREFER_MOST_DAMAGE, m_commandSrc))
 				{
-					owner->adjustModelConditionForWeaponStatus();
-					m_attackMoveMachine->setGoalObject(urgentTarget);
-					m_attackMoveMachine->setState(AI_ATTACK_OBJECT);
-					attackTarget = urgentTarget;
+					Weapon *urgentWeapon = owner->getCurrentWeapon();
+					// Retargeting to a merely visible distant unit must not
+					// strand artillery that has already stopped to fire.
+					if (!ai->isLongRangeArtillery() ||
+							(urgentWeapon && urgentWeapon->isWithinAttackRange(owner, urgentTarget)))
+					{
+						owner->adjustModelConditionForWeaponStatus();
+						m_attackMoveMachine->setGoalObject(urgentTarget);
+						m_attackMoveMachine->setState(AI_ATTACK_OBJECT);
+						attackTarget = urgentTarget;
+					}
+					else
+					{
+						owner->chooseBestWeaponForTarget(attackTarget, PREFER_MOST_DAMAGE, m_commandSrc);
+					}
 				}
 			}
 		}
