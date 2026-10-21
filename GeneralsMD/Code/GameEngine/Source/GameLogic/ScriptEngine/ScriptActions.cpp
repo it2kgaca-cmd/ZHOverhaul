@@ -169,7 +169,16 @@ void ScriptActions::reset()
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::update()
 {
-	// Empty for now.  jba.
+	// Some campaign scripts never issue ENABLE_INPUT after every camera
+	// segment. A presentation skip must not permanently suppress future
+	// camera actions or ESC if that endpoint is absent.
+	if (m_skipCinematicPresentation && TheGameLogic &&
+		TheGameLogic->getFrame() - m_cinematicSkipStartFrame >
+			3 * 60 * LOGICFRAMES_PER_SECOND)
+	{
+		DEBUG_LOG(("Cinematic presentation skip expired without ENABLE_INPUT"));
+		abortCinematicSkipFastForward();
+	}
 }
 
 

@@ -68,7 +68,7 @@
 
 #if defined(RTS_ZEROHOUR)
 // When ESC starts a scripted-cinematic skip on key-down, swallow its matching key-up even if the
-// fast-forward finishes before the release arrives. Otherwise the release can leak into menu handling.
+// presentation is released before the key is lifted. Otherwise the release leaks into menu handling.
 static Bool s_consumeCinematicSkipEscapeRelease = FALSE;
 #endif
 
@@ -333,11 +333,11 @@ GameMessageDisposition WindowTranslator::translateGameMessage(const GameMessage 
 					break;
 				}
 
-				// Once the first ESC has started a cinematic fast-forward, every later ESC event is
-				// consumed until the cinematic's actual ENABLE_INPUT endpoint. The fast-forward can finish
-				// slightly before presentation/camera teardown does, so "currently fast-forwarding" alone is
-				// not a sufficient guard against re-entry.
-				if (TheScriptActions &&
+				// While the cinematic owns input, repeat ESC is inert. In presentation-skip
+				// mode the first ESC returns control immediately; after its matching key-up
+				// has been consumed, later ESC presses must work normally (pause/menu),
+				// even if the script has not yet reached ENABLE_INPUT.
+				if (TheScriptActions && TheInGameUI && !TheInGameUI->getInputEnabled() &&
 					(TheScriptActions->isCinematicSkipFastForwarding() ||
 					 TheScriptActions->isCinematicSkipEscapeLatched()))
 				{
