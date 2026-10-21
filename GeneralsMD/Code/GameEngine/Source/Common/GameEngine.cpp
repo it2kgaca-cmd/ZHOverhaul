@@ -952,9 +952,64 @@ void GameEngine::update()
 				}
 			}
 
-			// Cinematic skip is presentation-only. Never run multiple extra
-			// GameLogic updates without equivalent client/script lifecycle updates.
+#if defined(RTS_ZEROHOUR)
+			// Cinematic ESC skips the *real scripted sequence*. Do not merely
+			// hide the camera: movies/speech and CAMERA_MOVEMENT_FINISHED waits
+			// are accelerated by the script/condition layer while normal gameplay
+			// consequences still run. Unlike the old 24-tick loop, advance logic
+			// and the client together in small, bounded slices. Never cross the
+			// mission's end/clear-data boundary inside this update.
+			if (TheNetwork == nullptr && TheScriptActions &&
+				TheScriptActions->isCinematicSkipFastForwarding())
+			{
+				static const Int MAX_CINEMATIC_EXTRA_TICKS = 6;
+				static const DWORD CINEMATIC_SLICE_BUDGET_MS = 8;
+				static const UnsignedInt CINEMATIC_MAX_LOGIC_FRAMES =
+					3 * 60 * LOGICFRAMES_PER_SECOND;
 
+				const DWORD sliceStart = timeGetTime();
+				for (Int tick = 0; tick < MAX_CINEMATIC_EXTRA_TICKS &&
+					TheScriptActions && TheScriptActions->isCinematicSkipFastForwarding(); ++tick)
+				{
+					if (!TheGameLogic || !TheGameLogic->isInInteractiveGame() ||
+						TheGameLogic->isGamePaused() || TheGameLogic->isLoadingMap() ||
+						TheGameLogic->isLoadingSave() || TheGameLogic->isClearingGameData() ||
+						(TheScriptEngine && TheScriptEngine->isGameEnding()))
+					{
+						TheScriptActions->abortCinematicSkipFastForward();
+						break;
+					}
+
+					const UnsignedInt beforeFrame = TheGameLogic->getFrame();
+					TheGameLogic->UPDATE();
+
+					// The skip itself can release a scripted freeze during the
+					// previous message propagation. Refresh this before stepping.
+					TheFramePacer->setTimeFrozen(isTimeFrozen());
+					if (!TheFramePacer->isTimeFrozen())
+						TheGameClient->step();
+
+					if (!TheScriptActions->isCinematicSkipFastForwarding())
+						break;
+
+					if (TheGameLogic->getFrame() == beforeFrame)
+					{
+						// No world progress: avoid endlessly spinning in a freeze.
+						TheScriptActions->abortCinematicSkipFastForward();
+						break;
+					}
+
+					if (TheGameLogic->getFrame() -
+						TheScriptActions->getCinematicSkipStartFrame() >= CINEMATIC_MAX_LOGIC_FRAMES)
+					{
+						TheScriptActions->abortCinematicSkipFastForward();
+						break;
+					}
+					if ((timeGetTime() - sliceStart) >= CINEMATIC_SLICE_BUDGET_MS)
+						break;
+				}
+			}
+#endif
 		}
 	}
 }
