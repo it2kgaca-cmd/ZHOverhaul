@@ -3007,21 +3007,31 @@ Bool Player::isDoctrineRosterFallback(const ThingTemplate *tmplate) const
 		{ "AmericaAirForceGeneral", "AmericaTankCrusader" },
 		{ "AmericaAirForceGeneral", "AmericaTankPaladin" },
 		{ "AmericaSuperWeaponGeneral", "SupW_AmericaTankCrusader" },
+		{ "AmericaSuperWeaponGeneral", "AmericaTankCrusader" },
 		{ "AmericaSuperWeaponGeneral", "SupW_AmericaTankPaladin" },
+		{ "AmericaSuperWeaponGeneral", "AmericaTankPaladin" },
 		{ "AmericaLaserGeneral", "Lazr_AmericaVehicleTomahawk" },
+		{ "AmericaLaserGeneral", "AmericaVehicleTomahawk" },
 		{ "AmericaLaserGeneral", "Lazr_AmericaTankPaladin" },
+		{ "AmericaLaserGeneral", "AmericaTankPaladin" },
 		{ "ChinaInfantryGeneral", "ChinaTankBattleMaster" },
 		{ "ChinaInfantryGeneral", "ChinaTankOverlord" },
 		{ "ChinaInfantryGeneral", "Infa_ChinaTankGattling" },
+		{ "ChinaInfantryGeneral", "ChinaTankGattling" },
 		{ "ChinaTankGeneral", "ChinaVehicleInfernoCannon" },
 		{ "ChinaTankGeneral", "ChinaVehicleNukeCannon" },
 		{ "GLADemolitionGeneral", "Demo_GLAInfantryHijacker" },
+		{ "GLADemolitionGeneral", "GLAInfantryHijacker" },
 		{ "GLADemolitionGeneral", "Demo_GLAInfantrySaboteur" },
+		{ "GLADemolitionGeneral", "GLAInfantrySaboteur" },
 		{ "GLAToxinGeneral", "GLAInfantryHijacker" },
 		{ "GLAToxinGeneral", "GLAInfantrySaboteur" },
 		{ "GLAStealthGeneral", "Slth_GLATankScorpion" },
+		{ "GLAStealthGeneral", "GLATankScorpion" },
 		{ "GLAStealthGeneral", "Slth_GLATankMarauder" },
-		{ "GLAStealthGeneral", "Slth_GLAVehicleScudLauncher" }
+		{ "GLAStealthGeneral", "GLATankMarauder" },
+		{ "GLAStealthGeneral", "Slth_GLAVehicleScudLauncher" },
+		{ "GLAStealthGeneral", "GLAVehicleScudLauncher" }
 	};
 	for (size_t i = 0; i < sizeof(restored) / sizeof(restored[0]); ++i)
 	{
