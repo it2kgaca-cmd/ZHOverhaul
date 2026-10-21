@@ -1488,6 +1488,13 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 			if( TheUpgradeCenter->canAffordUpgrade( player, command->getUpgradeTemplate() ) == FALSE )
 				return COMMAND_RESTRICTED;//COMMAND_CANT_AFFORD;
 
+			// Object::canProduceUpgrade() is also the simulation-side authority used by the
+			// production queue. Consult it here so dependency-gated upgrades (notably Ranger
+			// Flashbangs requiring a completed War Factory) are visibly disabled instead of
+			// accepting a click that the simulation later rejects.
+			if( obj->canProduceUpgrade( command->getUpgradeTemplate() ) == FALSE )
+				return COMMAND_RESTRICTED;
+
 			for( size_t i = 0; i < command->getScienceVec().size(); i++ )
 			{
 				ScienceType st = command->getScienceVec()[ i ];
