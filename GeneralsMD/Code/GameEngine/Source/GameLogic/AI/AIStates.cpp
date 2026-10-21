@@ -3854,6 +3854,62 @@ static void stopLongRangeArtilleryAtAttackMoveOpportunity(Object *owner, AIUpdat
 	owner->clearModelConditionState(MODELCONDITION_MOVING);
 }
 
+//----------------------------------------------------------------------------------------------------------
+// Attack-Move artillery cannot rely on the ordinary mood scan here: its legal weapon range is deliberately
+// longer than its personal vision, so a target revealed by allied sight can be shootable without ever being
+// returned by the owner's normal mood envelope. Scan the full weapon envelope, but still require player
+// visibility/fog legality and an actually in-range weapon before committing to the engagement.
+static Object *findImmediateLongRangeArtilleryAttackMoveTarget(
+	Object *owner, AIUpdateInterface *ai, CommandSourceType source)
+{
+	if (!owner || !ai || !ai->isLongRangeArtillery())
+		return nullptr;
+
+	const Real largestWeaponRange = owner->getLargestWeaponRange();
+	if (largestWeaponRange <= 0.0f)
+		return nullptr;
+
+	PartitionFilterRelationship enemies(owner, PartitionFilterRelationship::ALLOW_ENEMIES);
+	PartitionFilterAlive alive;
+	PartitionFilterOnMap onMap;
+	PartitionFilterStealthedAndUndetected visible(owner, false);
+	PartitionFilterFreeOfFog unfogged(owner->getControllingPlayer()->getPlayerIndex());
+	PartitionFilter *filters[] = { &enemies, &alive, &onMap, &visible, &unfogged, nullptr };
+
+	// Give the broad-phase a small geometry margin; Weapon::isWithinAttackRange() below remains the
+	// authority for the exact legal shot.
+	const Real scanRange = largestWeaponRange + PATHFIND_CELL_SIZE_F * 2.0f;
+	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange(
+		owner, scanRange, FROM_BOUNDINGSPHERE_2D, filters, ITER_SORTED_NEAR_TO_FAR);
+	MemoryPoolObjectHolder holder(iter);
+
+	Object *bestTarget = nullptr;
+	Int bestScore = INT_MIN;
+	for (Object *target = iter->first(); target; target = iter->next())
+	{
+		if (!owner->chooseBestWeaponForTarget(target, PREFER_MOST_DAMAGE, source))
+			continue;
+
+		Weapon *weapon = owner->getCurrentWeapon();
+		if (!weapon || !weapon->isWithinAttackRange(owner, target))
+			continue;
+
+		const Int score = TheAI->getAttackMoveTargetScore(owner, target, largestWeaponRange);
+		if (!bestTarget || score > bestScore)
+		{
+			bestTarget = target;
+			bestScore = score;
+		}
+	}
+
+	// The candidate loop changes the selected weapon while evaluating targets. Re-select for the winner so
+	// the caller enters AI_ATTACK_OBJECT with the exact weapon whose range made the target legal.
+	if (bestTarget && !owner->chooseBestWeaponForTarget(bestTarget, PREFER_MOST_DAMAGE, source))
+		return nullptr;
+
+	return bestTarget;
+}
+
 StateReturnType AIAttackMoveToState::update()
 {
 
@@ -4024,7 +4080,14 @@ StateReturnType AIAttackMoveToState::update()
 
 		Object *nextObjectToAttack = nullptr;
 		Object *widePreAimTarget = nullptr;
-		if (explicitCombatScan)
+
+		// Long-range artillery gets an exact, every-frame legal-shot scan across its real weapon
+		// envelope. This is what makes "first target at maximum legal range" deterministic even when
+		// the target is revealed by allied sight beyond the artillery unit's own vision.
+		if (ai->isLongRangeArtillery())
+			nextObjectToAttack = findImmediateLongRangeArtilleryAttackMoveTarget(owner, ai, m_commandSrc);
+
+		if (explicitCombatScan && nextObjectToAttack == nullptr)
 		{
 			ai->setNextMoodCheckTime(now);
 			nextObjectToAttack = ai->getNextMoodTarget(
