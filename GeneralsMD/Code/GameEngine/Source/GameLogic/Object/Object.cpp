@@ -6294,6 +6294,33 @@ Bool Object::canProduceUpgrade( const UpgradeTemplate *upgrade )
 	// TheSuperHackers @logic-client-separation helmutbuhler 11/04/2025
 	// TheControlBar belongs to the client, we shouldn't depend on that to check this.
 
+#if !RETAIL_COMPATIBLE_CRC
+	if (upgrade && upgrade->getUpgradeName().compareNoCase("Upgrade_AmericaRangerFlashBangGrenade") == 0)
+	{
+		// Flashbang doctrine comes online with the War Factory rather than merely the Barracks.
+		// Keep this simulation-side so human UI, AI research, replays and direct queue calls all
+		// share one authoritative requirement.
+		Player *player = getControllingPlayer();
+		Bool hasWarFactory = FALSE;
+		if (player && TheGameLogic)
+		{
+			for (Object *candidate = TheGameLogic->getFirstObject(); candidate; candidate = candidate->getNextObject())
+			{
+				if (candidate->getControllingPlayer() != player || candidate->isEffectivelyDead() ||
+						candidate->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION))
+					continue;
+				if (candidate->isKindOf(KINDOF_FS_WARFACTORY))
+				{
+					hasWarFactory = TRUE;
+					break;
+				}
+			}
+		}
+		if (!hasWarFactory)
+			return FALSE;
+	}
+#endif
+
 	// We need to have the button to make the upgrade.  CommandSets are a weird Logic/Client hybrid.
 	const CommandSet *set = TheControlBar->findCommandSet(getCommandSetString());
 
