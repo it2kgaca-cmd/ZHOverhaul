@@ -2996,22 +2996,39 @@ Bool Player::isDoctrineRosterFallback(const ThingTemplate *tmplate) const
 			 !tmplate->isKindOf(KINDOF_AIRCRAFT)))
 		return FALSE;
 
-	// Base factions keep their normal prices. Boss is not treated as a specialist
-	// general. General-specific unit templates also keep their authored balance;
-	// only parent-faction templates restored to a specialist roster get this tax.
+	// Only the units actually restored to a specialist roster receive a
+	// doctrine surcharge. Do NOT tax ordinary parent-faction units broadly,
+	// and do include authored specialist versions of restored units.
 	const AsciiString side = getSide();
-	if (strstr(side.str(), "General") == nullptr)
-		return FALSE;
-
-	const AsciiString ownerSide = tmplate->getDefaultOwningSide();
-	const AsciiString base = getBaseSide();
-
-	if (base.compareNoCase("USA") == 0)
-		return ownerSide.compareNoCase("America") == 0;
-	if (base.compareNoCase("China") == 0)
-		return ownerSide.compareNoCase("China") == 0;
-	if (base.compareNoCase("GLA") == 0)
-		return ownerSide.compareNoCase("GLA") == 0;
+	const AsciiString unit = tmplate->getName();
+	struct DoctrineFallback { const char *general; const char *unit; };
+	static const DoctrineFallback restored[] =
+	{
+		{ "AmericaAirForceGeneral", "AmericaTankCrusader" },
+		{ "AmericaAirForceGeneral", "AmericaTankPaladin" },
+		{ "AmericaSuperWeaponGeneral", "SupW_AmericaTankCrusader" },
+		{ "AmericaSuperWeaponGeneral", "SupW_AmericaTankPaladin" },
+		{ "AmericaLaserGeneral", "Lazr_AmericaVehicleTomahawk" },
+		{ "AmericaLaserGeneral", "Lazr_AmericaTankPaladin" },
+		{ "ChinaInfantryGeneral", "ChinaTankBattleMaster" },
+		{ "ChinaInfantryGeneral", "ChinaTankOverlord" },
+		{ "ChinaInfantryGeneral", "Infa_ChinaTankGattling" },
+		{ "ChinaTankGeneral", "ChinaVehicleInfernoCannon" },
+		{ "ChinaTankGeneral", "ChinaVehicleNukeCannon" },
+		{ "GLADemolitionGeneral", "Demo_GLAInfantryHijacker" },
+		{ "GLADemolitionGeneral", "Demo_GLAInfantrySaboteur" },
+		{ "GLAToxinGeneral", "GLAInfantryHijacker" },
+		{ "GLAToxinGeneral", "GLAInfantrySaboteur" },
+		{ "GLAStealthGeneral", "Slth_GLATankScorpion" },
+		{ "GLAStealthGeneral", "Slth_GLATankMarauder" },
+		{ "GLAStealthGeneral", "Slth_GLAVehicleScudLauncher" }
+	};
+	for (size_t i = 0; i < sizeof(restored) / sizeof(restored[0]); ++i)
+	{
+		if (side.compareNoCase(restored[i].general) == 0 &&
+				unit.compareNoCase(restored[i].unit) == 0)
+			return TRUE;
+	}
 #endif
 	return FALSE;
 }
