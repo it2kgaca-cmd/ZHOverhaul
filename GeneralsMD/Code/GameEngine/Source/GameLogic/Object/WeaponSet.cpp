@@ -665,39 +665,63 @@ CanAttackResult WeaponSet::getAbleToUseWeaponAgainstTarget( AbleToAttackType att
 	Bool withinAttackRange = FALSE;
 	const Object *containedBy = source->getContainedBy();
 	Bool hasAWeaponInRange = FALSE;
-	Bool hasAWeapon				 = FALSE;
-	for (Int slot = 0; slot < WEAPONSLOT_COUNT - 1; ++slot)
-	{
-		Weapon *weaponToTestForRange = m_weapons[ m_curWeapon ];
-		if ( weaponToTestForRange )
-		{
-			hasAWeapon = TRUE;
-			if ((m_totalAntiMask & targetAntiMask) == 0)//we don't care to check for this weapon
-				continue;
+	Bool hasAWeapon = FALSE;
 
-			Bool handled = FALSE;
-			ContainModuleInterface *contain = containedBy ? containedBy->getContain() : nullptr;
-			if( contain && contain->isGarrisonable() && contain->isEnclosingContainerFor( source ))
-			{                                       // non enclosing garrison containers do not use firepoints. Lorenzen, 6/11/03
-				//For contained things, we need to fake-move objects to the best garrison point in order
-				//to get precise range checks.
-				Coord3D targetPos = *pos;
-				Coord3D goalPos;
-				if( contain->calcBestGarrisonPosition( &goalPos, &targetPos) )
-				{
-					withinAttackRange = weaponToTestForRange->isSourceObjectWithGoalPositionWithinAttackRange( source, &goalPos, victim, &targetPos );
-					handled = TRUE;
-				}
-			}
-			else if( victim )
-				withinAttackRange = weaponToTestForRange->isWithinAttackRange( source, victim );
-			else
-				withinAttackRange = weaponToTestForRange->isWithinAttackRange( source, pos );
-			if( withinAttackRange )
+	// Respect explicit weapon-mode locks, but otherwise evaluate every legal slot. The old loop
+	// iterated "slot" while repeatedly testing m_curWeapon, which made multi-weapon infantry
+	// incorrectly report out-of-range depending on whichever weapon happened to be current.
+	Int rangeFirst = WEAPONSLOT_COUNT - 1;
+	Int rangeLast = PRIMARY_WEAPON;
+	if (isCurWeaponLocked())
+	{
+		rangeFirst = m_curWeapon;
+		rangeLast = m_curWeapon;
+	}
+	else if (specificSlot != (WeaponSlotType)-1)
+	{
+		rangeFirst = specificSlot;
+		rangeLast = specificSlot;
+	}
+
+	for (Int slot = rangeFirst; slot >= rangeLast; --slot)
+	{
+		Weapon *weaponToTestForRange = m_weapons[slot];
+		if (!weaponToTestForRange)
+			continue;
+
+		hasAWeapon = TRUE;
+		if ((weaponToTestForRange->getAntiMask() & targetAntiMask) == 0)
+			continue;
+
+		Bool handled = FALSE;
+		ContainModuleInterface *contain = containedBy ? containedBy->getContain() : nullptr;
+		if (contain && contain->isGarrisonable() && contain->isEnclosingContainerFor(source))
+		{
+			// Prefer the best available firing point. A full garrison can legitimately have no
+			// free point here because this soldier already occupies one; in that case, fall back
+			// to the soldier's real current firepoint instead of declaring the shot impossible.
+			Coord3D targetPos = *pos;
+			Coord3D goalPos;
+			if (contain->calcBestGarrisonPosition(&goalPos, &targetPos))
 			{
-				hasAWeaponInRange = TRUE;
-				break;
+				withinAttackRange = weaponToTestForRange->isSourceObjectWithGoalPositionWithinAttackRange(
+					source, &goalPos, victim, &targetPos);
+				handled = TRUE;
 			}
+		}
+
+		if (!handled)
+		{
+			if (victim)
+				withinAttackRange = weaponToTestForRange->isWithinAttackRange(source, victim);
+			else
+				withinAttackRange = weaponToTestForRange->isWithinAttackRange(source, pos);
+		}
+
+		if (withinAttackRange)
+		{
+			hasAWeaponInRange = TRUE;
+			break;
 		}
 	}
 
