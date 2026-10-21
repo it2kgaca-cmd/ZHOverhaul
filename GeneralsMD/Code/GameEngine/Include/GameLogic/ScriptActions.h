@@ -52,6 +52,7 @@ public:
 	virtual void closeWindows( Bool suppressNewWindows ) = 0;
 	virtual Bool skipCurrentCinematic() = 0; ///< Fast-forward the current scripted cinematic to its gameplay endpoint.
 	virtual Bool isCinematicSkipFastForwarding() const = 0;
+	virtual Bool isCinematicSkipEscapeLatched() const = 0;
 	virtual UnsignedInt getCinematicSkipStartFrame() const = 0;
 	virtual void abortCinematicSkipFastForward() = 0;
 
@@ -82,6 +83,7 @@ public:
 	virtual void closeWindows( Bool suppressNewWindows ) override;
 	virtual Bool skipCurrentCinematic() override;
 	virtual Bool isCinematicSkipFastForwarding() const override { return m_skipCinematicPresentation; }
+	virtual Bool isCinematicSkipEscapeLatched() const override { return m_cinematicSkipEscapeLatched; }
 	virtual UnsignedInt getCinematicSkipStartFrame() const override { return m_cinematicSkipStartFrame; }
 	virtual void abortCinematicSkipFastForward() override;
 
@@ -94,6 +96,9 @@ protected:
 
 	Bool m_suppressNewWindows;
 	Bool m_skipCinematicPresentation;
+	// Remains true after fast-forward finishes until the cinematic's real ENABLE_INPUT endpoint.
+	// This closes the ESC re-entry window while presentation/camera teardown is still completing.
+	Bool m_cinematicSkipEscapeLatched;
 	UnsignedInt m_cinematicSkipStartFrame;
 	AsciiString m_unnamedUnit;
 
