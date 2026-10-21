@@ -334,11 +334,15 @@ GameMessageDisposition WindowTranslator::translateGameMessage(const GameMessage 
 				}
 
 				// Once the first ESC has started a cinematic fast-forward, every later ESC event is
-				// consumed until that fast-forward finishes. This check MUST happen before attempting
-				// skipCurrentCinematic(); otherwise a second key-down re-enters the skip and resets its
-				// start frame while the first skip is still resolving.
-				if (TheScriptActions && TheScriptActions->isCinematicSkipFastForwarding())
+				// consumed until the cinematic's actual ENABLE_INPUT endpoint. The fast-forward can finish
+				// slightly before presentation/camera teardown does, so "currently fast-forwarding" alone is
+				// not a sufficient guard against re-entry.
+				if (TheScriptActions &&
+					(TheScriptActions->isCinematicSkipFastForwarding() ||
+					 TheScriptActions->isCinematicSkipEscapeLatched()))
 				{
+					if (BitIsSet(state, KEY_STATE_DOWN) && !BitIsSet(state, KEY_STATE_AUTOREPEAT))
+						s_consumeCinematicSkipEscapeRelease = TRUE;
 					returnCode = WIN_INPUT_USED;
 					break;
 				}
