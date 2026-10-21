@@ -266,6 +266,54 @@ Bool ProductionPrerequisite::isSatisfiedByDoctrineFacility(const Player *player)
 }
 
 //-----------------------------------------------------------------------------
+Bool ProductionPrerequisite::isAdvancedTechStructurePrerequisite(const Player *player) const
+{
+	if (!player || m_prereqUnits.empty() || !m_prereqSciences.empty())
+		return FALSE;
+
+	// An Object= line is one OR-block. Only reinterpret a block when every alternative
+	// is the owning faction's advanced-tech structure; mixed production requirements
+	// remain ordinary hard prerequisites.
+	Bool sawAdvancedTech = FALSE;
+	for (size_t i = 0; i < m_prereqUnits.size(); ++i)
+	{
+		const ThingTemplate *required = m_prereqUnits[i].unit;
+		if (!required || !doctrineTemplateBelongsToPlayerBaseSide(required, player) ||
+				!required->isKindOf(KINDOF_FS_ADVANCED_TECH))
+			return FALSE;
+		sawAdvancedTech = TRUE;
+	}
+	return sawAdvancedTech;
+}
+
+//-----------------------------------------------------------------------------
+Bool ProductionPrerequisite::isSatisfiedByAdvancedVehicleEconomy(const Player *player) const
+{
+	if (!player || !TheGameLogic)
+		return FALSE;
+
+	const AsciiString base = player->getBaseSide();
+	for (Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject())
+	{
+		if (obj->isEffectivelyDead() || obj->getControllingPlayer() != player)
+			continue;
+
+		const ThingTemplate *candidate = obj->getTemplate();
+		if (!candidate || !candidate->isKindOf(KINDOF_STRUCTURE) ||
+				!doctrineTemplateBelongsToPlayerBaseSide(candidate, player))
+			continue;
+
+		if (base.compareNoCase("USA") == 0 && candidate->isKindOf(KINDOF_FS_SUPPLY_DROPZONE))
+			return TRUE;
+		if (base.compareNoCase("China") == 0 && candidate->isKindOf(KINDOF_FS_INTERNET_CENTER))
+			return TRUE;
+		if (base.compareNoCase("GLA") == 0 && candidate->isKindOf(KINDOF_FS_BLACK_MARKET))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//-----------------------------------------------------------------------------
 Bool ProductionPrerequisite::isSatisfied(const Player *player) const
 {
 	Int i;
