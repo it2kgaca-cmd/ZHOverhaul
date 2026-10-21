@@ -2872,6 +2872,41 @@ ScienceAvailabilityType Player::getScienceAvailabilityTypeFromString( const Asci
 
 namespace
 {
+#if !RETAIL_COMPATIBLE_CRC
+	Bool isTemplateFromPlayerBaseSide(const ThingTemplate *thing, const Player *player)
+	{
+		if (!thing || !player)
+			return FALSE;
+
+		const AsciiString side = thing->getDefaultOwningSide();
+		const AsciiString base = player->getBaseSide();
+		if (base.compareNoCase("USA") == 0)
+			return strstr(side.str(), "America") != nullptr;
+		if (base.compareNoCase("China") == 0)
+			return strstr(side.str(), "China") != nullptr;
+		if (base.compareNoCase("GLA") == 0)
+			return strstr(side.str(), "GLA") != nullptr;
+		return FALSE;
+	}
+
+	Bool playerOwnsFactionAdvancedTech(const Player *player)
+	{
+		if (!player || !TheGameLogic)
+			return FALSE;
+
+		for (Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject())
+		{
+			if (obj->isEffectivelyDead() || obj->getControllingPlayer() != player)
+				continue;
+			const ThingTemplate *thing = obj->getTemplate();
+			if (thing && thing->isKindOf(KINDOF_FS_ADVANCED_TECH) &&
+					isTemplateFromPlayerBaseSide(thing, player))
+				return TRUE;
+		}
+		return FALSE;
+	}
+#endif
+
   // ------------------------------------------------------------------------------------------------
   // For countExisting
   struct TypeCountData
@@ -2999,6 +3034,15 @@ Bool Player::canBuild(const ThingTemplate *tmplate) const
 	if (tmplate->getBuildable() == BSTATUS_ONLY_BY_AI && getPlayerType() != PLAYER_COMPUTER)
 		return false;
 
+#if !RETAIL_COMPATIBLE_CRC
+	// China must establish its advanced-tech tier before the Internet Center. This applies
+	// centrally to base China and all general-specific Internet Center templates, and the AI
+	// sees the exact same legality rule as the player.
+	if (tmplate->isKindOf(KINDOF_FS_INTERNET_CENTER) &&
+			!playerOwnsFactionAdvancedTech(this))
+		return false;
+#endif
+
 	// else BSTATUS tmplate->getBuildable() == BSTATUS_YES
 	{
 
@@ -3020,9 +3064,26 @@ Bool Player::canBuild(const ThingTemplate *tmplate) const
 		for (Int i = 0; i < tmplate->getPrereqCount(); i++)
 		{
 			const ProductionPrerequisite *pre = tmplate->getNthPrereq(i);
+
+#if !RETAIL_COMPATIBLE_CRC
+			// Existing Object= advanced-tech requirements identify the advanced production tier.
+			// Infantry keep using Strategy Center / Palace / Propaganda Center. Ground vehicles
+			// reinterpret that one tier as Supply Drop Zone / Black Market / Internet Center.
+			if (tmplate->isKindOf(KINDOF_VEHICLE) &&
+					pre->isAdvancedTechStructurePrerequisite(this))
+			{
+				if (!pre->isSatisfiedByAdvancedVehicleEconomy(this))
+					prereqsOK = false;
+				continue;
+			}
+#endif
+
 			if (pre->isSatisfied(this) == false )
 			{
 #if !RETAIL_COMPATIBLE_CRC
+				// Promotion/science requirements on production units are never hard locks in
+				// ZHOverhaul. They remain visible to the pricing code, which applies the 1.60x
+				// cost / 1.40x time penalty until the science is purchased.
 				if (doctrineUnit && pre->isScienceOnly())
 					continue;
 				if (rosterFallback && pre->isSatisfiedByDoctrineFacility(this))
