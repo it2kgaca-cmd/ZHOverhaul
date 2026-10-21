@@ -419,6 +419,18 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 			for( Int i=0; i<thingTemplate->getPrereqCount(); i++ )
 			{
 				prereq = thingTemplate->getNthPrereq(i);
+
+#if !RETAIL_COMPATIBLE_CRC
+				// Production-unit promotion sciences are soft economic gates in ZHOverhaul.
+				// Player::canBuild() deliberately permits them before the science and the
+				// ThingTemplate cost/time calculators apply the penalty, so don't lie in the
+				// tooltip by presenting "Generals Promotion" as a hard missing prerequisite.
+				const KindOfMaskType &kindOf = thingTemplate->getKindOf();
+				if ((kindOf.test(KINDOF_INFANTRY) || kindOf.test(KINDOF_VEHICLE) ||
+					 kindOf.test(KINDOF_AIRCRAFT)) && prereq->isScienceOnly())
+					continue;
+#endif
+
 				requiresList = prereq->getRequiresList(player);
 
 				if( requiresList != UnicodeString::TheEmptyString )
