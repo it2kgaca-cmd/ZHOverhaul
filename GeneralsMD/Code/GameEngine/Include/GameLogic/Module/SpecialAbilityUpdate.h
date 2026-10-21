@@ -210,6 +210,22 @@ public:
 		}
 	}
 
+	// Opportunistic Hacker/Lotus Guard interactions must restore Guard, not
+	// turn into Attack-Move or strand the unit in Idle after a hack.
+	void setGuardContinuation(Int targetType, const Coord3D *pos, ObjectID guardedObject,
+		Int mode, Int commandSource, Bool oneShotPersistent)
+	{
+		if (!pos)
+			return;
+		m_resumeGuard = TRUE;
+		m_resumeGuardTargetType = targetType;
+		m_resumeGuardPosition = *pos;
+		m_resumeGuardObjectID = guardedObject;
+		m_resumeGuardMode = mode;
+		m_resumeGuardCommandSource = commandSource;
+		m_attackMoveOneShotPersistent = oneShotPersistent;
+	}
+
 protected:
 	void onExit( Bool cleanup );
 
@@ -295,4 +311,10 @@ private:
 	Bool											m_attackMoveOneShotPersistent;
 	Int											m_resumeAttackMoveCommandSource;
 	Coord3D										m_resumeAttackMoveDestination;
+	Bool											m_resumeGuard;
+	Int											m_resumeGuardTargetType;
+	ObjectID										m_resumeGuardObjectID;
+	Int											m_resumeGuardMode;
+	Int											m_resumeGuardCommandSource;
+	Coord3D										m_resumeGuardPosition;
 };
