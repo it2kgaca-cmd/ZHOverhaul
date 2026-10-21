@@ -425,9 +425,10 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 				// Player::canBuild() deliberately permits them before the science and the
 				// ThingTemplate cost/time calculators apply the penalty, so don't lie in the
 				// tooltip by presenting "Generals Promotion" as a hard missing prerequisite.
-				const KindOfMaskType &kindOf = thingTemplate->getKindOf();
-				if ((kindOf.test(KINDOF_INFANTRY) || kindOf.test(KINDOF_VEHICLE) ||
-					 kindOf.test(KINDOF_AIRCRAFT)) && prereq->isScienceOnly())
+				if ((thingTemplate->isKindOf(KINDOF_INFANTRY) ||
+					 thingTemplate->isKindOf(KINDOF_VEHICLE) ||
+					 thingTemplate->isKindOf(KINDOF_AIRCRAFT)) &&
+					prereq->isScienceOnly())
 					continue;
 #endif
 
