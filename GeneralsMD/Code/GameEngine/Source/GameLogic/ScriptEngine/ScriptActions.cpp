@@ -128,6 +128,7 @@ ScriptActions::ScriptActions()
 {
 	m_suppressNewWindows = FALSE;
 	m_skipCinematicPresentation = FALSE;
+	m_cinematicSkipEscapeLatched = FALSE;
 	m_cinematicSkipStartFrame = 0;
 	m_unnamedUnit = AsciiString::TheEmptyString;
 
@@ -157,6 +158,7 @@ void ScriptActions::reset()
 {
 	m_suppressNewWindows = FALSE;
 	m_skipCinematicPresentation = FALSE;
+	m_cinematicSkipEscapeLatched = FALSE;
 	m_cinematicSkipStartFrame = 0;
 	closeWindows(FALSE); // Close victory or defeat windows.
 
@@ -176,10 +178,10 @@ void ScriptActions::update()
 //-------------------------------------------------------------------------------------------------
 Bool ScriptActions::skipCurrentCinematic()
 {
-	// A cinematic skip is a one-shot transition. Re-entering while the first fast-forward is still
-	// active resets its start frame and can leave the simulation repeatedly trying to resolve a
-	// cinematic that is already being torn down. Repeated ESC presses must therefore be harmless.
-	if (m_skipCinematicPresentation)
+	// A cinematic skip is a one-shot transition. Keep a second latch alive even after the accelerated
+	// simulation reaches the cinematic endpoint: camera/presentation teardown can finish a little before
+	// the script's canonical ENABLE_INPUT action. ESC must stay inert for that entire input-lock period.
+	if (m_skipCinematicPresentation || m_cinematicSkipEscapeLatched)
 		return FALSE;
 
 	// Fast-forwarding game logic independently is only safe in single-player.
@@ -196,6 +198,7 @@ Bool ScriptActions::skipCurrentCinematic()
 		return FALSE;
 
 	m_skipCinematicPresentation = TRUE;
+	m_cinematicSkipEscapeLatched = TRUE;
 	m_cinematicSkipStartFrame = TheGameLogic ? TheGameLogic->getFrame() : 0;
 
 	// Keep control locked until the cinematic's own ENABLE_INPUT action is reached. The fast-forward
@@ -279,14 +282,16 @@ void ScriptActions::finishCinematicSkipFastForward(Bool aborted)
 //-------------------------------------------------------------------------------------------------
 void ScriptActions::abortCinematicSkipFastForward()
 {
-	if (!m_skipCinematicPresentation)
+	if (!m_skipCinematicPresentation && !m_cinematicSkipEscapeLatched)
 		return;
 
-	finishCinematicSkipFastForward(TRUE);
+	if (m_skipCinematicPresentation)
+		finishCinematicSkipFastForward(TRUE);
 	if (TheInGameUI)
 		TheInGameUI->setInputEnabled(TRUE);
 	if (TheMouse)
 		TheMouse->setVisibility(TRUE);
+	m_cinematicSkipEscapeLatched = FALSE;
 }
 
 
@@ -3408,6 +3413,10 @@ void ScriptActions::doEnableInput()
 		finishCinematicSkipFastForward(FALSE);
 	TheInGameUI->setInputEnabled(true);
 	TheMouse->setVisibility(true);
+
+	// Only the cinematic's real input release ends the ESC quarantine. finishCinematicSkipFastForward()
+	// intentionally leaves this latched so a second ESC cannot start another fast-forward during teardown.
+	m_cinematicSkipEscapeLatched = FALSE;
 }
 
 //-------------------------------------------------------------------------------------------------
