@@ -5550,9 +5550,14 @@ Bool AIUpdateInterface::isLongRangeArtillery() const
 	if (longestWeaponRange <= 0.0f)
 		return FALSE;
 
-	const Real visionRange = TheAI->getAdjustedVisionRangeForObject(obj,
-		AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
-	return longestWeaponRange > visionRange * 1.10f;
+	// IMPORTANT: This is a property of the weapon/unit, not of the player's
+	// stance or Guard acquisition radius. GuardOuterModifierHuman is 2.2 in
+	// AIData.ini: using adjusted vision classified a 350-range Tomahawk
+	// (180 authored vision) as ordinary armor (350 < 180*2.2*1.1).
+	// Consequently the Attack-Move artillery hard stop NEVER executed.
+	const Real authoredVisionRange = obj->getVisionRange();
+	return authoredVisionRange > 0.0f &&
+		longestWeaponRange > authoredVisionRange * 1.10f;
 }
 
 //-------------------------------------------------------------------------------------------------
