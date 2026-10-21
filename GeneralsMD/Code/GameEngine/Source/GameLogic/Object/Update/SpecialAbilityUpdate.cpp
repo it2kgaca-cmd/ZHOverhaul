@@ -138,6 +138,35 @@ namespace
 			adjustedInfantryInteractionFrames(obj, type, data->m_packTime);
 		return original > shortened ? original - shortened : 0;
 	}
+	// Guard special attacks return to the actual Guard order, rather than
+	// leaving the specialist idle when the ability ends or aborts.
+	void restoreSpecialistGuard(Object *owner, Bool resume, Int targetType,
+		const Coord3D &position, ObjectID guardObjectID, Int guardMode, Int commandSource)
+	{
+		if (!resume || !owner || owner->isEffectivelyDead())
+			return;
+		AIUpdateInterface *ai = owner->getAIUpdateInterface();
+		if (!ai)
+			return;
+		const GuardMode mode = (GuardMode)guardMode;
+		const CommandSourceType source = (CommandSourceType)commandSource;
+		if (targetType == (Int)GUARDTARGET_OBJECT)
+		{
+			Object *guarded = TheGameLogic->findObjectByID(guardObjectID);
+			if (guarded && !guarded->isEffectivelyDead())
+			{
+				ai->aiGuardObject(guarded, mode, source);
+				return;
+			}
+		}
+		if (targetType == (Int)GUARDTARGET_AREA && ai->getAreaToGuard())
+		{
+			ai->aiGuardArea(ai->getAreaToGuard(), mode, source);
+			return;
+		}
+		ai->aiGuardPosition(&position, mode, source);
+	}
+
 }
 
 
@@ -163,6 +192,12 @@ SpecialAbilityUpdate::SpecialAbilityUpdate( Thing *thing, const ModuleData* modu
   m_attackMoveOneShotPersistent = FALSE;
   m_resumeAttackMoveCommandSource = (Int)CMD_FROM_AI;
   m_resumeAttackMoveDestination.zero();
+  m_resumeGuard = FALSE;
+  m_resumeGuardTargetType = (Int)GUARDTARGET_NONE;
+  m_resumeGuardObjectID = INVALID_ID;
+  m_resumeGuardMode = (Int)GUARDMODE_NORMAL;
+  m_resumeGuardCommandSource = (Int)CMD_FROM_AI;
+  m_resumeGuardPosition.zero();
   setWakeFrame(getObject(), UPDATE_SLEEP_FOREVER);
 //  This is the althernate way to one-at-a-time BlackLotus' specials; we'll keep it commented her until Dustin decides, or until 12/10/02
 //  setBusy( FALSE );
@@ -408,11 +443,19 @@ UpdateSleepTime SpecialAbilityUpdate::update()
     const Bool resumeAttackMove = m_resumeAttackMove;
     const Coord3D resumeDestination = m_resumeAttackMoveDestination;
     const CommandSourceType resumeSource = (CommandSourceType)m_resumeAttackMoveCommandSource;
-    if( !resumeAttackMove )
+  const Bool resumeGuard = m_resumeGuard;
+  const Int guardTargetType = m_resumeGuardTargetType;
+  const ObjectID guardObjectID = m_resumeGuardObjectID;
+  const Int guardMode = m_resumeGuardMode;
+  const Int guardSource = m_resumeGuardCommandSource;
+  const Coord3D guardPosition = m_resumeGuardPosition;
+    if( !resumeAttackMove && !resumeGuard )
       ai->aiIdle( CMD_FROM_AI );
     onExit( false );
     if( resumeAttackMove && !getObject()->isEffectivelyDead() )
       ai->aiAttackMoveToPosition( &resumeDestination, NO_MAX_SHOTS_LIMIT, resumeSource );
+    restoreSpecialistGuard(getObject(), resumeGuard, guardTargetType,
+    guardPosition, guardObjectID, guardMode, guardSource);
     return calcSleepTime();
   }
 
@@ -596,6 +639,12 @@ Bool SpecialAbilityUpdate::initiateIntentToDoSpecialPower( const SpecialPowerTem
   m_attackMoveOneShotPersistent = FALSE;
   m_resumeAttackMoveCommandSource = (Int)CMD_FROM_AI;
   m_resumeAttackMoveDestination.zero();
+  m_resumeGuard = FALSE;
+  m_resumeGuardTargetType = (Int)GUARDTARGET_NONE;
+  m_resumeGuardObjectID = INVALID_ID;
+  m_resumeGuardMode = (Int)GUARDMODE_NORMAL;
+  m_resumeGuardCommandSource = (Int)CMD_FROM_AI;
+  m_resumeGuardPosition.zero();
 
   //Clear target values
   m_targetID = INVALID_ID;
@@ -731,6 +780,12 @@ void SpecialAbilityUpdate::onExit( Bool cleanup )
   m_attackMoveOneShotPersistent = FALSE;
   m_resumeAttackMoveCommandSource = (Int)CMD_FROM_AI;
   m_resumeAttackMoveDestination.zero();
+  m_resumeGuard = FALSE;
+  m_resumeGuardTargetType = (Int)GUARDTARGET_NONE;
+  m_resumeGuardObjectID = INVALID_ID;
+  m_resumeGuardMode = (Int)GUARDMODE_NORMAL;
+  m_resumeGuardCommandSource = (Int)CMD_FROM_AI;
+  m_resumeGuardPosition.zero();
 
 //  This is the althernate way to one-at-a-time BlackLotus' specials; we'll keep it commented her until Dustin decides, or until 12/10/02
 //  setBusy( FALSE );// My owner is no longer using me
@@ -1880,6 +1935,12 @@ void SpecialAbilityUpdate::finishAbility()
   const Bool resumeAttackMove = m_resumeAttackMove;
   const Coord3D resumeDestination = m_resumeAttackMoveDestination;
   const CommandSourceType resumeSource = (CommandSourceType)m_resumeAttackMoveCommandSource;
+  const Bool resumeGuard = m_resumeGuard;
+  const Int guardTargetType = m_resumeGuardTargetType;
+  const ObjectID guardObjectID = m_resumeGuardObjectID;
+  const Int guardMode = m_resumeGuardMode;
+  const Int guardSource = m_resumeGuardCommandSource;
+  const Coord3D guardPosition = m_resumeGuardPosition;
 
   m_withinStartAbilityRange = false;
   m_packingState = STATE_NONE;
@@ -1953,7 +2014,7 @@ void SpecialAbilityUpdate::finishAbility()
 	{
 		//Clear any old AI before ending this special ability.
 		AIUpdateInterface *ai = getObject()->getAIUpdateInterface();
-		if (ai && !resumeAttackMove)
+		if (ai && !resumeAttackMove && !resumeGuard)
 	  	ai->aiIdle(CMD_FROM_AI);
 	}
 
@@ -1981,6 +2042,8 @@ void SpecialAbilityUpdate::finishAbility()
 		if( ai )
 			ai->aiAttackMoveToPosition( &resumeDestination, NO_MAX_SHOTS_LIMIT, resumeSource );
 	}
+  restoreSpecialistGuard(getObject(), resumeGuard, guardTargetType,
+    guardPosition, guardObjectID, guardMode, guardSource);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -2154,7 +2217,7 @@ void SpecialAbilityUpdate::xfer( Xfer *xfer )
 
 	// version
 #if !RETAIL_COMPATIBLE_XFER_SAVE
-	XferVersion currentVersion = 3;
+	XferVersion currentVersion = 4;
 #else
 	XferVersion currentVersion = 1;
 #endif
@@ -2226,6 +2289,24 @@ void SpecialAbilityUpdate::xfer( Xfer *xfer )
     m_attackMoveOneShotPersistent = FALSE;
     m_resumeAttackMoveCommandSource = (Int)CMD_FROM_AI;
     m_resumeAttackMoveDestination.zero();
+  }
+  if( version >= 4 )
+  {
+    xfer->xferBool( &m_resumeGuard );
+    xfer->xferInt( &m_resumeGuardTargetType );
+    xfer->xferObjectID( &m_resumeGuardObjectID );
+    xfer->xferInt( &m_resumeGuardMode );
+    xfer->xferInt( &m_resumeGuardCommandSource );
+    xfer->xferCoord3D( &m_resumeGuardPosition );
+  }
+  else if( xfer->getXferMode() == XFER_LOAD )
+  {
+  m_resumeGuard = FALSE;
+  m_resumeGuardTargetType = (Int)GUARDTARGET_NONE;
+  m_resumeGuardObjectID = INVALID_ID;
+  m_resumeGuardMode = (Int)GUARDMODE_NORMAL;
+  m_resumeGuardCommandSource = (Int)CMD_FROM_AI;
+  m_resumeGuardPosition.zero();
   }
 #endif
 
